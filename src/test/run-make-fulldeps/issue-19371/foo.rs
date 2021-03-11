@@ -56,10 +56,10 @@ fn compile(code: String, output: PathBuf, sysroot: PathBuf) {
         file_loader: None,
         diagnostic_output: DiagnosticOutput::Default,
         stderr: None,
-        crate_name: None,
         lint_caps: Default::default(),
         register_lints: None,
         override_queries: None,
+        make_codegen_backend: None,
         registry: rustc_driver::diagnostics_registry(),
     };
 

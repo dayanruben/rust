@@ -17,6 +17,8 @@ const LICENSES: &[&str] = &[
     "MIT",
     "Unlicense/MIT",
     "Unlicense OR MIT",
+    "0BSD OR MIT OR Apache-2.0", // adler license
+    "Zlib OR Apache-2.0 OR MIT", // tinyvec
 ];
 
 /// These are exceptions to Rust's permissive licensing policy, and
@@ -24,80 +26,74 @@ const LICENSES: &[&str] = &[
 /// tooling. It is _crucial_ that no exception crates be dependencies
 /// of the Rust runtime (std/test).
 const EXCEPTIONS: &[(&str, &str)] = &[
-    ("mdbook", "MPL-2.0"),                  // mdbook
-    ("openssl", "Apache-2.0"),              // cargo, mdbook
-    ("toml-query", "MPL-2.0"),              // mdbook
-    ("toml-query_derive", "MPL-2.0"),       // mdbook
-    ("is-match", "MPL-2.0"),                // mdbook
-    ("rdrand", "ISC"),                      // mdbook, rustfmt
-    ("fuchsia-cprng", "BSD-3-Clause"),      // mdbook, rustfmt
-    ("fuchsia-zircon-sys", "BSD-3-Clause"), // rustdoc, rustc, cargo
-    ("fuchsia-zircon", "BSD-3-Clause"),     // rustdoc, rustc, cargo (jobserver & tempdir)
-    ("colored", "MPL-2.0"),                 // rustfmt
-    ("ordslice", "Apache-2.0"),             // rls
-    ("cloudabi", "BSD-2-Clause"),           // (rls -> crossbeam-channel 0.2 -> rand 0.5)
-    ("ryu", "Apache-2.0 OR BSL-1.0"),       // rls/cargo/... (because of serde)
-    ("bytesize", "Apache-2.0"),             // cargo
-    ("im-rc", "MPL-2.0+"),                  // cargo
-    ("adler32", "BSD-3-Clause AND Zlib"),   // cargo dep that isn't used
-    ("constant_time_eq", "CC0-1.0"),        // rustfmt
-    ("sized-chunks", "MPL-2.0+"),           // cargo via im-rc
-    ("bitmaps", "MPL-2.0+"),                // cargo via im-rc
+    ("mdbook", "MPL-2.0"),                                  // mdbook
+    ("openssl", "Apache-2.0"),                              // cargo, mdbook
+    ("fuchsia-zircon-sys", "BSD-3-Clause"),                 // rustdoc, rustc, cargo
+    ("fuchsia-zircon", "BSD-3-Clause"), // rustdoc, rustc, cargo (jobserver & tempdir)
+    ("colored", "MPL-2.0"),             // rustfmt
+    ("ordslice", "Apache-2.0"),         // rls
+    ("cloudabi", "BSD-2-Clause"),       // (rls -> crossbeam-channel 0.2 -> rand 0.5)
+    ("ryu", "Apache-2.0 OR BSL-1.0"),   // rls/cargo/... (because of serde)
+    ("bytesize", "Apache-2.0"),         // cargo
+    ("im-rc", "MPL-2.0+"),              // cargo
+    ("constant_time_eq", "CC0-1.0"),    // rustfmt
+    ("sized-chunks", "MPL-2.0+"),       // cargo via im-rc
+    ("bitmaps", "MPL-2.0+"),            // cargo via im-rc
+    ("crossbeam-queue", "MIT/Apache-2.0 AND BSD-2-Clause"), // rls via rayon
+    ("arrayref", "BSD-2-Clause"),       // cargo-miri/directories/.../rust-argon2 (redox)
+    ("instant", "BSD-3-Clause"),        // rustc_driver/tracing-subscriber/parking_lot
+    ("snap", "BSD-3-Clause"),           // rustc
     // FIXME: this dependency violates the documentation comment above:
     ("fortanix-sgx-abi", "MPL-2.0"), // libstd but only for `sgx` target
-    ("dunce", "CC0-1.0"),            // mdbook-linkcheck
-    ("codespan-reporting", "Apache-2.0"), // mdbook-linkcheck
-    ("codespan", "Apache-2.0"),      // mdbook-linkcheck
-    ("crossbeam-channel", "MIT/Apache-2.0 AND BSD-2-Clause"), // cargo
 ];
 
 /// These are the root crates that are part of the runtime. The licenses for
 /// these and all their dependencies *must not* be in the exception list.
 const RUNTIME_CRATES: &[&str] = &["std", "core", "alloc", "test", "panic_abort", "panic_unwind"];
 
-/// Which crates to check against the whitelist?
-const WHITELIST_CRATES: &[&str] = &["rustc_middle", "rustc_codegen_llvm"];
+/// Crates whose dependencies must be explicitly permitted.
+const RESTRICTED_DEPENDENCY_CRATES: &[&str] = &["rustc_middle", "rustc_codegen_llvm"];
 
-/// Whitelist of crates rustc is allowed to depend on. Avoid adding to the list if possible.
+/// Crates rustc is allowed to depend on. Avoid adding to the list if possible.
 ///
 /// This list is here to provide a speed-bump to adding a new dependency to
 /// rustc. Please check with the compiler team before adding an entry.
-const WHITELIST: &[&str] = &[
-    "adler32",
+const PERMITTED_DEPENDENCIES: &[&str] = &[
+    "addr2line",
+    "adler",
     "aho-corasick",
     "annotate-snippets",
     "ansi_term",
     "arrayvec",
     "atty",
     "autocfg",
-    "backtrace",
-    "backtrace-sys",
     "bitflags",
     "block-buffer",
     "block-padding",
-    "byte-tools",
     "byteorder",
-    "c2-chacha",
+    "byte-tools",
     "cc",
     "cfg-if",
     "chalk-derive",
-    "chalk-engine",
     "chalk-ir",
-    "chalk-macros",
     "cloudabi",
     "cmake",
     "compiler_builtins",
+    "cpuid-bool",
     "crc32fast",
     "crossbeam-deque",
     "crossbeam-epoch",
     "crossbeam-queue",
     "crossbeam-utils",
+    "cstr",
     "datafrog",
+    "difference",
     "digest",
     "dlmalloc",
     "either",
     "ena",
     "env_logger",
+    "expect-test",
     "fake-simd",
     "filetime",
     "flate2",
@@ -107,10 +103,13 @@ const WHITELIST: &[&str] = &[
     "generic-array",
     "getopts",
     "getrandom",
+    "gimli",
+    "gsgdt",
     "hashbrown",
     "hermit-abi",
     "humantime",
     "indexmap",
+    "instant",
     "itertools",
     "jobserver",
     "kernel32-sys",
@@ -119,19 +118,22 @@ const WHITELIST: &[&str] = &[
     "libz-sys",
     "lock_api",
     "log",
-    "log_settings",
+    "maybe-uninit",
     "md-5",
     "measureme",
     "memchr",
     "memmap",
     "memoffset",
     "miniz_oxide",
-    "nodrop",
     "num_cpus",
+    "object",
     "once_cell",
     "opaque-debug",
     "parking_lot",
     "parking_lot_core",
+    "pathdiff",
+    "perf-event-open-sys",
+    "pin-project-lite",
     "pkg-config",
     "polonius-engine",
     "ppv-lite86",
@@ -144,11 +146,9 @@ const WHITELIST: &[&str] = &[
     "rand_chacha",
     "rand_core",
     "rand_hc",
-    "rand_isaac",
     "rand_pcg",
     "rand_xorshift",
     "redox_syscall",
-    "redox_termios",
     "regex",
     "regex-syntax",
     "remove_dir_all",
@@ -164,24 +164,26 @@ const WHITELIST: &[&str] = &[
     "serde",
     "serde_derive",
     "sha-1",
+    "sha2",
     "smallvec",
+    "snap",
     "stable_deref_trait",
     "stacker",
     "syn",
     "synstructure",
     "tempfile",
     "termcolor",
-    "termion",
     "termize",
     "thread_local",
+    "tracing",
+    "tracing-attributes",
+    "tracing-core",
     "typenum",
-    "ucd-util",
     "unicode-normalization",
     "unicode-script",
     "unicode-security",
     "unicode-width",
     "unicode-xid",
-    "utf8-ranges",
     "vcpkg",
     "version_check",
     "wasi",
@@ -190,20 +192,20 @@ const WHITELIST: &[&str] = &[
     "winapi-i686-pc-windows-gnu",
     "winapi-util",
     "winapi-x86_64-pc-windows-gnu",
-    "wincolor",
 ];
 
 /// Dependency checks.
 ///
-/// `path` is path to the `src` directory, `cargo` is path to the cargo executable.
-pub fn check(path: &Path, cargo: &Path, bad: &mut bool) {
+/// `root` is path to the directory with the root `Cargo.toml` (for the workspace). `cargo` is path
+/// to the cargo executable.
+pub fn check(root: &Path, cargo: &Path, bad: &mut bool) {
     let mut cmd = cargo_metadata::MetadataCommand::new();
     cmd.cargo_path(cargo)
-        .manifest_path(path.parent().unwrap().join("Cargo.toml"))
+        .manifest_path(root.join("Cargo.toml"))
         .features(cargo_metadata::CargoOpt::AllFeatures);
     let metadata = t!(cmd.exec());
     check_exceptions(&metadata, bad);
-    check_whitelist(&metadata, bad);
+    check_dependencies(&metadata, bad);
     check_crate_duplicate(&metadata, bad);
 }
 
@@ -215,12 +217,12 @@ fn check_exceptions(metadata: &Metadata, bad: &mut bool) {
     for (name, license) in EXCEPTIONS {
         // Check that the package actually exists.
         if !metadata.packages.iter().any(|p| p.name == *name) {
-            println!(
+            tidy_error!(
+                bad,
                 "could not find exception package `{}`\n\
                 Remove from EXCEPTIONS list if it is no longer used.",
                 name
             );
-            *bad = true;
         }
         // Check that the license hasn't changed.
         for pkg in metadata.packages.iter().filter(|p| p.name == *name) {
@@ -233,14 +235,22 @@ fn check_exceptions(metadata: &Metadata, bad: &mut bool) {
             }
             match &pkg.license {
                 None => {
-                    println!(
+                    tidy_error!(
+                        bad,
                         "dependency exception `{}` does not declare a license expression",
                         pkg.id
                     );
-                    *bad = true;
                 }
                 Some(pkg_license) => {
                     if pkg_license.as_str() != *license {
+                        if *name == "crossbeam-queue"
+                            && *license == "MIT/Apache-2.0 AND BSD-2-Clause"
+                        {
+                            // We have two versions of crossbeam-queue and both
+                            // are fine.
+                            continue;
+                        }
+
                         println!("dependency exception `{}` license has changed", name);
                         println!("    previously `{}` now `{}`", license, pkg_license);
                         println!("    update EXCEPTIONS for the new license");
@@ -266,8 +276,7 @@ fn check_exceptions(metadata: &Metadata, bad: &mut bool) {
         let license = match &pkg.license {
             Some(license) => license,
             None => {
-                println!("dependency `{}` does not define a license expression", pkg.id,);
-                *bad = true;
+                tidy_error!(bad, "dependency `{}` does not define a license expression", pkg.id);
                 continue;
             }
         };
@@ -279,53 +288,52 @@ fn check_exceptions(metadata: &Metadata, bad: &mut bool) {
                 // general, these should never be added.
                 continue;
             }
-            println!("invalid license `{}` in `{}`", license, pkg.id);
-            *bad = true;
+            tidy_error!(bad, "invalid license `{}` in `{}`", license, pkg.id);
         }
     }
 }
 
-/// Checks the dependency of `WHITELIST_CRATES` at the given path. Changes `bad` to `true` if a
-/// check failed.
+/// Checks the dependency of `RESTRICTED_DEPENDENCY_CRATES` at the given path. Changes `bad` to
+/// `true` if a check failed.
 ///
-/// Specifically, this checks that the dependencies are on the `WHITELIST`.
-fn check_whitelist(metadata: &Metadata, bad: &mut bool) {
-    // Check that the WHITELIST does not have unused entries.
-    for name in WHITELIST {
+/// Specifically, this checks that the dependencies are on the `PERMITTED_DEPENDENCIES`.
+fn check_dependencies(metadata: &Metadata, bad: &mut bool) {
+    // Check that the PERMITTED_DEPENDENCIES does not have unused entries.
+    for name in PERMITTED_DEPENDENCIES {
         if !metadata.packages.iter().any(|p| p.name == *name) {
-            println!(
-                "could not find whitelisted package `{}`\n\
-                Remove from WHITELIST list if it is no longer used.",
+            tidy_error!(
+                bad,
+                "could not find allowed package `{}`\n\
+                Remove from PERMITTED_DEPENDENCIES list if it is no longer used.",
                 name
             );
-            *bad = true;
         }
     }
-    // Get the whitelist in a convenient form.
-    let whitelist: HashSet<_> = WHITELIST.iter().cloned().collect();
+    // Get the list in a convenient form.
+    let permitted_dependencies: HashSet<_> = PERMITTED_DEPENDENCIES.iter().cloned().collect();
 
     // Check dependencies.
     let mut visited = BTreeSet::new();
     let mut unapproved = BTreeSet::new();
-    for &krate in WHITELIST_CRATES.iter() {
+    for &krate in RESTRICTED_DEPENDENCY_CRATES.iter() {
         let pkg = pkg_from_name(metadata, krate);
-        let mut bad = check_crate_whitelist(&whitelist, metadata, &mut visited, pkg);
+        let mut bad =
+            check_crate_dependencies(&permitted_dependencies, metadata, &mut visited, pkg);
         unapproved.append(&mut bad);
     }
 
     if !unapproved.is_empty() {
-        println!("Dependencies not on the whitelist:");
+        tidy_error!(bad, "Dependencies not explicitly permitted:");
         for dep in unapproved {
             println!("* {}", dep);
         }
-        *bad = true;
     }
 }
 
 /// Checks the dependencies of the given crate from the given cargo metadata to see if they are on
-/// the whitelist. Returns a list of illegal dependencies.
-fn check_crate_whitelist<'a>(
-    whitelist: &'a HashSet<&'static str>,
+/// the list of permitted dependencies. Returns a list of disallowed dependencies.
+fn check_crate_dependencies<'a>(
+    permitted_dependencies: &'a HashSet<&'static str>,
     metadata: &'a Metadata,
     visited: &mut BTreeSet<&'a PackageId>,
     krate: &'a Package,
@@ -340,10 +348,10 @@ fn check_crate_whitelist<'a>(
 
     visited.insert(&krate.id);
 
-    // If this path is in-tree, we don't require it to be on the whitelist.
+    // If this path is in-tree, we don't require it to be explicitly permitted.
     if krate.source.is_some() {
-        // If this dependency is not on `WHITELIST`, add to bad set.
-        if !whitelist.contains(krate.name.as_str()) {
+        // If this dependency is not on `PERMITTED_DEPENDENCIES`, add to bad set.
+        if !permitted_dependencies.contains(krate.name.as_str()) {
             unapproved.insert(&krate.id);
         }
     }
@@ -352,7 +360,7 @@ fn check_crate_whitelist<'a>(
     let to_check = deps_of(metadata, &krate.id);
 
     for dep in to_check {
-        let mut bad = check_crate_whitelist(whitelist, metadata, visited, dep);
+        let mut bad = check_crate_dependencies(permitted_dependencies, metadata, visited, dep);
         unapproved.append(&mut bad);
     }
 
@@ -373,16 +381,17 @@ fn check_crate_duplicate(metadata: &Metadata, bad: &mut bool) {
         let matches: Vec<_> = metadata.packages.iter().filter(|pkg| pkg.name == name).collect();
         match matches.len() {
             0 => {
-                println!(
+                tidy_error!(
+                    bad,
                     "crate `{}` is missing, update `check_crate_duplicate` \
                     if it is no longer used",
                     name
                 );
-                *bad = true;
             }
             1 => {}
             _ => {
-                println!(
+                tidy_error!(
+                    bad,
                     "crate `{}` is duplicated in `Cargo.lock`, \
                     it is too expensive to build multiple times, \
                     so make sure only one version appears across all dependencies",
@@ -391,7 +400,6 @@ fn check_crate_duplicate(metadata: &Metadata, bad: &mut bool) {
                 for pkg in matches {
                     println!("  * {}", pkg.id);
                 }
-                *bad = true;
             }
         }
     }

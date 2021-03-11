@@ -1,11 +1,12 @@
 // run-pass
 
 #![feature(generators)]
+#![feature(destructuring_assignment)]
 
 #![allow(non_camel_case_types)]
 #![allow(dead_code)]
 #![allow(unreachable_code)]
-#![allow(unused_braces, unused_parens)]
+#![allow(unused_braces, unused_must_use, unused_parens)]
 
 #![recursion_limit = "256"]
 
@@ -159,6 +160,11 @@ fn match_nested_if() {
     assert!(val);
 }
 
+fn monkey_barrel() {
+    let val = ()=()=()=()=()=()=()=()=()=()=()=()=()=()=()=()=()=()=()=()=()=()=()=()=();
+    assert_eq!(val, ());
+}
+
 pub fn main() {
     strange();
     funny();
@@ -177,4 +183,5 @@ pub fn main() {
     r#match();
     i_yield();
     match_nested_if();
+    monkey_barrel();
 }

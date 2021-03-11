@@ -32,6 +32,7 @@ fn test7(x: _) { let _x: usize = x; }
 
 fn test8(_f: fn() -> _) { }
 //~^ ERROR the type placeholder `_` is not allowed within types on item signatures
+//~^^ ERROR the type placeholder `_` is not allowed within types on item signatures
 
 struct Test9;
 
@@ -98,6 +99,7 @@ pub fn main() {
 
     fn fn_test8(_f: fn() -> _) { }
     //~^ ERROR the type placeholder `_` is not allowed within types on item signatures
+    //~^^ ERROR the type placeholder `_` is not allowed within types on item signatures
 
     struct FnTest9;
 
@@ -192,6 +194,8 @@ trait Qux {
     const D: _ = 42;
     //~^ ERROR the type placeholder `_` is not allowed within types on item signatures
     // type E: _; // FIXME: make the parser propagate the existence of `B`
+    type F: std::ops::Fn(_);
+    //~^ ERROR the type placeholder `_` is not allowed within types on item signatures
 }
 impl Qux for Struct {
     type A = _;
@@ -204,3 +208,15 @@ impl Qux for Struct {
     const D: _ = 42;
     //~^ ERROR the type placeholder `_` is not allowed within types on item signatures
 }
+
+fn map<T>(_: fn() -> Option<&'static T>) -> Option<T> {
+    None
+}
+
+fn value() -> Option<&'static _> {
+//~^ ERROR the type placeholder `_` is not allowed within types on item signatures
+    Option::<&'static u8>::None
+}
+
+const _: Option<_> = map(value);
+//~^ ERROR the type placeholder `_` is not allowed within types on item signatures

@@ -1,4 +1,8 @@
-use crate::utils::{differing_macro_contexts, higher, snippet_block_with_applicability, span_lint, span_lint_and_sugg};
+use crate::utils::{
+    differing_macro_contexts, get_parent_expr, get_trait_def_id, implements_trait, paths,
+    snippet_block_with_applicability, span_lint, span_lint_and_sugg,
+};
+use if_chain::if_chain;
 use rustc_errors::Applicability;
 use rustc_hir::intravisit::{walk_expr, NestedVisitorMap, Visitor};
 use rustc_hir::{BlockCheckMode, Expr, ExprKind};
@@ -28,7 +32,6 @@ declare_clippy_lint! {
     ///
     /// ```rust
     /// # fn somefunc() -> bool { true };
-    ///
     /// // Bad
     /// if { let x = somefunc(); x } { /* ... */ }
     ///
@@ -45,7 +48,7 @@ declare_lint_pass!(BlocksInIfConditions => [BLOCKS_IN_IF_CONDITIONS]);
 
 struct ExVisitor<'a, 'tcx> {
     found_block: Option<&'tcx Expr<'tcx>>,
-    cx: &'a LateContext<'a, 'tcx>,
+    cx: &'a LateContext<'tcx>,
 }
 
 impl<'a, 'tcx> Visitor<'tcx> for ExVisitor<'a, 'tcx> {
@@ -53,6 +56,18 @@ impl<'a, 'tcx> Visitor<'tcx> for ExVisitor<'a, 'tcx> {
 
     fn visit_expr(&mut self, expr: &'tcx Expr<'tcx>) {
         if let ExprKind::Closure(_, _, eid, _, _) = expr.kind {
+            // do not lint if the closure is called using an iterator (see #1141)
+            if_chain! {
+                if let Some(parent) = get_parent_expr(self.cx, expr);
+                if let ExprKind::MethodCall(_, _, args, _) = parent.kind;
+                let caller = self.cx.typeck_results().expr_ty(&args[0]);
+                if let Some(iter_id) = get_trait_def_id(self.cx, &paths::ITERATOR);
+                if implements_trait(self.cx, caller, iter_id, &[]);
+                then {
+                    return;
+                }
+            }
+
             let body = self.cx.tcx.hir().body(eid);
             let ex = &body.value;
             if matches!(ex.kind, ExprKind::Block(_, _)) && !body.value.span.from_expansion() {
@@ -71,12 +86,12 @@ const BRACED_EXPR_MESSAGE: &str = "omit braces around single expression conditio
 const COMPLEX_BLOCK_MESSAGE: &str = "in an `if` condition, avoid complex blocks or closures with blocks; \
                                     instead, move the block or closure higher and bind it with a `let`";
 
-impl<'a, 'tcx> LateLintPass<'a, 'tcx> for BlocksInIfConditions {
-    fn check_expr(&mut self, cx: &LateContext<'a, 'tcx>, expr: &'tcx Expr<'_>) {
+impl<'tcx> LateLintPass<'tcx> for BlocksInIfConditions {
+    fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'_>) {
         if in_external_macro(cx.sess(), expr.span) {
             return;
         }
-        if let Some((cond, _, _)) = higher::if_block(&expr) {
+        if let ExprKind::If(cond, _, _) = &expr.kind {
             if let ExprKind::Block(block, _) = &cond.kind {
                 if block.rules == BlockCheckMode::DefaultBlock {
                     if block.stmts.is_empty() {

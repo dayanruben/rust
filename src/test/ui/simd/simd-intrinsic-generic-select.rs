@@ -2,10 +2,7 @@
 #![allow(non_camel_case_types)]
 
 // ignore-emscripten
-// ignore-mips       behavior of simd_select_bitmask is endian-specific
-// ignore-mips64     behavior of simd_select_bitmask is endian-specific
-// ignore-powerpc    behavior of simd_select_bitmask is endian-specific
-// ignore-powerpc64  behavior of simd_select_bitmask is endian-specific
+// ignore-endian-big behavior of simd_select_bitmask is endian-specific
 
 // Test that the simd_select intrinsics produces correct results.
 
@@ -168,6 +165,31 @@ fn main() {
 
         let r: u32x8 = simd_select_bitmask(0b11110000u8, a, b);
         let e = u32x8(8, 9, 10, 11, 4, 5, 6, 7);
+        assert_eq!(r, e);
+    }
+
+    unsafe {
+        let a = u32x4(0, 1, 2, 3);
+        let b = u32x4(4, 5, 6, 7);
+
+        let r: u32x4 = simd_select_bitmask(0u8, a, b);
+        let e = b;
+        assert_eq!(r, e);
+
+        let r: u32x4 = simd_select_bitmask(0xfu8, a, b);
+        let e = a;
+        assert_eq!(r, e);
+
+        let r: u32x4 = simd_select_bitmask(0b0101u8, a, b);
+        let e = u32x4(0, 5, 2, 7);
+        assert_eq!(r, e);
+
+        let r: u32x4 = simd_select_bitmask(0b1010u8, a, b);
+        let e = u32x4(4, 1, 6, 3);
+        assert_eq!(r, e);
+
+        let r: u32x4 = simd_select_bitmask(0b1100u8, a, b);
+        let e = u32x4(4, 5, 2, 3);
         assert_eq!(r, e);
     }
 }

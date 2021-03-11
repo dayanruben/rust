@@ -17,21 +17,22 @@ use std::process::Command;
 
 use build_helper::{output, t};
 
+use crate::cache::INTERNER;
 use crate::config::Target;
 use crate::Build;
 
-struct Finder {
+pub struct Finder {
     cache: HashMap<OsString, Option<PathBuf>>,
     path: OsString,
 }
 
 impl Finder {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self { cache: HashMap::new(), path: env::var_os("PATH").unwrap_or_default() }
     }
 
-    fn maybe_have<S: AsRef<OsStr>>(&mut self, cmd: S) -> Option<PathBuf> {
-        let cmd: OsString = cmd.as_ref().into();
+    pub fn maybe_have<S: Into<OsString>>(&mut self, cmd: S) -> Option<PathBuf> {
+        let cmd: OsString = cmd.into();
         let path = &self.path;
         self.cache
             .entry(cmd.clone())
@@ -54,7 +55,7 @@ impl Finder {
             .clone()
     }
 
-    fn must_have<S: AsRef<OsStr>>(&mut self, cmd: S) -> PathBuf {
+    pub fn must_have<S: AsRef<OsStr>>(&mut self, cmd: S) -> PathBuf {
         self.maybe_have(&cmd).unwrap_or_else(|| {
             panic!("\n\ncouldn't find required command: {:?}\n\n", cmd.as_ref());
         })
@@ -79,44 +80,21 @@ pub fn check(build: &mut Build) {
     }
 
     // We need cmake, but only if we're actually building LLVM or sanitizers.
-    let building_llvm = build
-        .hosts
-        .iter()
-        .map(|host| {
-            build
-                .config
-                .target_config
-                .get(host)
-                .map(|config| config.llvm_config.is_none())
-                .unwrap_or(true)
-        })
-        .any(|build_llvm_ourselves| build_llvm_ourselves);
-    if building_llvm || build.config.sanitizers {
+    let building_llvm = build.config.rust_codegen_backends.contains(&INTERNER.intern_str("llvm"))
+        && build
+            .hosts
+            .iter()
+            .map(|host| {
+                build
+                    .config
+                    .target_config
+                    .get(host)
+                    .map(|config| config.llvm_config.is_none())
+                    .unwrap_or(true)
+            })
+            .any(|build_llvm_ourselves| build_llvm_ourselves);
+    if building_llvm || build.config.any_sanitizers_enabled() {
         cmd_finder.must_have("cmake");
-    }
-
-    // Ninja is currently only used for LLVM itself.
-    if building_llvm {
-        if build.config.ninja {
-            // Some Linux distros rename `ninja` to `ninja-build`.
-            // CMake can work with either binary name.
-            if cmd_finder.maybe_have("ninja-build").is_none() {
-                cmd_finder.must_have("ninja");
-            }
-        }
-
-        // If ninja isn't enabled but we're building for MSVC then we try
-        // doubly hard to enable it. It was realized in #43767 that the msbuild
-        // CMake generator for MSVC doesn't respect configuration options like
-        // disabling LLVM assertions, which can often be quite important!
-        //
-        // In these cases we automatically enable Ninja if we find it in the
-        // environment.
-        if !build.config.ninja && build.config.build.contains("msvc") {
-            if cmd_finder.maybe_have("ninja").is_some() {
-                build.config.ninja = true;
-            }
-        }
     }
 
     build.config.python = build
@@ -134,6 +112,13 @@ pub fn check(build: &mut Build) {
         .map(|p| cmd_finder.must_have(p))
         .or_else(|| cmd_finder.maybe_have("node"))
         .or_else(|| cmd_finder.maybe_have("nodejs"));
+
+    build.config.npm = build
+        .config
+        .npm
+        .take()
+        .map(|p| cmd_finder.must_have(p))
+        .or_else(|| cmd_finder.maybe_have("npm"));
 
     build.config.gdb = build
         .config
@@ -171,10 +156,12 @@ pub fn check(build: &mut Build) {
         }
     }
 
-    // Externally configured LLVM requires FileCheck to exist
-    let filecheck = build.llvm_filecheck(build.build);
-    if !filecheck.starts_with(&build.out) && !filecheck.exists() && build.config.codegen_tests {
-        panic!("FileCheck executable {:?} does not exist", filecheck);
+    if build.config.rust_codegen_backends.contains(&INTERNER.intern_str("llvm")) {
+        // Externally configured LLVM requires FileCheck to exist
+        let filecheck = build.llvm_filecheck(build.build);
+        if !filecheck.starts_with(&build.out) && !filecheck.exists() && build.config.codegen_tests {
+            panic!("FileCheck executable {:?} does not exist", filecheck);
+        }
     }
 
     for target in &build.targets {
@@ -183,7 +170,11 @@ pub fn check(build: &mut Build) {
             panic!("the iOS target is only supported on macOS");
         }
 
-        build.config.target_config.entry(target.clone()).or_insert(Target::from_triple(target));
+        build
+            .config
+            .target_config
+            .entry(*target)
+            .or_insert_with(|| Target::from_triple(&target.triple));
 
         if target.contains("-none-") || target.contains("nvptx") {
             if build.no_std(*target) == Some(false) {
@@ -196,13 +187,13 @@ pub fn check(build: &mut Build) {
             // If this is a native target (host is also musl) and no musl-root is given,
             // fall back to the system toolchain in /usr before giving up
             if build.musl_root(*target).is_none() && build.config.build == *target {
-                let target = build.config.target_config.entry(target.clone()).or_default();
+                let target = build.config.target_config.entry(*target).or_default();
                 target.musl_root = Some("/usr".into());
             }
-            match build.musl_root(*target) {
-                Some(root) => {
-                    if fs::metadata(root.join("lib/libc.a")).is_err() {
-                        panic!("couldn't find libc.a in musl dir: {}", root.join("lib").display());
+            match build.musl_libdir(*target) {
+                Some(libdir) => {
+                    if fs::metadata(libdir.join("libc.a")).is_err() {
+                        panic!("couldn't find libc.a in musl libdir: {}", libdir.display());
                     }
                 }
                 None => panic!(

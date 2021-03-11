@@ -1,10 +1,12 @@
-#![allow(incomplete_features, dead_code, unconditional_recursion)]
-#![feature(const_generics)]
-#![feature(lazy_normalization_consts)]
+// revisions: full min
+#![cfg_attr(full, feature(const_generics))]
+#![cfg_attr(full, allow(incomplete_features))]
+#![allow(dead_code, unconditional_recursion)]
 
 fn fact<const N: usize>() {
     fact::<{ N - 1 }>();
-    //~^ ERROR constant expression depends on a generic parameter
+    //[full]~^ ERROR constant expression depends on a generic parameter
+    //[min]~^^ ERROR generic parameters may not be used in const operations
 }
 
 fn main() {}

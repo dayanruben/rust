@@ -11,7 +11,7 @@
 /// ```
 /// println!("sup");
 /// ```
-pub fn link_error() {} //~^^^^^ ERROR cannot be resolved, ignoring it
+pub fn link_error() {} //~^^^^^ ERROR unresolved link to `error`
 
 /// wait, this doesn't have a doctest?
 pub fn no_doctest() {} //~^ ERROR missing code example in this documentation
@@ -22,3 +22,8 @@ pub fn no_doctest() {} //~^ ERROR missing code example in this documentation
 /// println!("sup");
 /// ```
 fn private_doctest() {} //~^^^^^ ERROR documentation test in private item
+
+/// <unknown>
+//~^ ERROR unclosed HTML tag `unknown`
+//~^^ ERROR missing code example
+pub fn c() {}

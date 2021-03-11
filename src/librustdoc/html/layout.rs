@@ -1,42 +1,45 @@
 use std::path::PathBuf;
 
+use rustc_data_structures::fx::FxHashMap;
+
 use crate::externalfiles::ExternalHtml;
 use crate::html::escape::Escape;
 use crate::html::format::{Buffer, Print};
-use crate::html::render::ensure_trailing_slash;
+use crate::html::render::{ensure_trailing_slash, StylePath};
 
 #[derive(Clone)]
-pub struct Layout {
-    pub logo: String,
-    pub favicon: String,
-    pub external_html: ExternalHtml,
-    pub krate: String,
+crate struct Layout {
+    crate logo: String,
+    crate favicon: String,
+    crate external_html: ExternalHtml,
+    crate default_settings: FxHashMap<String, String>,
+    crate krate: String,
     /// The given user css file which allow to customize the generated
     /// documentation theme.
-    pub css_file_extension: Option<PathBuf>,
+    crate css_file_extension: Option<PathBuf>,
     /// If false, the `select` element to have search filtering by crates on rendered docs
     /// won't be generated.
-    pub generate_search_filter: bool,
+    crate generate_search_filter: bool,
 }
 
-pub struct Page<'a> {
-    pub title: &'a str,
-    pub css_class: &'a str,
-    pub root_path: &'a str,
-    pub static_root_path: Option<&'a str>,
-    pub description: &'a str,
-    pub keywords: &'a str,
-    pub resource_suffix: &'a str,
-    pub extra_scripts: &'a [&'a str],
-    pub static_extra_scripts: &'a [&'a str],
+crate struct Page<'a> {
+    crate title: &'a str,
+    crate css_class: &'a str,
+    crate root_path: &'a str,
+    crate static_root_path: Option<&'a str>,
+    crate description: &'a str,
+    crate keywords: &'a str,
+    crate resource_suffix: &'a str,
+    crate extra_scripts: &'a [&'a str],
+    crate static_extra_scripts: &'a [&'a str],
 }
 
-pub fn render<T: Print, S: Print>(
+crate fn render<T: Print, S: Print>(
     layout: &Layout,
     page: &Page<'_>,
     sidebar: S,
     t: T,
-    themes: &[PathBuf],
+    style_files: &[StylePath],
 ) -> String {
     let static_root_path = page.static_root_path.unwrap_or(page.root_path);
     format!(
@@ -52,11 +55,10 @@ pub fn render<T: Print, S: Print>(
     <link rel=\"stylesheet\" type=\"text/css\" href=\"{static_root_path}normalize{suffix}.css\">\
     <link rel=\"stylesheet\" type=\"text/css\" href=\"{static_root_path}rustdoc{suffix}.css\" \
           id=\"mainThemeStyle\">\
-    {themes}\
-    <link rel=\"stylesheet\" type=\"text/css\" href=\"{static_root_path}dark{suffix}.css\">\
-    <link rel=\"stylesheet\" type=\"text/css\" href=\"{static_root_path}light{suffix}.css\" \
-          id=\"themeStyle\">\
+    {style_files}\
+    <script id=\"default-settings\"{default_settings}></script>\
     <script src=\"{static_root_path}storage{suffix}.js\"></script>\
+    <script src=\"{static_root_path}crates{suffix}.js\"></script>\
     <noscript><link rel=\"stylesheet\" href=\"{static_root_path}noscript{suffix}.css\"></noscript>\
     {css_extension}\
     {favicon}\
@@ -74,17 +76,17 @@ pub fn render<T: Print, S: Print>(
     <![endif]-->\
     {before_content}\
     <nav class=\"sidebar\">\
-        <div class=\"sidebar-menu\">&#9776;</div>\
+        <div class=\"sidebar-menu\" role=\"button\">&#9776;</div>\
         {logo}\
         {sidebar}\
     </nav>\
     <div class=\"theme-picker\">\
-        <button id=\"theme-picker\" aria-label=\"Pick another theme!\">\
+        <button id=\"theme-picker\" aria-label=\"Pick another theme!\" aria-haspopup=\"menu\">\
             <img src=\"{static_root_path}brush{suffix}.svg\" \
-                 width=\"18\" \
+                 width=\"18\" height=\"18\" \
                  alt=\"Pick another theme!\">\
         </button>\
-        <div id=\"theme-choices\"></div>\
+        <div id=\"theme-choices\" role=\"menu\"></div>\
     </div>\
     <script src=\"{static_root_path}theme{suffix}.js\"></script>\
     <nav class=\"sub\">\
@@ -98,9 +100,10 @@ pub fn render<T: Print, S: Print>(
                            placeholder=\"Click or press ‘S’ to search, ‘?’ for more options…\" \
                            type=\"search\">\
                 </div>\
+                <button type=\"button\" class=\"help-button\">?</button>
                 <a id=\"settings-menu\" href=\"{root_path}settings.html\">\
                     <img src=\"{static_root_path}wheel{suffix}.svg\" \
-                         width=\"18\" \
+                         width=\"18\" height=\"18\" \
                          alt=\"Change settings\">\
                 </a>\
             </div>\
@@ -110,14 +113,10 @@ pub fn render<T: Print, S: Print>(
     <section id=\"search\" class=\"content hidden\"></section>\
     <section class=\"footer\"></section>\
     {after_content}\
-    <script>\
-        window.rootPath = \"{root_path}\";\
-        window.currentCrate = \"{krate}\";\
-    </script>\
+    <div id=\"rustdoc-vars\" data-root-path=\"{root_path}\" data-current-crate=\"{krate}\" \
+       data-search-js=\"{root_path}search-index{suffix}.js\"></div>
     <script src=\"{static_root_path}main{suffix}.js\"></script>\
-    {static_extra_scripts}\
     {extra_scripts}\
-    <script defer src=\"{root_path}search-index{suffix}.js\"></script>\
 </body>\
 </html>",
         css_extension = if layout.css_file_extension.is_some() {
@@ -136,22 +135,23 @@ pub fn render<T: Print, S: Print>(
         root_path = page.root_path,
         css_class = page.css_class,
         logo = {
-            let p = format!("{}{}", page.root_path, layout.krate);
-            let p = ensure_trailing_slash(&p);
             if layout.logo.is_empty() {
                 format!(
-                    "<a href='{path}index.html'>\
-                     <div class='logo-container'>\
+                    "<a href='{root}{path}index.html'>\
+                     <div class='logo-container rust-logo'>\
                      <img src='{static_root_path}rust-logo{suffix}.png' alt='logo'></div></a>",
-                    path = p,
+                    root = page.root_path,
+                    path = ensure_trailing_slash(&layout.krate),
                     static_root_path = static_root_path,
                     suffix = page.resource_suffix
                 )
             } else {
                 format!(
-                    "<a href='{}index.html'>\
-                     <div class='logo-container'><img src='{}' alt='logo'></div></a>",
-                    p, layout.logo
+                    "<a href='{root}{path}index.html'>\
+                     <div class='logo-container'><img src='{logo}' alt='logo'></div></a>",
+                    root = page.root_path,
+                    path = ensure_trailing_slash(&layout.krate),
+                    logo = layout.logo
                 )
             }
         },
@@ -160,7 +160,9 @@ pub fn render<T: Print, S: Print>(
         keywords = page.keywords,
         favicon = if layout.favicon.is_empty() {
             format!(
-                r#"<link rel="shortcut icon" href="{static_root_path}favicon{suffix}.ico">"#,
+                r##"<link rel="icon" type="image/svg+xml" href="{static_root_path}favicon{suffix}.svg">
+<link rel="alternate icon" type="image/png" href="{static_root_path}favicon-16x16{suffix}.png">
+<link rel="alternate icon" type="image/png" href="{static_root_path}favicon-32x32{suffix}.png">"##,
                 static_root_path = static_root_path,
                 suffix = page.resource_suffix
             )
@@ -172,17 +174,28 @@ pub fn render<T: Print, S: Print>(
         after_content = layout.external_html.after_content,
         sidebar = Buffer::html().to_display(sidebar),
         krate = layout.krate,
-        themes = themes
+        default_settings = layout
+            .default_settings
             .iter()
-            .filter_map(|t| t.file_stem())
-            .filter_map(|t| t.to_str())
+            .map(|(k, v)| format!(r#" data-{}="{}""#, k.replace('-', "_"), Escape(v)))
+            .collect::<String>(),
+        style_files = style_files
+            .iter()
+            .filter_map(|t| {
+                if let Some(stem) = t.path.file_stem() { Some((stem, t.disabled)) } else { None }
+            })
+            .filter_map(|t| {
+                if let Some(path) = t.0.to_str() { Some((path, t.1)) } else { None }
+            })
             .map(|t| format!(
-                r#"<link rel="stylesheet" type="text/css" href="{}.css">"#,
-                Escape(&format!("{}{}{}", static_root_path, t, page.resource_suffix))
+                r#"<link rel="stylesheet" type="text/css" href="{}.css" {} {}>"#,
+                Escape(&format!("{}{}{}", static_root_path, t.0, page.resource_suffix)),
+                if t.1 { "disabled" } else { "" },
+                if t.0 == "light" { "id=\"themeStyle\"" } else { "" }
             ))
             .collect::<String>(),
         suffix = page.resource_suffix,
-        static_extra_scripts = page
+        extra_scripts = page
             .static_extra_scripts
             .iter()
             .map(|e| {
@@ -192,29 +205,25 @@ pub fn render<T: Print, S: Print>(
                     extra_script = e
                 )
             })
-            .collect::<String>(),
-        extra_scripts = page
-            .extra_scripts
-            .iter()
-            .map(|e| {
+            .chain(page.extra_scripts.iter().map(|e| {
                 format!(
                     "<script src=\"{root_path}{extra_script}.js\"></script>",
                     root_path = page.root_path,
                     extra_script = e
                 )
-            })
+            }))
             .collect::<String>(),
         filter_crates = if layout.generate_search_filter {
             "<select id=\"crate-search\">\
-            <option value=\"All crates\">All crates</option>\
-        </select>"
+                 <option value=\"All crates\">All crates</option>\
+             </select>"
         } else {
             ""
         },
     )
 }
 
-pub fn redirect(url: &str) -> String {
+crate fn redirect(url: &str) -> String {
     // <script> triggers a redirect before refresh, so this is fine.
     format!(
         r##"<!DOCTYPE html>

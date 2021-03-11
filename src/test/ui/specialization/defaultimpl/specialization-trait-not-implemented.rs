@@ -2,7 +2,7 @@
 // - default impls do not have to supply all items and
 // - a default impl does not count as an impl (in this case, an incomplete default impl).
 
-#![feature(specialization)]
+#![feature(specialization)] //~ WARN the feature `specialization` is incomplete
 
 trait Foo {
     fn foo_one(&self) -> &'static str;
@@ -20,5 +20,5 @@ default impl<T> Foo for T {
 
 fn main() {
     println!("{}", MyStruct.foo_one());
-    //~^ ERROR no method named `foo_one` found
+    //~^ ERROR the method
 }

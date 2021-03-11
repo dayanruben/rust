@@ -221,7 +221,7 @@ where
 {
     if let ast::ExprKind::While(_, loop_block, label)
     | ast::ExprKind::ForLoop(_, _, loop_block, label)
-    | ast::ExprKind::Loop(loop_block, label) = &expr.kind
+    | ast::ExprKind::Loop(loop_block, label, ..) = &expr.kind
     {
         func(loop_block, label.as_ref());
     }
@@ -424,7 +424,7 @@ fn erode_from_back(s: &str) -> String {
 }
 
 fn span_of_first_expr_in_block(block: &ast::Block) -> Option<Span> {
-    block.stmts.iter().next().map(|stmt| stmt.span)
+    block.stmts.get(0).map(|stmt| stmt.span)
 }
 
 #[cfg(test)]

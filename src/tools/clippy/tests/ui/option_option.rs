@@ -1,4 +1,5 @@
 #![deny(clippy::option_option)]
+#![allow(clippy::unnecessary_wraps)]
 
 fn input(_: Option<Option<u8>>) {}
 
@@ -59,4 +60,27 @@ fn main() {
 
     // The lint allows this
     let expr = Some(Some(true));
+}
+
+extern crate serde;
+mod issue_4298 {
+    use serde::{Deserialize, Deserializer, Serialize};
+    use std::borrow::Cow;
+
+    #[derive(Serialize, Deserialize)]
+    struct Foo<'a> {
+        #[serde(deserialize_with = "func")]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[serde(default)]
+        #[serde(borrow)]
+        foo: Option<Option<Cow<'a, str>>>,
+    }
+
+    #[allow(clippy::option_option)]
+    fn func<'a, D>(_: D) -> Result<Option<Option<Cow<'a, str>>>, D::Error>
+    where
+        D: Deserializer<'a>,
+    {
+        Ok(Some(Some(Cow::Borrowed("hi"))))
+    }
 }

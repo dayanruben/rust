@@ -1,10 +1,10 @@
 use crate::utils::{numeric_literal, span_lint_and_sugg};
 use if_chain::if_chain;
-use rustc_ast::ast::{FloatTy, LitFloatType, LitKind};
+use rustc_ast::ast::{self, LitFloatType, LitKind};
 use rustc_errors::Applicability;
 use rustc_hir as hir;
 use rustc_lint::{LateContext, LateLintPass};
-use rustc_middle::ty;
+use rustc_middle::ty::{self, FloatTy};
 use rustc_session::{declare_lint_pass, declare_tool_lint};
 use std::fmt;
 
@@ -58,11 +58,11 @@ declare_clippy_lint! {
 
 declare_lint_pass!(FloatLiteral => [EXCESSIVE_PRECISION, LOSSY_FLOAT_LITERAL]);
 
-impl<'a, 'tcx> LateLintPass<'a, 'tcx> for FloatLiteral {
-    fn check_expr(&mut self, cx: &LateContext<'a, 'tcx>, expr: &'tcx hir::Expr<'_>) {
+impl<'tcx> LateLintPass<'tcx> for FloatLiteral {
+    fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx hir::Expr<'_>) {
         if_chain! {
-            let ty = cx.tables.expr_ty(expr);
-            if let ty::Float(fty) = ty.kind;
+            let ty = cx.typeck_results().expr_ty(expr);
+            if let ty::Float(fty) = *ty.kind();
             if let hir::ExprKind::Lit(ref lit) = expr.kind;
             if let LitKind::Float(sym, lit_float_ty) = lit.node;
             then {
@@ -75,9 +75,9 @@ impl<'a, 'tcx> LateLintPass<'a, 'tcx> for FloatLiteral {
                 let digits = count_digits(&sym_str);
                 let max = max_digits(fty);
                 let type_suffix = match lit_float_ty {
-                    LitFloatType::Suffixed(FloatTy::F32) => Some("f32"),
-                    LitFloatType::Suffixed(FloatTy::F64) => Some("f64"),
-                    _ => None
+                    LitFloatType::Suffixed(ast::FloatTy::F32) => Some("f32"),
+                    LitFloatType::Suffixed(ast::FloatTy::F64) => Some("f64"),
+                    LitFloatType::Unsuffixed => None
                 };
                 let (is_whole, mut float_str) = match fty {
                     FloatTy::F32 => {

@@ -1,5 +1,5 @@
 use crate::utils::{
-    get_trait_def_id, implements_trait, snippet_opt, span_lint_and_then, trait_ref_of_method, SpanlessEq,
+    eq_expr_value, get_trait_def_id, implements_trait, snippet_opt, span_lint_and_then, trait_ref_of_method,
 };
 use crate::utils::{higher, sugg};
 use if_chain::if_chain;
@@ -24,7 +24,11 @@ declare_clippy_lint! {
     /// let mut a = 5;
     /// let b = 0;
     /// // ...
+    /// // Bad
     /// a = a + b;
+    ///
+    /// // Good
+    /// a += b;
     /// ```
     pub ASSIGN_OP_PATTERN,
     style,
@@ -56,9 +60,9 @@ declare_clippy_lint! {
 
 declare_lint_pass!(AssignOps => [ASSIGN_OP_PATTERN, MISREFACTORED_ASSIGN_OP]);
 
-impl<'a, 'tcx> LateLintPass<'a, 'tcx> for AssignOps {
+impl<'tcx> LateLintPass<'tcx> for AssignOps {
     #[allow(clippy::too_many_lines)]
-    fn check_expr(&mut self, cx: &LateContext<'a, 'tcx>, expr: &'tcx hir::Expr<'_>) {
+    fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx hir::Expr<'_>) {
         match &expr.kind {
             hir::ExprKind::AssignOp(op, lhs, rhs) => {
                 if let hir::ExprKind::Binary(binop, l, r) = &rhs.kind {
@@ -66,11 +70,11 @@ impl<'a, 'tcx> LateLintPass<'a, 'tcx> for AssignOps {
                         return;
                     }
                     // lhs op= l op r
-                    if SpanlessEq::new(cx).ignore_fn().eq_expr(lhs, l) {
+                    if eq_expr_value(cx, lhs, l) {
                         lint_misrefactored_assign_op(cx, expr, *op, rhs, lhs, r);
                     }
                     // lhs op= l commutative_op r
-                    if is_commutative(op.node) && SpanlessEq::new(cx).ignore_fn().eq_expr(lhs, r) {
+                    if is_commutative(op.node) && eq_expr_value(cx, lhs, r) {
                         lint_misrefactored_assign_op(cx, expr, *op, rhs, lhs, l);
                     }
                 }
@@ -78,8 +82,8 @@ impl<'a, 'tcx> LateLintPass<'a, 'tcx> for AssignOps {
             hir::ExprKind::Assign(assignee, e, _) => {
                 if let hir::ExprKind::Binary(op, l, r) = &e.kind {
                     let lint = |assignee: &hir::Expr<'_>, rhs: &hir::Expr<'_>| {
-                        let ty = cx.tables.expr_ty(assignee);
-                        let rty = cx.tables.expr_ty(rhs);
+                        let ty = cx.typeck_results().expr_ty(assignee);
+                        let rty = cx.typeck_results().expr_ty(rhs);
                         macro_rules! ops {
                             ($op:expr,
                              $cx:expr,
@@ -157,14 +161,12 @@ impl<'a, 'tcx> LateLintPass<'a, 'tcx> for AssignOps {
 
                     if visitor.counter == 1 {
                         // a = a op b
-                        if SpanlessEq::new(cx).ignore_fn().eq_expr(assignee, l) {
+                        if eq_expr_value(cx, assignee, l) {
                             lint(assignee, r);
                         }
                         // a = b commutative_op a
                         // Limited to primitive type as these ops are know to be commutative
-                        if SpanlessEq::new(cx).ignore_fn().eq_expr(assignee, r)
-                            && cx.tables.expr_ty(assignee).is_primitive_ty()
-                        {
+                        if eq_expr_value(cx, assignee, r) && cx.typeck_results().expr_ty(assignee).is_primitive_ty() {
                             match op.node {
                                 hir::BinOpKind::Add
                                 | hir::BinOpKind::Mul
@@ -187,7 +189,7 @@ impl<'a, 'tcx> LateLintPass<'a, 'tcx> for AssignOps {
 }
 
 fn lint_misrefactored_assign_op(
-    cx: &LateContext<'_, '_>,
+    cx: &LateContext<'_>,
     expr: &hir::Expr<'_>,
     op: hir::BinOp,
     rhs: &hir::Expr<'_>,
@@ -242,14 +244,14 @@ fn is_commutative(op: hir::BinOpKind) -> bool {
 struct ExprVisitor<'a, 'tcx> {
     assignee: &'a hir::Expr<'a>,
     counter: u8,
-    cx: &'a LateContext<'a, 'tcx>,
+    cx: &'a LateContext<'tcx>,
 }
 
 impl<'a, 'tcx> Visitor<'tcx> for ExprVisitor<'a, 'tcx> {
     type Map = Map<'tcx>;
 
     fn visit_expr(&mut self, expr: &'tcx hir::Expr<'_>) {
-        if SpanlessEq::new(self.cx).ignore_fn().eq_expr(self.assignee, expr) {
+        if eq_expr_value(self.cx, self.assignee, expr) {
             self.counter += 1;
         }
 

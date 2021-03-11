@@ -51,7 +51,7 @@ o("option-checking", None, "complain about unrecognized options in this configur
 o("ninja", "llvm.ninja", "build LLVM using the Ninja generator (for MSVC, requires building in the correct environment)")
 o("locked-deps", "build.locked-deps", "force Cargo.lock to be up to date")
 o("vendor", "build.vendor", "enable usage of vendored Rust crates")
-o("sanitizers", "build.sanitizers", "build the sanitizer runtimes (asan, lsan, msan, tsan)")
+o("sanitizers", "build.sanitizers", "build the sanitizer runtimes (asan, lsan, msan, tsan, hwasan)")
 o("dist-src", "rust.dist-src", "when building tarballs enables building a source tarball")
 o("cargo-native-static", "build.cargo-native-static", "static native libraries in cargo")
 o("profiler", "build.profiler", "build the profiler runtime")
@@ -65,7 +65,7 @@ v("llvm-cflags", "llvm.cflags", "build LLVM with these extra compiler flags")
 v("llvm-cxxflags", "llvm.cxxflags", "build LLVM with these extra compiler flags")
 v("llvm-ldflags", "llvm.ldflags", "build LLVM with these extra linker flags")
 
-o("llvm-libunwind", "rust.llvm-libunwind", "use LLVM libunwind")
+v("llvm-libunwind", "rust.llvm-libunwind", "use LLVM libunwind")
 
 # Optimization and debugging options. These may be overridden by the release
 # channel, etc.
@@ -141,9 +141,14 @@ v("qemu-armhf-rootfs", "target.arm-unknown-linux-gnueabihf.qemu-rootfs",
   "rootfs in qemu testing, you probably don't want to use this")
 v("qemu-aarch64-rootfs", "target.aarch64-unknown-linux-gnu.qemu-rootfs",
   "rootfs in qemu testing, you probably don't want to use this")
+v("qemu-riscv64-rootfs", "target.riscv64gc-unknown-linux-gnu.qemu-rootfs",
+  "rootfs in qemu testing, you probably don't want to use this")
 v("experimental-targets", "llvm.experimental-targets",
   "experimental LLVM targets to build")
 v("release-channel", "rust.channel", "the name of the release channel to build")
+v("release-description", "rust.description", "optional descriptive string for version output")
+v("dist-compression-formats", None,
+  "comma-separated list of compression formats to use")
 
 # Used on systems where "cc" is unavailable
 v("default-linker", "rust.default-linker", "the default linker")
@@ -264,7 +269,7 @@ config = {}
 def build():
     if 'build' in known_args:
         return known_args['build'][-1][1]
-    return bootstrap.default_build_triple()
+    return bootstrap.default_build_triple(verbose=False)
 
 
 def set(key, value):
@@ -346,6 +351,8 @@ for key in known_args:
     elif option.name == 'option-checking':
         # this was handled above
         pass
+    elif option.name == 'dist-compression-formats':
+        set('dist.compression-formats', value.split(','))
     else:
         raise RuntimeError("unhandled option {}".format(option.name))
 

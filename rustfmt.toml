@@ -6,7 +6,7 @@ merge_derives = false
 # by default we ignore everything in the repository
 # tidy only checks files which are not ignored, each entry follows gitignore style
 ignore = [
-    "build",
+    "/build/",
     "/vendor/",
 
     # tests for now are not formatted, as they are sometimes pretty-printing constrained
@@ -14,6 +14,9 @@ ignore = [
     "src/test",
 
     # do not format submodules
+    "library/backtrace",
+    "library/stdarch",
+    "compiler/rustc_codegen_cranelift",
     "src/doc/book",
     "src/doc/edition-guide",
     "src/doc/embedded-book",
@@ -22,14 +25,11 @@ ignore = [
     "src/doc/rust-by-example",
     "src/doc/rustc-dev-guide",
     "src/llvm-project",
-    "src/stdarch",
     "src/tools/cargo",
     "src/tools/clippy",
     "src/tools/miri",
     "src/tools/rls",
-    "src/tools/rust-installer",
+    "src/tools/rust-analyzer",
     "src/tools/rustfmt",
-
-    # We do not format this file as it is externally sourced and auto-generated.
-    "src/libstd/sys/cloudabi/abi/cloudabi.rs",
+    "src/tools/rust-installer",
 ]

@@ -9,11 +9,8 @@ use std::fmt::{Display, Debug};
 trait Foo {
     type Assoc where Self: Sized;
     type Assoc2<T> where T: Display;
-    //~^ ERROR type-generic associated types are not yet implemented
     type Assoc3<T>;
-    //~^ ERROR type-generic associated types are not yet implemented
-    type WithDefault<'a, T: Debug + 'a> = dyn Iterator<Item=T>;
-    //~^ ERROR type-generic associated types are not yet implemented
+    type WithDefault<'a, T: Debug + 'a>: ?Sized = dyn Iterator<Item=T>;
     type NoGenerics;
 }
 
@@ -22,7 +19,9 @@ struct Bar;
 impl Foo for Bar {
     type Assoc = usize;
     type Assoc2<T> = Vec<T>;
+    //~^ ERROR `T` doesn't implement `std::fmt::Display`
     type Assoc3<T> where T: Iterator = Vec<T>;
+    //~^ ERROR impl has stricter requirements than trait
     type WithDefault<'a, T: Debug + 'a> = &'a dyn Iterator<Item=T>;
     type NoGenerics = ::std::cell::Cell<i32>;
 }

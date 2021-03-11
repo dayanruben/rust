@@ -22,28 +22,63 @@ LL |     a.iter().map(|_: (u16, u16)| 45);
    |              |
    |              expected signature of `fn(&(u32, u32)) -> _`
 
-error[E0631]: type mismatch in function arguments
-  --> $DIR/closure-arg-type-mismatch.rs:10:9
-   |
-LL | fn baz<F: Fn(*mut &u32)>(_: F) {}
-   |           ------------- required by this bound in `baz`
-LL | fn _test<'a>(f: fn(*mut &'a u32)) {
-LL |     baz(f);
-   |         ^
-   |         |
-   |         expected signature of `for<'r> fn(*mut &'r u32) -> _`
-   |         found signature of `fn(*mut &'a u32) -> _`
-
-error[E0271]: type mismatch resolving `for<'r> <fn(*mut &'a u32) as std::ops::FnOnce<(*mut &'r u32,)>>::Output == ()`
+error[E0308]: mismatched types
   --> $DIR/closure-arg-type-mismatch.rs:10:5
    |
-LL | fn baz<F: Fn(*mut &u32)>(_: F) {}
-   |           ------------- required by this bound in `baz`
-LL | fn _test<'a>(f: fn(*mut &'a u32)) {
 LL |     baz(f);
-   |     ^^^ expected bound lifetime parameter, found concrete lifetime
+   |     ^^^ lifetime mismatch
+   |
+   = note: expected type `for<'r> Fn<(*mut &'r u32,)>`
+              found type `Fn<(*mut &'a u32,)>`
+note: the required lifetime does not necessarily outlive the lifetime `'a` as defined on the function body at 9:10
+  --> $DIR/closure-arg-type-mismatch.rs:9:10
+   |
+LL | fn _test<'a>(f: fn(*mut &'a u32)) {
+   |          ^^
+note: the lifetime requirement is introduced here
+  --> $DIR/closure-arg-type-mismatch.rs:8:11
+   |
+LL | fn baz<F: Fn(*mut &u32)>(_: F) {}
+   |           ^^^^^^^^^^^^^
 
-error: aborting due to 5 previous errors
+error: implementation of `FnOnce` is not general enough
+  --> $DIR/closure-arg-type-mismatch.rs:10:5
+   |
+LL |     baz(f);
+   |     ^^^ implementation of `FnOnce` is not general enough
+   |
+   = note: `fn(*mut &'a u32)` must implement `FnOnce<(*mut &'0 u32,)>`, for any lifetime `'0`...
+   = note: ...but it actually implements `FnOnce<(*mut &'a u32,)>`
 
-Some errors have detailed explanations: E0271, E0631.
-For more information about an error, try `rustc --explain E0271`.
+error[E0308]: mismatched types
+  --> $DIR/closure-arg-type-mismatch.rs:10:5
+   |
+LL |     baz(f);
+   |     ^^^ lifetime mismatch
+   |
+   = note: expected type `for<'r> Fn<(*mut &'r u32,)>`
+              found type `Fn<(*mut &'a u32,)>`
+note: the lifetime `'a` as defined on the function body at 9:10 doesn't meet the lifetime requirements
+  --> $DIR/closure-arg-type-mismatch.rs:9:10
+   |
+LL | fn _test<'a>(f: fn(*mut &'a u32)) {
+   |          ^^
+note: the lifetime requirement is introduced here
+  --> $DIR/closure-arg-type-mismatch.rs:8:11
+   |
+LL | fn baz<F: Fn(*mut &u32)>(_: F) {}
+   |           ^^^^^^^^^^^^^
+
+error: implementation of `FnOnce` is not general enough
+  --> $DIR/closure-arg-type-mismatch.rs:10:5
+   |
+LL |     baz(f);
+   |     ^^^ implementation of `FnOnce` is not general enough
+   |
+   = note: `fn(*mut &'a u32)` must implement `FnOnce<(*mut &'0 u32,)>`, for any lifetime `'0`...
+   = note: ...but it actually implements `FnOnce<(*mut &'a u32,)>`
+
+error: aborting due to 7 previous errors
+
+Some errors have detailed explanations: E0308, E0631.
+For more information about an error, try `rustc --explain E0308`.

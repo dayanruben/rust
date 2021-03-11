@@ -21,10 +21,13 @@ LL |                    *y = 1;
 error: captured variable cannot escape `FnMut` closure body
   --> $DIR/borrowck-describe-lvalue.rs:264:16
    |
+LL |           let mut x = 0;
+   |               ----- variable defined here
 LL |              || {
    |               - inferred to be a `FnMut` closure
 LL | /                || {
 LL | |                    let y = &mut x;
+   | |                                 - variable captured here
 LL | |                    &mut x;
 LL | |                    *y = 1;
 LL | |                    drop(y);
@@ -358,7 +361,7 @@ LL |                 drop(x);
 LL |                 drop(x);
    |                      ^ value used here after move
    |
-   = note: move occurs because `x` has type `std::vec::Vec<i32>`, which does not implement the `Copy` trait
+   = note: move occurs because `x` has type `Vec<i32>`, which does not implement the `Copy` trait
 
 error: aborting due to 32 previous errors
 

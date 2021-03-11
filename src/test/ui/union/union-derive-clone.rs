@@ -1,8 +1,6 @@
-#![feature(untagged_unions)]
-
 use std::mem::ManuallyDrop;
 
-#[derive(Clone)] //~ ERROR the trait bound `U1: std::marker::Copy` is not satisfied
+#[derive(Clone)] //~ ERROR the trait bound `U1: Copy` is not satisfied
 union U1 {
     a: u8,
 }
@@ -34,5 +32,5 @@ struct CloneNoCopy;
 
 fn main() {
     let u = U5 { a: ManuallyDrop::new(CloneNoCopy) };
-    let w = u.clone(); //~ ERROR no method named `clone` found for union `U5<CloneNoCopy>`
+    let w = u.clone(); //~ ERROR the method
 }

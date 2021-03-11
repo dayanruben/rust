@@ -1,8 +1,10 @@
 // run-pass
 //
 // see issue #70529
-#![feature(const_generics)]
-//~^ WARN the feature `const_generics` is incomplete
+// revisions: full min
+
+#![cfg_attr(full, feature(const_generics))]
+#![cfg_attr(full, allow(incomplete_features))]
 
 struct A<const N: usize> {
     arr: [u8; N],

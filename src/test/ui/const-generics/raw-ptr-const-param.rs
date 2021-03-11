@@ -1,9 +1,11 @@
-#![feature(const_generics, const_compare_raw_pointers)]
-//~^ WARN the feature `const_generics` is incomplete
+// revisions: full min
 
-struct Const<const P: *const u32>;
+#![cfg_attr(full, feature(const_generics))]
+#![cfg_attr(full, allow(incomplete_features))]
+
+struct Const<const P: *const u32>; //~ ERROR: using raw pointers as const generic parameters
 
 fn main() {
-    let _: Const<{ 15 as *const _ }> = Const::<{ 10 as *const _ }>; //~ mismatched types
+    let _: Const<{ 15 as *const _ }> = Const::<{ 10 as *const _ }>;
     let _: Const<{ 10 as *const _ }> = Const::<{ 10 as *const _ }>;
 }

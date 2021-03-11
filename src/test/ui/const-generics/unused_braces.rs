@@ -1,8 +1,11 @@
 // check-pass
+// run-rustfix
+// revisions: full min
+
+#![cfg_attr(full, feature(const_generics))]
+#![cfg_attr(full, allow(incomplete_features))]
 #![warn(unused_braces)]
 
-#![feature(const_generics)]
-//~^ WARN the feature `const_generics` is incomplete
 
 struct A<const N: usize>;
 

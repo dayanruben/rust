@@ -6,12 +6,12 @@ use rustc_hir as hir;
 use rustc_lint::LateContext;
 use rustc_target::abi::LayoutOf;
 
-pub fn lint(cx: &LateContext<'_, '_>, expr: &hir::Expr<'_>, args: &[&[hir::Expr<'_>]], arith: &str) {
+pub fn lint(cx: &LateContext<'_>, expr: &hir::Expr<'_>, args: &[&[hir::Expr<'_>]], arith: &str) {
     let unwrap_arg = &args[0][1];
     let arith_lhs = &args[1][0];
     let arith_rhs = &args[1][1];
 
-    let ty = cx.tables.expr_ty(arith_lhs);
+    let ty = cx.typeck_results().expr_ty(arith_lhs);
     if !ty.is_integral() {
         return;
     }
@@ -57,7 +57,7 @@ pub fn lint(cx: &LateContext<'_, '_>, expr: &hir::Expr<'_>, args: &[&[hir::Expr<
         );
     } else {
         match (mm, arith) {
-            (MinMax::Max, "add") | (MinMax::Max, "mul") | (MinMax::Min, "sub") => (),
+            (MinMax::Max, "add" | "mul") | (MinMax::Min, "sub") => (),
             _ => return,
         }
 
@@ -85,13 +85,12 @@ enum MinMax {
     Max,
 }
 
-fn is_min_or_max<'tcx>(cx: &LateContext<'_, 'tcx>, expr: &hir::Expr<'_>) -> Option<MinMax> {
+fn is_min_or_max<'tcx>(cx: &LateContext<'tcx>, expr: &hir::Expr<'_>) -> Option<MinMax> {
     // `T::max_value()` `T::min_value()` inherent methods
     if_chain! {
         if let hir::ExprKind::Call(func, args) = &expr.kind;
         if args.is_empty();
-        if let hir::ExprKind::Path(path) = &func.kind;
-        if let hir::QPath::TypeRelative(_, segment) = path;
+        if let hir::ExprKind::Path(hir::QPath::TypeRelative(_, segment)) = &func.kind;
         then {
             match &*segment.ident.as_str() {
                 "max_value" => return Some(MinMax::Max),
@@ -101,7 +100,7 @@ fn is_min_or_max<'tcx>(cx: &LateContext<'_, 'tcx>, expr: &hir::Expr<'_>) -> Opti
         }
     }
 
-    let ty = cx.tables.expr_ty(expr);
+    let ty = cx.typeck_results().expr_ty(expr);
     let ty_str = ty.to_string();
 
     // `std::T::MAX` `std::T::MIN` constants
@@ -149,7 +148,7 @@ fn is_min_or_max<'tcx>(cx: &LateContext<'_, 'tcx>, expr: &hir::Expr<'_>) -> Opti
     }
 
     if ty.is_signed() {
-        if let hir::ExprKind::Unary(hir::UnOp::UnNeg, val) = &expr.kind {
+        if let hir::ExprKind::Unary(hir::UnOp::Neg, val) = &expr.kind {
             return check_lit(val, true);
         }
     }
@@ -164,7 +163,7 @@ enum Sign {
 }
 
 fn lit_sign(expr: &hir::Expr<'_>) -> Option<Sign> {
-    if let hir::ExprKind::Unary(hir::UnOp::UnNeg, inner) = &expr.kind {
+    if let hir::ExprKind::Unary(hir::UnOp::Neg, inner) = &expr.kind {
         if let hir::ExprKind::Lit(..) = &inner.kind {
             return Some(Sign::Neg);
         }

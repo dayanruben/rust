@@ -7,12 +7,11 @@ LL |
 LL | impl <T: Sync+'static> Foo for (T,) { }
    |                        ^^^ `T` cannot be sent between threads safely
    |
-   = help: within `(T,)`, the trait `std::marker::Send` is not implemented for `T`
    = note: required because it appears within the type `(T,)`
 help: consider further restricting this bound
    |
-LL | impl <T: Sync+'static + std::marker::Send> Foo for (T,) { }
-   |                       ^^^^^^^^^^^^^^^^^^^
+LL | impl <T: Sync+'static + Send> Foo for (T,) { }
+   |                       ^^^^^^
 
 error[E0277]: `T` cannot be shared between threads safely
   --> $DIR/builtin-superkinds-double-superkind.rs:9:16
@@ -23,12 +22,11 @@ LL | trait Foo : Send+Sync { }
 LL | impl <T: Send> Foo for (T,T) { }
    |                ^^^ `T` cannot be shared between threads safely
    |
-   = help: within `(T, T)`, the trait `std::marker::Sync` is not implemented for `T`
    = note: required because it appears within the type `(T, T)`
 help: consider further restricting this bound
    |
-LL | impl <T: Send + std::marker::Sync> Foo for (T,T) { }
-   |               ^^^^^^^^^^^^^^^^^^^
+LL | impl <T: Send + Sync> Foo for (T,T) { }
+   |               ^^^^^^
 
 error: aborting due to 2 previous errors
 

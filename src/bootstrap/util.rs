@@ -14,17 +14,16 @@ use std::time::Instant;
 use build_helper::t;
 
 use crate::builder::Builder;
-use crate::cache::Interned;
-use crate::config::Config;
+use crate::config::{Config, TargetSelection};
 
 /// Returns the `name` as the filename of a static library for `target`.
-pub fn staticlib(name: &str, target: &str) -> String {
+pub fn staticlib(name: &str, target: TargetSelection) -> String {
     if target.contains("windows") { format!("{}.lib", name) } else { format!("lib{}.a", name) }
 }
 
 /// Given an executable called `name`, return the filename for the
 /// executable for a particular target.
-pub fn exe(name: &str, target: &str) -> String {
+pub fn exe(name: &str, target: TargetSelection) -> String {
     if target.contains("windows") { format!("{}.exe", name) } else { name.to_string() }
 }
 
@@ -33,9 +32,15 @@ pub fn is_dylib(name: &str) -> bool {
     name.ends_with(".dylib") || name.ends_with(".so") || name.ends_with(".dll")
 }
 
+/// Returns `true` if the file name given looks like a debug info file
+pub fn is_debug_info(name: &str) -> bool {
+    // FIXME: consider split debug info on other platforms (e.g., Linux, macOS)
+    name.ends_with(".pdb")
+}
+
 /// Returns the corresponding relative library directory that the compiler's
 /// dylibs will be found in.
-pub fn libdir(target: &str) -> &'static str {
+pub fn libdir(target: TargetSelection) -> &'static str {
     if target.contains("windows") { "bin" } else { "lib" }
 }
 
@@ -123,7 +128,7 @@ impl Drop for TimeIt {
     fn drop(&mut self) {
         let time = self.1.elapsed();
         if !self.0 {
-            println!("\tfinished in {}.{:03}", time.as_secs(), time.subsec_millis());
+            println!("\tfinished in {}.{:03} seconds", time.as_secs(), time.subsec_millis());
         }
     }
 }
@@ -294,7 +299,7 @@ pub fn forcing_clang_based_tests() -> bool {
     }
 }
 
-pub fn use_host_linker(target: &Interned<String>) -> bool {
+pub fn use_host_linker(target: TargetSelection) -> bool {
     // FIXME: this information should be gotten by checking the linker flavor
     // of the rustc target
     !(target.contains("emscripten")

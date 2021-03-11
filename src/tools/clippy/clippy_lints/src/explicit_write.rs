@@ -5,6 +5,7 @@ use rustc_errors::Applicability;
 use rustc_hir::{BorrowKind, Expr, ExprKind};
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_session::{declare_lint_pass, declare_tool_lint};
+use rustc_span::sym;
 
 declare_clippy_lint! {
     /// **What it does:** Checks for usage of `write!()` / `writeln()!` which can be
@@ -28,15 +29,15 @@ declare_clippy_lint! {
 
 declare_lint_pass!(ExplicitWrite => [EXPLICIT_WRITE]);
 
-impl<'a, 'tcx> LateLintPass<'a, 'tcx> for ExplicitWrite {
-    fn check_expr(&mut self, cx: &LateContext<'a, 'tcx>, expr: &'tcx Expr<'_>) {
+impl<'tcx> LateLintPass<'tcx> for ExplicitWrite {
+    fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'_>) {
         if_chain! {
             // match call to unwrap
-            if let ExprKind::MethodCall(ref unwrap_fun, _, ref unwrap_args) = expr.kind;
-            if unwrap_fun.ident.name == sym!(unwrap);
+            if let ExprKind::MethodCall(ref unwrap_fun, _, ref unwrap_args, _) = expr.kind;
+            if unwrap_fun.ident.name == sym::unwrap;
             // match call to write_fmt
             if !unwrap_args.is_empty();
-            if let ExprKind::MethodCall(ref write_fun, _, write_args) =
+            if let ExprKind::MethodCall(ref write_fun, _, write_args, _) =
                 unwrap_args[0].kind;
             if write_fun.ident.name == sym!(write_fmt);
             // match calls to std::io::stdout() / std::io::stderr ()

@@ -8,11 +8,8 @@ trait Tr {
     type B = Box<Self::A>;
 }
 
-// ...but is an error in any impl that doesn't override at least one of the defaults
 impl Tr for () {}
-//~^ ERROR overflow evaluating the requirement
 
-// As soon as at least one is redefined, it works:
 impl Tr for u8 {
     type A = u8;
 }
@@ -26,18 +23,15 @@ impl Tr for u32 {
     type B = u8;
 }
 
-// ...but only if this actually breaks the cycle
 impl Tr for bool {
-//~^ ERROR overflow evaluating the requirement
     type A = Box<Self::B>;
-    //~^ ERROR overflow evaluating the requirement
+    //~^ ERROR overflow evaluating the requirement `<bool as Tr>::B == _`
 }
 // (the error is shown twice for some reason)
 
 impl Tr for usize {
-//~^ ERROR overflow evaluating the requirement
     type B = &'static Self::A;
-    //~^ ERROR overflow evaluating the requirement
+    //~^ ERROR overflow evaluating the requirement `<usize as Tr>::A == _`
 }
 
 fn main() {

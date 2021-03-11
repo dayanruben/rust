@@ -12,9 +12,6 @@ use build_helper::output;
 
 use crate::Build;
 
-// The version number
-pub const CFG_RELEASE_NUM: &str = "1.45.0";
-
 pub struct GitInfo {
     inner: Option<Info>,
 }
@@ -77,9 +74,9 @@ impl GitInfo {
         if let Some(ref inner) = self.inner {
             version.push_str(" (");
             version.push_str(&inner.short_sha);
-            version.push_str(" ");
+            version.push(' ');
             version.push_str(&inner.commit_date);
-            version.push_str(")");
+            version.push(')');
         }
         version
     }

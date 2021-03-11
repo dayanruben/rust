@@ -3,11 +3,10 @@
 
 use crate::consts::{miri_to_const, Constant};
 use crate::utils::span_lint;
-use rustc_ast::ast::{IntTy, UintTy};
 use rustc_hir::{Item, ItemKind};
 use rustc_lint::{LateContext, LateLintPass};
-use rustc_middle::ty;
 use rustc_middle::ty::util::IntTypeExt;
+use rustc_middle::ty::{self, IntTy, UintTy};
 use rustc_session::{declare_lint_pass, declare_tool_lint};
 use std::convert::TryFrom;
 
@@ -36,9 +35,9 @@ declare_clippy_lint! {
 
 declare_lint_pass!(UnportableVariant => [ENUM_CLIKE_UNPORTABLE_VARIANT]);
 
-impl<'a, 'tcx> LateLintPass<'a, 'tcx> for UnportableVariant {
+impl<'tcx> LateLintPass<'tcx> for UnportableVariant {
     #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap, clippy::cast_sign_loss)]
-    fn check_item(&mut self, cx: &LateContext<'a, 'tcx>, item: &'tcx Item<'_>) {
+    fn check_item(&mut self, cx: &LateContext<'tcx>, item: &'tcx Item<'_>) {
         if cx.tcx.data_layout.pointer_size.bits() != 64 {
             return;
         }
@@ -53,26 +52,26 @@ impl<'a, 'tcx> LateLintPass<'a, 'tcx> for UnportableVariant {
                         .ok()
                         .map(|val| rustc_middle::ty::Const::from_value(cx.tcx, val, ty));
                     if let Some(Constant::Int(val)) = constant.and_then(miri_to_const) {
-                        if let ty::Adt(adt, _) = ty.kind {
+                        if let ty::Adt(adt, _) = ty.kind() {
                             if adt.is_enum() {
                                 ty = adt.repr.discr_type().to_ty(cx.tcx);
                             }
                         }
-                        match ty.kind {
+                        match ty.kind() {
                             ty::Int(IntTy::Isize) => {
                                 let val = ((val as i128) << 64) >> 64;
                                 if i32::try_from(val).is_ok() {
                                     continue;
                                 }
                             },
-                            ty::Uint(UintTy::Usize) if val > u128::from(u32::max_value()) => {},
+                            ty::Uint(UintTy::Usize) if val > u128::from(u32::MAX) => {},
                             _ => continue,
                         }
                         span_lint(
                             cx,
                             ENUM_CLIKE_UNPORTABLE_VARIANT,
                             var.span,
-                            "Clike enum variant discriminant is not portable to 32-bit targets",
+                            "C-like enum variant discriminant is not portable to 32-bit targets",
                         );
                     };
                 }

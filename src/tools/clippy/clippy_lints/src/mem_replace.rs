@@ -1,13 +1,14 @@
 use crate::utils::{
-    in_macro, match_def_path, match_qpath, paths, snippet, snippet_with_applicability, span_lint_and_help,
+    in_macro, match_def_path, match_qpath, meets_msrv, paths, snippet, snippet_with_applicability, span_lint_and_help,
     span_lint_and_sugg, span_lint_and_then,
 };
 use if_chain::if_chain;
 use rustc_errors::Applicability;
 use rustc_hir::{BorrowKind, Expr, ExprKind, Mutability, QPath};
-use rustc_lint::{LateContext, LateLintPass};
+use rustc_lint::{LateContext, LateLintPass, LintContext};
 use rustc_middle::lint::in_external_macro;
-use rustc_session::{declare_lint_pass, declare_tool_lint};
+use rustc_semver::RustcVersion;
+use rustc_session::{declare_tool_lint, impl_lint_pass};
 use rustc_span::source_map::Span;
 use rustc_span::symbol::sym;
 
@@ -94,10 +95,10 @@ declare_clippy_lint! {
     "replacing a value of type `T` with `T::default()` instead of using `std::mem::take`"
 }
 
-declare_lint_pass!(MemReplace =>
+impl_lint_pass!(MemReplace =>
     [MEM_REPLACE_OPTION_WITH_NONE, MEM_REPLACE_WITH_UNINIT, MEM_REPLACE_WITH_DEFAULT]);
 
-fn check_replace_option_with_none(cx: &LateContext<'_, '_>, src: &Expr<'_>, dest: &Expr<'_>, expr_span: Span) {
+fn check_replace_option_with_none(cx: &LateContext<'_>, src: &Expr<'_>, dest: &Expr<'_>, expr_span: Span) {
     if let ExprKind::Path(ref replacement_qpath) = src.kind {
         // Check that second argument is `Option::None`
         if match_qpath(replacement_qpath, &paths::OPTION_NONE) {
@@ -135,44 +136,70 @@ fn check_replace_option_with_none(cx: &LateContext<'_, '_>, src: &Expr<'_>, dest
     }
 }
 
-fn check_replace_with_uninit(cx: &LateContext<'_, '_>, src: &Expr<'_>, expr_span: Span) {
-    if let ExprKind::Call(ref repl_func, ref repl_args) = src.kind {
-        if_chain! {
-            if repl_args.is_empty();
-            if let ExprKind::Path(ref repl_func_qpath) = repl_func.kind;
-            if let Some(repl_def_id) = cx.tables.qpath_res(repl_func_qpath, repl_func.hir_id).opt_def_id();
-            then {
-                if cx.tcx.is_diagnostic_item(sym::mem_uninitialized, repl_def_id) {
-                    span_lint_and_help(
-                        cx,
-                        MEM_REPLACE_WITH_UNINIT,
-                        expr_span,
-                        "replacing with `mem::uninitialized()`",
-                        None,
-                        "consider using the `take_mut` crate instead",
-                    );
-                } else if cx.tcx.is_diagnostic_item(sym::mem_zeroed, repl_def_id) &&
-                        !cx.tables.expr_ty(src).is_primitive() {
-                    span_lint_and_help(
-                        cx,
-                        MEM_REPLACE_WITH_UNINIT,
-                        expr_span,
-                        "replacing with `mem::zeroed()`",
-                        None,
-                        "consider using a default value or the `take_mut` crate instead",
-                    );
-                }
+fn check_replace_with_uninit(cx: &LateContext<'_>, src: &Expr<'_>, dest: &Expr<'_>, expr_span: Span) {
+    if_chain! {
+        // check if replacement is mem::MaybeUninit::uninit().assume_init()
+        if let Some(method_def_id) = cx.typeck_results().type_dependent_def_id(src.hir_id);
+        if cx.tcx.is_diagnostic_item(sym::assume_init, method_def_id);
+        then {
+            let mut applicability = Applicability::MachineApplicable;
+            span_lint_and_sugg(
+                cx,
+                MEM_REPLACE_WITH_UNINIT,
+                expr_span,
+                "replacing with `mem::MaybeUninit::uninit().assume_init()`",
+                "consider using",
+                format!(
+                    "std::ptr::read({})",
+                    snippet_with_applicability(cx, dest.span, "", &mut applicability)
+                ),
+                applicability,
+            );
+            return;
+        }
+    }
+
+    if_chain! {
+        if let ExprKind::Call(ref repl_func, ref repl_args) = src.kind;
+        if repl_args.is_empty();
+        if let ExprKind::Path(ref repl_func_qpath) = repl_func.kind;
+        if let Some(repl_def_id) = cx.qpath_res(repl_func_qpath, repl_func.hir_id).opt_def_id();
+        then {
+            if cx.tcx.is_diagnostic_item(sym::mem_uninitialized, repl_def_id) {
+                let mut applicability = Applicability::MachineApplicable;
+                span_lint_and_sugg(
+                    cx,
+                    MEM_REPLACE_WITH_UNINIT,
+                    expr_span,
+                    "replacing with `mem::uninitialized()`",
+                    "consider using",
+                    format!(
+                        "std::ptr::read({})",
+                        snippet_with_applicability(cx, dest.span, "", &mut applicability)
+                    ),
+                    applicability,
+                );
+            } else if cx.tcx.is_diagnostic_item(sym::mem_zeroed, repl_def_id) &&
+                    !cx.typeck_results().expr_ty(src).is_primitive() {
+                span_lint_and_help(
+                    cx,
+                    MEM_REPLACE_WITH_UNINIT,
+                    expr_span,
+                    "replacing with `mem::zeroed()`",
+                    None,
+                    "consider using a default value or the `take_mut` crate instead",
+                );
             }
         }
     }
 }
 
-fn check_replace_with_default(cx: &LateContext<'_, '_>, src: &Expr<'_>, dest: &Expr<'_>, expr_span: Span) {
+fn check_replace_with_default(cx: &LateContext<'_>, src: &Expr<'_>, dest: &Expr<'_>, expr_span: Span) {
     if let ExprKind::Call(ref repl_func, _) = src.kind {
         if_chain! {
             if !in_external_macro(cx.tcx.sess, expr_span);
             if let ExprKind::Path(ref repl_func_qpath) = repl_func.kind;
-            if let Some(repl_def_id) = cx.tables.qpath_res(repl_func_qpath, repl_func.hir_id).opt_def_id();
+            if let Some(repl_def_id) = cx.qpath_res(repl_func_qpath, repl_func.hir_id).opt_def_id();
             if match_def_path(cx, repl_def_id, &paths::DEFAULT_TRAIT_METHOD);
             then {
                 span_lint_and_then(
@@ -198,20 +225,36 @@ fn check_replace_with_default(cx: &LateContext<'_, '_>, src: &Expr<'_>, dest: &E
     }
 }
 
-impl<'a, 'tcx> LateLintPass<'a, 'tcx> for MemReplace {
-    fn check_expr(&mut self, cx: &LateContext<'a, 'tcx>, expr: &'tcx Expr<'_>) {
+const MEM_REPLACE_WITH_DEFAULT_MSRV: RustcVersion = RustcVersion::new(1, 40, 0);
+
+pub struct MemReplace {
+    msrv: Option<RustcVersion>,
+}
+
+impl MemReplace {
+    #[must_use]
+    pub fn new(msrv: Option<RustcVersion>) -> Self {
+        Self { msrv }
+    }
+}
+
+impl<'tcx> LateLintPass<'tcx> for MemReplace {
+    fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'_>) {
         if_chain! {
             // Check that `expr` is a call to `mem::replace()`
             if let ExprKind::Call(ref func, ref func_args) = expr.kind;
             if let ExprKind::Path(ref func_qpath) = func.kind;
-            if let Some(def_id) = cx.tables.qpath_res(func_qpath, func.hir_id).opt_def_id();
+            if let Some(def_id) = cx.qpath_res(func_qpath, func.hir_id).opt_def_id();
             if match_def_path(cx, def_id, &paths::MEM_REPLACE);
             if let [dest, src] = &**func_args;
             then {
                 check_replace_option_with_none(cx, src, dest, expr.span);
-                check_replace_with_uninit(cx, src, expr.span);
-                check_replace_with_default(cx, src, dest, expr.span);
+                check_replace_with_uninit(cx, src, dest, expr.span);
+                if meets_msrv(self.msrv.as_ref(), &MEM_REPLACE_WITH_DEFAULT_MSRV) {
+                    check_replace_with_default(cx, src, dest, expr.span);
+                }
             }
         }
     }
+    extract_msrv_attr!(LateContext);
 }

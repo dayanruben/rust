@@ -1,6 +1,6 @@
 // run-pass
-
-#![feature(track_caller)]
+// revisions: default mir-opt
+//[mir-opt] compile-flags: -Zmir-opt-level=4
 
 fn ptr_call(f: fn()) {
     f();

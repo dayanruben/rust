@@ -6,7 +6,8 @@ struct Test;
 impl Test {
     #[allow(dead_code)]
     #[allow(unused_variables)]
-    pub extern fn test(val: &str) {
+    #[allow(improper_ctypes_definitions)]
+    pub extern "C" fn test(val: &str) {
 
     }
 }

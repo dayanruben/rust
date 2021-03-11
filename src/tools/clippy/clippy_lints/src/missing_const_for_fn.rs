@@ -1,13 +1,18 @@
-use crate::utils::{fn_has_unsatisfiable_preds, has_drop, is_entrypoint_fn, span_lint, trait_ref_of_method};
+use crate::utils::qualify_min_const_fn::is_min_const_fn;
+use crate::utils::{
+    fn_has_unsatisfiable_preds, has_drop, is_entrypoint_fn, meets_msrv, span_lint, trait_ref_of_method,
+};
 use rustc_hir as hir;
 use rustc_hir::intravisit::FnKind;
 use rustc_hir::{Body, Constness, FnDecl, GenericParamKind, HirId};
-use rustc_lint::{LateContext, LateLintPass};
+use rustc_lint::{LateContext, LateLintPass, LintContext};
 use rustc_middle::lint::in_external_macro;
-use rustc_mir::transform::qualify_min_const_fn::is_min_const_fn;
-use rustc_session::{declare_lint_pass, declare_tool_lint};
+use rustc_semver::RustcVersion;
+use rustc_session::{declare_tool_lint, impl_lint_pass};
 use rustc_span::Span;
 use rustc_typeck::hir_ty_to_ty;
+
+const MISSING_CONST_FOR_FN_MSRV: RustcVersion = RustcVersion::new(1, 37, 0);
 
 declare_clippy_lint! {
     /// **What it does:**
@@ -69,18 +74,33 @@ declare_clippy_lint! {
     "Lint functions definitions that could be made `const fn`"
 }
 
-declare_lint_pass!(MissingConstForFn => [MISSING_CONST_FOR_FN]);
+impl_lint_pass!(MissingConstForFn => [MISSING_CONST_FOR_FN]);
 
-impl<'a, 'tcx> LateLintPass<'a, 'tcx> for MissingConstForFn {
+pub struct MissingConstForFn {
+    msrv: Option<RustcVersion>,
+}
+
+impl MissingConstForFn {
+    #[must_use]
+    pub fn new(msrv: Option<RustcVersion>) -> Self {
+        Self { msrv }
+    }
+}
+
+impl<'tcx> LateLintPass<'tcx> for MissingConstForFn {
     fn check_fn(
         &mut self,
-        cx: &LateContext<'_, '_>,
+        cx: &LateContext<'_>,
         kind: FnKind<'_>,
         _: &FnDecl<'_>,
         _: &Body<'_>,
         span: Span,
         hir_id: HirId,
     ) {
+        if !meets_msrv(self.msrv.as_ref(), &MISSING_CONST_FOR_FN_MSRV) {
+            return;
+        }
+
         let def_id = cx.tcx.hir().local_def_id(hir_id);
 
         if in_external_macro(cx.tcx.sess, span) || is_entrypoint_fn(cx, def_id.to_def_id()) {
@@ -99,7 +119,7 @@ impl<'a, 'tcx> LateLintPass<'a, 'tcx> for MissingConstForFn {
                 let has_const_generic_params = generics
                     .params
                     .iter()
-                    .any(|param| matches!(param.kind, GenericParamKind::Const{ .. }));
+                    .any(|param| matches!(param.kind, GenericParamKind::Const { .. }));
 
                 if already_const(header) || has_const_generic_params {
                     return;
@@ -113,12 +133,12 @@ impl<'a, 'tcx> LateLintPass<'a, 'tcx> for MissingConstForFn {
                     return;
                 }
             },
-            _ => return,
+            FnKind::Closure => return,
         }
 
         let mir = cx.tcx.optimized_mir(def_id);
 
-        if let Err((span, err)) = is_min_const_fn(cx.tcx, def_id.to_def_id(), &mir) {
+        if let Err((span, err)) = is_min_const_fn(cx.tcx, &mir) {
             if rustc_mir::const_eval::is_min_const_fn(cx.tcx, def_id.to_def_id()) {
                 cx.tcx.sess.span_err(span, &err);
             }
@@ -126,12 +146,13 @@ impl<'a, 'tcx> LateLintPass<'a, 'tcx> for MissingConstForFn {
             span_lint(cx, MISSING_CONST_FOR_FN, span, "this could be a `const fn`");
         }
     }
+    extract_msrv_attr!(LateContext);
 }
 
 /// Returns true if any of the method parameters is a type that implements `Drop`. The method
 /// can't be made const then, because `drop` can't be const-evaluated.
-fn method_accepts_dropable(cx: &LateContext<'_, '_>, param_tys: &[hir::Ty<'_>]) -> bool {
-    // If any of the params are dropable, return true
+fn method_accepts_dropable(cx: &LateContext<'_>, param_tys: &[hir::Ty<'_>]) -> bool {
+    // If any of the params are droppable, return true
     param_tys.iter().any(|hir_ty| {
         let ty_ty = hir_ty_to_ty(cx.tcx, hir_ty);
         has_drop(cx, ty_ty)

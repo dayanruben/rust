@@ -52,8 +52,8 @@ declare_clippy_lint! {
 
 declare_lint_pass!(SuspiciousImpl => [SUSPICIOUS_ARITHMETIC_IMPL, SUSPICIOUS_OP_ASSIGN_IMPL]);
 
-impl<'a, 'tcx> LateLintPass<'a, 'tcx> for SuspiciousImpl {
-    fn check_expr(&mut self, cx: &LateContext<'a, 'tcx>, expr: &'tcx hir::Expr<'_>) {
+impl<'tcx> LateLintPass<'tcx> for SuspiciousImpl {
+    fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx hir::Expr<'_>) {
         if let hir::ExprKind::Binary(binop, _, _) | hir::ExprKind::AssignOp(binop, ..) = expr.kind {
             match binop.node {
                 hir::BinOpKind::Eq
@@ -64,46 +64,49 @@ impl<'a, 'tcx> LateLintPass<'a, 'tcx> for SuspiciousImpl {
                 | hir::BinOpKind::Gt => return,
                 _ => {},
             }
-            // Check if the binary expression is part of another bi/unary expression
-            // or operator assignment as a child node
-            let mut parent_expr = cx.tcx.hir().get_parent_node(expr.hir_id);
-            while parent_expr != hir::CRATE_HIR_ID {
-                if let hir::Node::Expr(e) = cx.tcx.hir().get(parent_expr) {
-                    match e.kind {
-                        hir::ExprKind::Binary(..)
-                        | hir::ExprKind::Unary(hir::UnOp::UnNot, _)
-                        | hir::ExprKind::Unary(hir::UnOp::UnNeg, _)
-                        | hir::ExprKind::AssignOp(..) => return,
-                        _ => {},
+
+            // Check for more than one binary operation in the implemented function
+            // Linting when multiple operations are involved can result in false positives
+            if_chain! {
+                let parent_fn = cx.tcx.hir().get_parent_item(expr.hir_id);
+                if let hir::Node::ImplItem(impl_item) = cx.tcx.hir().get(parent_fn);
+                if let hir::ImplItemKind::Fn(_, body_id) = impl_item.kind;
+                let body = cx.tcx.hir().body(body_id);
+                let mut visitor = BinaryExprVisitor { nb_binops: 0 };
+
+                then {
+                    walk_expr(&mut visitor, &body.value);
+                    if visitor.nb_binops > 1 {
+                        return;
                     }
                 }
-                parent_expr = cx.tcx.hir().get_parent_node(parent_expr);
-            }
-            // as a parent node
-            let mut visitor = BinaryExprVisitor { in_binary_expr: false };
-            walk_expr(&mut visitor, expr);
-
-            if visitor.in_binary_expr {
-                return;
             }
 
             if let Some(impl_trait) = check_binop(
                 cx,
                 expr,
                 binop.node,
-                &["Add", "Sub", "Mul", "Div"],
+                &[
+                    "Add", "Sub", "Mul", "Div", "Rem", "BitAnd", "BitOr", "BitXor", "Shl", "Shr",
+                ],
                 &[
                     hir::BinOpKind::Add,
                     hir::BinOpKind::Sub,
                     hir::BinOpKind::Mul,
                     hir::BinOpKind::Div,
+                    hir::BinOpKind::Rem,
+                    hir::BinOpKind::BitAnd,
+                    hir::BinOpKind::BitOr,
+                    hir::BinOpKind::BitXor,
+                    hir::BinOpKind::Shl,
+                    hir::BinOpKind::Shr,
                 ],
             ) {
                 span_lint(
                     cx,
                     SUSPICIOUS_ARITHMETIC_IMPL,
                     binop.span,
-                    &format!(r#"Suspicious use of binary operator in `{}` impl"#, impl_trait),
+                    &format!("suspicious use of binary operator in `{}` impl", impl_trait),
                 );
             }
 
@@ -140,7 +143,7 @@ impl<'a, 'tcx> LateLintPass<'a, 'tcx> for SuspiciousImpl {
                     cx,
                     SUSPICIOUS_OP_ASSIGN_IMPL,
                     binop.span,
-                    &format!(r#"Suspicious use of binary operator in `{}` impl"#, impl_trait),
+                    &format!("suspicious use of binary operator in `{}` impl", impl_trait),
                 );
             }
         }
@@ -148,7 +151,7 @@ impl<'a, 'tcx> LateLintPass<'a, 'tcx> for SuspiciousImpl {
 }
 
 fn check_binop(
-    cx: &LateContext<'_, '_>,
+    cx: &LateContext<'_>,
     expr: &hir::Expr<'_>,
     binop: hir::BinOpKind,
     traits: &[&'static str],
@@ -182,23 +185,23 @@ fn check_binop(
 }
 
 struct BinaryExprVisitor {
-    in_binary_expr: bool,
+    nb_binops: u32,
 }
 
-impl<'a, 'tcx> Visitor<'tcx> for BinaryExprVisitor {
+impl<'tcx> Visitor<'tcx> for BinaryExprVisitor {
     type Map = Map<'tcx>;
 
     fn visit_expr(&mut self, expr: &'tcx hir::Expr<'_>) {
         match expr.kind {
             hir::ExprKind::Binary(..)
-            | hir::ExprKind::Unary(hir::UnOp::UnNot, _)
-            | hir::ExprKind::Unary(hir::UnOp::UnNeg, _)
-            | hir::ExprKind::AssignOp(..) => self.in_binary_expr = true,
+            | hir::ExprKind::Unary(hir::UnOp::Not | hir::UnOp::Neg, _)
+            | hir::ExprKind::AssignOp(..) => self.nb_binops += 1,
             _ => {},
         }
 
         walk_expr(self, expr);
     }
+
     fn nested_visit_map(&mut self) -> NestedVisitorMap<Self::Map> {
         NestedVisitorMap::None
     }

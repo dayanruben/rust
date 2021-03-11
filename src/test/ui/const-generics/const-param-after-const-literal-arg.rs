@@ -1,7 +1,8 @@
 // check-pass
+// revisions: full min
 
-#![allow(incomplete_features)]
-#![feature(const_generics)]
+#![cfg_attr(full, feature(const_generics))]
+#![cfg_attr(full, allow(incomplete_features))]
 
 struct Foo<const A: usize, const B: usize>;
 

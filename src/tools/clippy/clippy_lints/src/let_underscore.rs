@@ -35,7 +35,7 @@ declare_clippy_lint! {
     /// **What it does:** Checks for `let _ = sync_lock`
     ///
     /// **Why is this bad?** This statement immediately drops the lock instead of
-    /// extending it's lifetime to the end of the scope, which is often not intended.
+    /// extending its lifetime to the end of the scope, which is often not intended.
     /// To extend lock lifetime to the end of the scope, use an underscore-prefixed
     /// name instead (i.e. _lock). If you want to explicitly drop the lock,
     /// `std::mem::drop` conveys your intention better and is less error-prone.
@@ -58,7 +58,48 @@ declare_clippy_lint! {
     "non-binding let on a synchronization lock"
 }
 
-declare_lint_pass!(LetUnderscore => [LET_UNDERSCORE_MUST_USE, LET_UNDERSCORE_LOCK]);
+declare_clippy_lint! {
+    /// **What it does:** Checks for `let _ = <expr>`
+    /// where expr has a type that implements `Drop`
+    ///
+    /// **Why is this bad?** This statement immediately drops the initializer
+    /// expression instead of extending its lifetime to the end of the scope, which
+    /// is often not intended. To extend the expression's lifetime to the end of the
+    /// scope, use an underscore-prefixed name instead (i.e. _var). If you want to
+    /// explicitly drop the expression, `std::mem::drop` conveys your intention
+    /// better and is less error-prone.
+    ///
+    /// **Known problems:** None.
+    ///
+    /// **Example:**
+    ///
+    /// Bad:
+    /// ```rust,ignore
+    /// struct Droppable;
+    /// impl Drop for Droppable {
+    ///     fn drop(&mut self) {}
+    /// }
+    /// {
+    ///     let _ = Droppable;
+    ///     //               ^ dropped here
+    ///     /* more code */
+    /// }
+    /// ```
+    ///
+    /// Good:
+    /// ```rust,ignore
+    /// {
+    ///     let _droppable = Droppable;
+    ///     /* more code */
+    ///     // dropped at end of scope
+    /// }
+    /// ```
+    pub LET_UNDERSCORE_DROP,
+    pedantic,
+    "non-binding let on a type that implements `Drop`"
+}
+
+declare_lint_pass!(LetUnderscore => [LET_UNDERSCORE_MUST_USE, LET_UNDERSCORE_LOCK, LET_UNDERSCORE_DROP]);
 
 const SYNC_GUARD_PATHS: [&[&str]; 3] = [
     &paths::MUTEX_GUARD,
@@ -66,8 +107,8 @@ const SYNC_GUARD_PATHS: [&[&str]; 3] = [
     &paths::RWLOCK_WRITE_GUARD,
 ];
 
-impl<'a, 'tcx> LateLintPass<'a, 'tcx> for LetUnderscore {
-    fn check_local(&mut self, cx: &LateContext<'_, '_>, local: &Local<'_>) {
+impl<'tcx> LateLintPass<'tcx> for LetUnderscore {
+    fn check_local(&mut self, cx: &LateContext<'_>, local: &Local<'_>) {
         if in_external_macro(cx.tcx.sess, local.span) {
             return;
         }
@@ -76,7 +117,7 @@ impl<'a, 'tcx> LateLintPass<'a, 'tcx> for LetUnderscore {
             if let PatKind::Wild = local.pat.kind;
             if let Some(ref init) = local.init;
             then {
-                let init_ty = cx.tables.expr_ty(init);
+                let init_ty = cx.typeck_results().expr_ty(init);
                 let contains_sync_guard = init_ty.walk().any(|inner| match inner.unpack() {
                     GenericArgKind::Type(inner_ty) => {
                         SYNC_GUARD_PATHS.iter().any(|path| match_type(cx, inner_ty, path))
@@ -94,7 +135,17 @@ impl<'a, 'tcx> LateLintPass<'a, 'tcx> for LetUnderscore {
                         "consider using an underscore-prefixed named \
                             binding or dropping explicitly with `std::mem::drop`"
                     )
-                } else if is_must_use_ty(cx, cx.tables.expr_ty(init)) {
+                } else if init_ty.needs_drop(cx.tcx, cx.param_env) {
+                    span_lint_and_help(
+                        cx,
+                        LET_UNDERSCORE_DROP,
+                        local.span,
+                        "non-binding `let` on a type that implements `Drop`",
+                        None,
+                        "consider using an underscore-prefixed named \
+                            binding or dropping explicitly with `std::mem::drop`"
+                    )
+                } else if is_must_use_ty(cx, cx.typeck_results().expr_ty(init)) {
                     span_lint_and_help(
                         cx,
                         LET_UNDERSCORE_MUST_USE,

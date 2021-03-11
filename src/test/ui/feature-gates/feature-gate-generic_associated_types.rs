@@ -3,11 +3,9 @@ use std::ops::Deref;
 trait PointerFamily<U> {
     type Pointer<T>: Deref<Target = T>;
     //~^ ERROR generic associated types are unstable
-    //~| ERROR type-generic associated types are not yet implemented
     type Pointer2<T>: Deref<Target = T> where T: Clone, U: Clone;
     //~^ ERROR generic associated types are unstable
     //~| ERROR where clauses on associated types are unstable
-    //~| ERROR type-generic associated types are not yet implemented
 }
 
 struct Foo;
@@ -17,6 +15,7 @@ impl PointerFamily<u32> for Foo {
     //~^ ERROR generic associated types are unstable
     type Pointer2<U32> = Box<U32>;
     //~^ ERROR generic associated types are unstable
+    //~| ERROR the trait bound `U32: Clone` is not satisfied
 }
 
 trait Bar {

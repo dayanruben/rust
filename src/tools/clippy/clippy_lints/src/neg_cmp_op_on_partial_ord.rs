@@ -45,18 +45,18 @@ declare_clippy_lint! {
 
 declare_lint_pass!(NoNegCompOpForPartialOrd => [NEG_CMP_OP_ON_PARTIAL_ORD]);
 
-impl<'a, 'tcx> LateLintPass<'a, 'tcx> for NoNegCompOpForPartialOrd {
-    fn check_expr(&mut self, cx: &LateContext<'a, 'tcx>, expr: &'tcx Expr<'_>) {
+impl<'tcx> LateLintPass<'tcx> for NoNegCompOpForPartialOrd {
+    fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'_>) {
         if_chain! {
 
             if !in_external_macro(cx.sess(), expr.span);
-            if let ExprKind::Unary(UnOp::UnNot, ref inner) = expr.kind;
+            if let ExprKind::Unary(UnOp::Not, ref inner) = expr.kind;
             if let ExprKind::Binary(ref op, ref left, _) = inner.kind;
             if let BinOpKind::Le | BinOpKind::Ge | BinOpKind::Lt | BinOpKind::Gt = op.node;
 
             then {
 
-                let ty = cx.tables.expr_ty(left);
+                let ty = cx.typeck_results().expr_ty(left);
 
                 let implements_ord = {
                     if let Some(id) = utils::get_trait_def_id(cx, &paths::ORD) {
@@ -79,10 +79,10 @@ impl<'a, 'tcx> LateLintPass<'a, 'tcx> for NoNegCompOpForPartialOrd {
                         cx,
                         NEG_CMP_OP_ON_PARTIAL_ORD,
                         expr.span,
-                        "The use of negated comparison operators on partially ordered \
-                        types produces code that is hard to read and refactor. Please \
+                        "the use of negated comparison operators on partially ordered \
+                        types produces code that is hard to read and refactor, please \
                         consider using the `partial_cmp` method instead, to make it \
-                        clear that the two values could be incomparable."
+                        clear that the two values could be incomparable"
                     )
                 }
             }

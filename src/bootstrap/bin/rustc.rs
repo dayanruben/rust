@@ -16,7 +16,6 @@
 //! never get replaced.
 
 use std::env;
-use std::io;
 use std::path::PathBuf;
 use std::process::Command;
 use std::str::FromStr;
@@ -76,6 +75,10 @@ fn main() {
         cmd.env("RUST_BACKTRACE", "1");
     }
 
+    if let Ok(lint_flags) = env::var("RUSTC_LINT_FLAGS") {
+        cmd.args(lint_flags.split_whitespace());
+    }
+
     if target.is_some() {
         // The stage0 compiler has a special sysroot distinct from what we
         // actually downloaded, so we just always pass the `--sysroot` option,
@@ -101,30 +104,6 @@ fn main() {
         {
             cmd.arg("-C").arg("panic=abort");
         }
-
-        // Set various options from config.toml to configure how we're building
-        // code.
-        let debug_assertions = match env::var("RUSTC_DEBUG_ASSERTIONS") {
-            Ok(s) => {
-                if s == "true" {
-                    "y"
-                } else {
-                    "n"
-                }
-            }
-            Err(..) => "n",
-        };
-
-        // The compiler builtins are pretty sensitive to symbols referenced in
-        // libcore and such, so we never compile them with debug assertions.
-        //
-        // FIXME(rust-lang/cargo#7253) we should be doing this in `builder.rs`
-        // with env vars instead of doing it here in this script.
-        if crate_name == Some("compiler_builtins") {
-            cmd.arg("-C").arg("debug-assertions=no");
-        } else {
-            cmd.arg("-C").arg(format!("debug-assertions={}", debug_assertions));
-        }
     } else {
         // FIXME(rust-lang/cargo#5754) we shouldn't be using special env vars
         // here, but rather Cargo should know what flags to pass rustc itself.
@@ -132,6 +111,9 @@ fn main() {
         // Override linker if necessary.
         if let Ok(host_linker) = env::var("RUSTC_HOST_LINKER") {
             cmd.arg(format!("-Clinker={}", host_linker));
+        }
+        if env::var_os("RUSTC_HOST_FUSE_LD_LLD").is_some() {
+            cmd.arg("-Clink-args=-fuse-ld=lld");
         }
 
         if let Ok(s) = env::var("RUSTC_HOST_CRT_STATIC") {
@@ -156,63 +138,145 @@ fn main() {
         cmd.arg("-Z").arg("force-unstable-if-unmarked");
     }
 
+    let is_test = args.iter().any(|a| a == "--test");
     if verbose > 1 {
+        let rust_env_vars =
+            env::vars().filter(|(k, _)| k.starts_with("RUST") || k.starts_with("CARGO"));
+        let prefix = if is_test { "[RUSTC-SHIM] rustc --test" } else { "[RUSTC-SHIM] rustc" };
+        let prefix = match crate_name {
+            Some(crate_name) => format!("{} {}", prefix, crate_name),
+            None => prefix.to_string(),
+        };
+        for (i, (k, v)) in rust_env_vars.enumerate() {
+            eprintln!("{} env[{}]: {:?}={:?}", prefix, i, k, v);
+        }
+        eprintln!("{} working directory: {}", prefix, env::current_dir().unwrap().display());
         eprintln!(
-            "rustc command: {:?}={:?} {:?}",
+            "{} command: {:?}={:?} {:?}",
+            prefix,
             bootstrap::util::dylib_path_var(),
             env::join_paths(&dylib_path).unwrap(),
             cmd,
         );
-        eprintln!("sysroot: {:?}", sysroot);
-        eprintln!("libdir: {:?}", libdir);
+        eprintln!("{} sysroot: {:?}", prefix, sysroot);
+        eprintln!("{} libdir: {:?}", prefix, libdir);
     }
 
-    if let Some(mut on_fail) = on_fail {
-        let e = match cmd.status() {
-            Ok(s) if s.success() => std::process::exit(0),
-            e => e,
-        };
-        println!("\nDid not run successfully: {:?}\n{:?}\n-------------", e, cmd);
-        exec_cmd(&mut on_fail).expect("could not run the backup command");
-        std::process::exit(1);
-    }
+    let start = Instant::now();
+    let status = {
+        let errmsg = format!("\nFailed to run:\n{:?}\n-------------", cmd);
+        cmd.status().expect(&errmsg)
+    };
 
-    if env::var_os("RUSTC_PRINT_STEP_TIMINGS").is_some() {
+    if env::var_os("RUSTC_PRINT_STEP_TIMINGS").is_some()
+        || env::var_os("RUSTC_PRINT_STEP_RUSAGE").is_some()
+    {
         if let Some(crate_name) = crate_name {
-            let start = Instant::now();
-            let status = cmd.status().unwrap_or_else(|_| panic!("\n\n failed to run {:?}", cmd));
             let dur = start.elapsed();
-
-            let is_test = args.iter().any(|a| a == "--test");
+            // If the user requested resource usage data, then
+            // include that in addition to the timing output.
+            let rusage_data =
+                env::var_os("RUSTC_PRINT_STEP_RUSAGE").and_then(|_| format_rusage_data());
             eprintln!(
-                "[RUSTC-TIMING] {} test:{} {}.{:03}",
+                "[RUSTC-TIMING] {} test:{} {}.{:03}{}{}",
                 crate_name,
                 is_test,
                 dur.as_secs(),
-                dur.subsec_millis()
+                dur.subsec_millis(),
+                if rusage_data.is_some() { " " } else { "" },
+                rusage_data.unwrap_or(String::new()),
             );
-
-            match status.code() {
-                Some(i) => std::process::exit(i),
-                None => {
-                    eprintln!("rustc exited with {}", status);
-                    std::process::exit(0xfe);
-                }
-            }
         }
     }
 
-    let code = exec_cmd(&mut cmd).unwrap_or_else(|_| panic!("\n\n failed to run {:?}", cmd));
-    std::process::exit(code);
-}
+    if status.success() {
+        std::process::exit(0);
+        // note: everything below here is unreachable. do not put code that
+        // should run on success, after this block.
+    }
+    if verbose > 0 {
+        println!("\nDid not run successfully: {}\n{:?}\n-------------", status, cmd);
+    }
 
-#[cfg(unix)]
-fn exec_cmd(cmd: &mut Command) -> io::Result<i32> {
-    use std::os::unix::process::CommandExt;
-    Err(cmd.exec())
+    if let Some(mut on_fail) = on_fail {
+        on_fail.status().expect("Could not run the on_fail command");
+    }
+
+    // Preserve the exit code. In case of signal, exit with 0xfe since it's
+    // awkward to preserve this status in a cross-platform way.
+    match status.code() {
+        Some(i) => std::process::exit(i),
+        None => {
+            eprintln!("rustc exited with {}", status);
+            std::process::exit(0xfe);
+        }
+    }
 }
 
 #[cfg(not(unix))]
-fn exec_cmd(cmd: &mut Command) -> io::Result<i32> {
-    cmd.status().map(|status| status.code().unwrap())
+/// getrusage is not available on non-unix platforms. So for now, we do not
+/// bother trying to make a shim for it.
+fn format_rusage_data() -> Option<String> {
+    None
+}
+
+#[cfg(unix)]
+/// Tries to build a string with human readable data for several of the rusage
+/// fields. Note that we are focusing mainly on data that we believe to be
+/// supplied on Linux (the `rusage` struct has other fields in it but they are
+/// currently unsupported by Linux).
+fn format_rusage_data() -> Option<String> {
+    let rusage: libc::rusage = unsafe {
+        let mut recv = std::mem::zeroed();
+        // -1 is RUSAGE_CHILDREN, which means to get the rusage for all children
+        // (and grandchildren, etc) processes that have respectively terminated
+        // and been waited for.
+        let retval = libc::getrusage(-1, &mut recv);
+        if retval != 0 {
+            return None;
+        }
+        recv
+    };
+    // Mac OS X reports the maxrss in bytes, not kb.
+    let divisor = if env::consts::OS == "macos" { 1024 } else { 1 };
+    let maxrss = rusage.ru_maxrss + (divisor - 1) / divisor;
+
+    let mut init_str = format!(
+        "user: {USER_SEC}.{USER_USEC:03} \
+         sys: {SYS_SEC}.{SYS_USEC:03} \
+         max rss (kb): {MAXRSS}",
+        USER_SEC = rusage.ru_utime.tv_sec,
+        USER_USEC = rusage.ru_utime.tv_usec,
+        SYS_SEC = rusage.ru_stime.tv_sec,
+        SYS_USEC = rusage.ru_stime.tv_usec,
+        MAXRSS = maxrss
+    );
+
+    // The remaining rusage stats vary in platform support. So we treat
+    // uniformly zero values in each category as "not worth printing", since it
+    // either means no events of that type occurred, or that the platform
+    // does not support it.
+
+    let minflt = rusage.ru_minflt;
+    let majflt = rusage.ru_majflt;
+    if minflt != 0 || majflt != 0 {
+        init_str.push_str(&format!(" page reclaims: {} page faults: {}", minflt, majflt));
+    }
+
+    let inblock = rusage.ru_inblock;
+    let oublock = rusage.ru_oublock;
+    if inblock != 0 || oublock != 0 {
+        init_str.push_str(&format!(" fs block inputs: {} fs block outputs: {}", inblock, oublock));
+    }
+
+    let nvcsw = rusage.ru_nvcsw;
+    let nivcsw = rusage.ru_nivcsw;
+    if nvcsw != 0 || nivcsw != 0 {
+        init_str.push_str(&format!(
+            " voluntary ctxt switches: {} involuntary ctxt switches: {}",
+            nvcsw, nivcsw
+        ));
+    }
+
+    return Some(init_str);
 }

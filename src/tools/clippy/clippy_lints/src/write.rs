@@ -2,7 +2,10 @@ use std::borrow::Cow;
 use std::ops::Range;
 
 use crate::utils::{snippet_with_applicability, span_lint, span_lint_and_sugg, span_lint_and_then};
-use rustc_ast::ast::{Expr, ExprKind, Item, ItemKind, MacCall, StrLit, StrStyle};
+use if_chain::if_chain;
+use rustc_ast::ast::{
+    Expr, ExprKind, ImplKind, Item, ItemKind, LitKind, MacCall, StrLit, StrStyle,
+};
 use rustc_ast::token;
 use rustc_ast::tokenstream::TokenStream;
 use rustc_errors::Applicability;
@@ -10,8 +13,8 @@ use rustc_lexer::unescape::{self, EscapeError};
 use rustc_lint::{EarlyContext, EarlyLintPass};
 use rustc_parse::parser;
 use rustc_session::{declare_tool_lint, impl_lint_pass};
-use rustc_span::symbol::Symbol;
-use rustc_span::{BytePos, Span};
+use rustc_span::symbol::kw;
+use rustc_span::{sym, BytePos, Span};
 
 declare_clippy_lint! {
     /// **What it does:** This lint warns when you use `println!("")` to
@@ -23,7 +26,11 @@ declare_clippy_lint! {
     ///
     /// **Example:**
     /// ```rust
+    /// // Bad
     /// println!("");
+    ///
+    /// // Good
+    /// println!();
     /// ```
     pub PRINTLN_EMPTY_STRING,
     style,
@@ -32,8 +39,7 @@ declare_clippy_lint! {
 
 declare_clippy_lint! {
     /// **What it does:** This lint warns when you use `print!()` with a format
-    /// string that
-    /// ends in a newline.
+    /// string that ends in a newline.
     ///
     /// **Why is this bad?** You should use `println!()` instead, which appends the
     /// newline.
@@ -71,6 +77,24 @@ declare_clippy_lint! {
     pub PRINT_STDOUT,
     restriction,
     "printing on stdout"
+}
+
+declare_clippy_lint! {
+    /// **What it does:** Checks for printing on *stderr*. The purpose of this lint
+    /// is to catch debugging remnants.
+    ///
+    /// **Why is this bad?** People often print on *stderr* while debugging an
+    /// application and might forget to remove those prints afterward.
+    ///
+    /// **Known problems:** Only catches `eprint!` and `eprintln!` calls.
+    ///
+    /// **Example:**
+    /// ```rust
+    /// eprintln!("Hello world!");
+    /// ```
+    pub PRINT_STDERR,
+    restriction,
+    "printing on stderr"
 }
 
 declare_clippy_lint! {
@@ -125,7 +149,11 @@ declare_clippy_lint! {
     /// ```rust
     /// # use std::fmt::Write;
     /// # let mut buf = String::new();
+    /// // Bad
     /// writeln!(buf, "");
+    ///
+    /// // Good
+    /// writeln!(buf);
     /// ```
     pub WRITELN_EMPTY_STRING,
     style,
@@ -147,7 +175,11 @@ declare_clippy_lint! {
     /// # use std::fmt::Write;
     /// # let mut buf = String::new();
     /// # let name = "World";
+    /// // Bad
     /// write!(buf, "Hello {}!\n", name);
+    ///
+    /// // Good
+    /// writeln!(buf, "Hello {}!", name);
     /// ```
     pub WRITE_WITH_NEWLINE,
     style,
@@ -168,7 +200,11 @@ declare_clippy_lint! {
     /// ```rust
     /// # use std::fmt::Write;
     /// # let mut buf = String::new();
+    /// // Bad
     /// writeln!(buf, "{}", "foo");
+    ///
+    /// // Good
+    /// writeln!(buf, "foo");
     /// ```
     pub WRITE_LITERAL,
     style,
@@ -184,6 +220,7 @@ impl_lint_pass!(Write => [
     PRINT_WITH_NEWLINE,
     PRINTLN_EMPTY_STRING,
     PRINT_STDOUT,
+    PRINT_STDERR,
     USE_DEBUG,
     PRINT_LITERAL,
     WRITE_WITH_NEWLINE,
@@ -193,10 +230,10 @@ impl_lint_pass!(Write => [
 
 impl EarlyLintPass for Write {
     fn check_item(&mut self, _: &EarlyContext<'_>, item: &Item) {
-        if let ItemKind::Impl {
+        if let ItemKind::Impl(box ImplKind {
             of_trait: Some(trait_ref),
             ..
-        } = &item.kind
+        }) = &item.kind
         {
             let trait_name = trait_ref
                 .path
@@ -206,7 +243,7 @@ impl EarlyLintPass for Write {
                 .expect("path has at least one segment")
                 .ident
                 .name;
-            if trait_name == sym!(Debug) {
+            if trait_name == sym::Debug {
                 self.in_debug_impl = true;
             }
         }
@@ -217,45 +254,33 @@ impl EarlyLintPass for Write {
     }
 
     fn check_mac(&mut self, cx: &EarlyContext<'_>, mac: &MacCall) {
-        if mac.path == sym!(println) {
-            span_lint(cx, PRINT_STDOUT, mac.span(), "use of `println!`");
-            if let (Some(fmt_str), _) = self.check_tts(cx, &mac.args.inner_tokens(), false) {
-                if fmt_str.symbol == Symbol::intern("") {
-                    span_lint_and_sugg(
-                        cx,
-                        PRINTLN_EMPTY_STRING,
-                        mac.span(),
-                        "using `println!(\"\")`",
-                        "replace it with",
-                        "println!()".to_string(),
-                        Applicability::MachineApplicable,
-                    );
-                }
+        fn is_build_script(cx: &EarlyContext<'_>) -> bool {
+            // Cargo sets the crate name for build scripts to `build_script_build`
+            cx.sess
+                .opts
+                .crate_name
+                .as_ref()
+                .map_or(false, |crate_name| crate_name == "build_script_build")
+        }
+
+        if mac.path == sym!(print) {
+            if !is_build_script(cx) {
+                span_lint(cx, PRINT_STDOUT, mac.span(), "use of `print!`");
             }
-        } else if mac.path == sym!(print) {
-            span_lint(cx, PRINT_STDOUT, mac.span(), "use of `print!`");
-            if let (Some(fmt_str), _) = self.check_tts(cx, &mac.args.inner_tokens(), false) {
-                if check_newlines(&fmt_str) {
-                    span_lint_and_then(
-                        cx,
-                        PRINT_WITH_NEWLINE,
-                        mac.span(),
-                        "using `print!()` with a format string that ends in a single newline",
-                        |err| {
-                            err.multipart_suggestion(
-                                "use `println!` instead",
-                                vec![
-                                    (mac.path.span, String::from("println")),
-                                    (newline_span(&fmt_str), String::new()),
-                                ],
-                                Applicability::MachineApplicable,
-                            );
-                        },
-                    );
-                }
+            self.lint_print_with_newline(cx, mac);
+        } else if mac.path == sym!(println) {
+            if !is_build_script(cx) {
+                span_lint(cx, PRINT_STDOUT, mac.span(), "use of `println!`");
             }
+            self.lint_println_empty_string(cx, mac);
+        } else if mac.path == sym!(eprint) {
+            span_lint(cx, PRINT_STDERR, mac.span(), "use of `eprint!`");
+            self.lint_print_with_newline(cx, mac);
+        } else if mac.path == sym!(eprintln) {
+            span_lint(cx, PRINT_STDERR, mac.span(), "use of `eprintln!`");
+            self.lint_println_empty_string(cx, mac);
         } else if mac.path == sym!(write) {
-            if let (Some(fmt_str), _) = self.check_tts(cx, &mac.args.inner_tokens(), true) {
+            if let (Some(fmt_str), _) = self.check_tts(cx, mac.args.inner_tokens(), true) {
                 if check_newlines(&fmt_str) {
                     span_lint_and_then(
                         cx,
@@ -276,16 +301,17 @@ impl EarlyLintPass for Write {
                 }
             }
         } else if mac.path == sym!(writeln) {
-            if let (Some(fmt_str), expr) = self.check_tts(cx, &mac.args.inner_tokens(), true) {
-                if fmt_str.symbol == Symbol::intern("") {
+            if let (Some(fmt_str), expr) = self.check_tts(cx, mac.args.inner_tokens(), true) {
+                if fmt_str.symbol == kw::Empty {
                     let mut applicability = Applicability::MachineApplicable;
-                    let suggestion = expr.map_or_else(
-                        move || {
-                            applicability = Applicability::HasPlaceholders;
-                            Cow::Borrowed("v")
-                        },
-                        move |expr| snippet_with_applicability(cx, expr.span, "v", &mut applicability),
-                    );
+                    // FIXME: remove this `#[allow(...)]` once the issue #5822 gets fixed
+                    #[allow(clippy::option_if_let_else)]
+                    let suggestion = if let Some(e) = expr {
+                        snippet_with_applicability(cx, e.span, "v", &mut applicability)
+                    } else {
+                        applicability = Applicability::HasPlaceholders;
+                        Cow::Borrowed("v")
+                    };
 
                     span_lint_and_sugg(
                         cx,
@@ -303,10 +329,14 @@ impl EarlyLintPass for Write {
 }
 
 /// Given a format string that ends in a newline and its span, calculates the span of the
-/// newline.
+/// newline, or the format string itself if the format string consists solely of a newline.
 fn newline_span(fmtstr: &StrLit) -> Span {
     let sp = fmtstr.span;
     let contents = &fmtstr.symbol.as_str();
+
+    if *contents == r"\n" {
+        return sp;
+    }
 
     let newline_sp_hi = sp.hi()
         - match fmtstr.style {
@@ -349,14 +379,13 @@ impl Write {
     fn check_tts<'a>(
         &self,
         cx: &EarlyContext<'a>,
-        tts: &TokenStream,
+        tts: TokenStream,
         is_write: bool,
     ) -> (Option<StrLit>, Option<Expr>) {
-        use fmt_macros::{
-            AlignUnknown, ArgumentImplicitlyIs, ArgumentIs, ArgumentNamed, CountImplied, FormatSpec, ParseMode, Parser,
-            Piece,
+        use rustc_parse_format::{
+            AlignUnknown, ArgumentImplicitlyIs, ArgumentIs, ArgumentNamed, CountImplied,
+            FormatSpec, ParseMode, Parser, Piece,
         };
-        let tts = tts.clone();
 
         let mut parser = parser::Parser::new(&cx.sess.parse_sess, tts, false, None);
         let mut expr: Option<Expr> = None;
@@ -385,7 +414,12 @@ impl Write {
             if let Piece::NextArgument(arg) = piece {
                 if !self.in_debug_impl && arg.format.ty == "?" {
                     // FIXME: modify rustc's fmt string parser to give us the current span
-                    span_lint(cx, USE_DEBUG, parser.prev_token.span, "use of `Debug`-based formatting");
+                    span_lint(
+                        cx,
+                        USE_DEBUG,
+                        parser.prev_token.span,
+                        "use of `Debug`-based formatting",
+                    );
                 }
                 args.push(arg);
             }
@@ -413,7 +447,9 @@ impl Write {
                 return (Some(fmtstr), None);
             };
             match &token_expr.kind {
-                ExprKind::Lit(_) => {
+                ExprKind::Lit(lit)
+                    if !matches!(lit.kind, LitKind::Int(..) | LitKind::Float(..)) =>
+                {
                     let mut all_simple = true;
                     let mut seen = false;
                     for arg in &args {
@@ -423,18 +459,21 @@ impl Write {
                                     all_simple &= arg.format == SIMPLE;
                                     seen = true;
                                 }
-                            },
-                            ArgumentNamed(_) => {},
+                            }
+                            ArgumentNamed(_) => {}
                         }
                     }
                     if all_simple && seen {
                         span_lint(cx, lint, token_expr.span, "literal with an empty format string");
                     }
                     idx += 1;
-                },
+                }
                 ExprKind::Assign(lhs, rhs, _) => {
-                    if let ExprKind::Lit(_) = rhs.kind {
-                        if let ExprKind::Path(_, p) = &lhs.kind {
+                    if_chain! {
+                        if let ExprKind::Lit(ref lit) = rhs.kind;
+                        if !matches!(lit.kind, LitKind::Int(..) | LitKind::Float(..));
+                        if let ExprKind::Path(_, p) = &lhs.kind;
+                        then {
                             let mut all_simple = true;
                             let mut seen = false;
                             for arg in &args {
@@ -453,8 +492,53 @@ impl Write {
                             }
                         }
                     }
-                },
+                }
                 _ => idx += 1,
+            }
+        }
+    }
+
+    fn lint_println_empty_string(&self, cx: &EarlyContext<'_>, mac: &MacCall) {
+        if let (Some(fmt_str), _) = self.check_tts(cx, mac.args.inner_tokens(), false) {
+            if fmt_str.symbol == kw::Empty {
+                let name = mac.path.segments[0].ident.name;
+                span_lint_and_sugg(
+                    cx,
+                    PRINTLN_EMPTY_STRING,
+                    mac.span(),
+                    &format!("using `{}!(\"\")`", name),
+                    "replace it with",
+                    format!("{}!()", name),
+                    Applicability::MachineApplicable,
+                );
+            }
+        }
+    }
+
+    fn lint_print_with_newline(&self, cx: &EarlyContext<'_>, mac: &MacCall) {
+        if let (Some(fmt_str), _) = self.check_tts(cx, mac.args.inner_tokens(), false) {
+            if check_newlines(&fmt_str) {
+                let name = mac.path.segments[0].ident.name;
+                let suggested = format!("{}ln", name);
+                span_lint_and_then(
+                    cx,
+                    PRINT_WITH_NEWLINE,
+                    mac.span(),
+                    &format!(
+                        "using `{}!()` with a format string that ends in a single newline",
+                        name
+                    ),
+                    |err| {
+                        err.multipart_suggestion(
+                            &format!("use `{}!` instead", suggested),
+                            vec![
+                                (mac.path.span, suggested),
+                                (newline_span(&fmt_str), String::new()),
+                            ],
+                            Applicability::MachineApplicable,
+                        );
+                    },
+                );
             }
         }
     }

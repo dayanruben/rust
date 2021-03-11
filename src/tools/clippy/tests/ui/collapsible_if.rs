@@ -149,4 +149,16 @@ fn main() {
             if truth() {}
         }
     }
+
+    // Fix #5962
+    if matches!(true, true) {
+        if matches!(true, true) {}
+    }
+
+    if true {
+        #[cfg(not(teehee))]
+        if true {
+            println!("Hello world!");
+        }
+    }
 }

@@ -1,5 +1,5 @@
 #![deny(missing_docs)]
-#![deny(missing_doc_code_examples)]
+#![deny(rustdoc::missing_doc_code_examples)]
 
 //! crate level doc
 //! ```
@@ -12,16 +12,16 @@
 /// ```
 /// println!("hello");
 /// ```
-fn test() {
+pub fn test() {
 }
 
 #[allow(missing_docs)]
-mod module1 { //~ ERROR
+pub mod module1 { //~ ERROR
 }
 
-#[allow(missing_doc_code_examples)]
+#[allow(rustdoc::missing_doc_code_examples)]
 /// doc
-mod module2 {
+pub mod module2 {
 
   /// doc
   pub fn test() {}
@@ -37,4 +37,48 @@ pub mod module3 {
   /// doc
   //~^ ERROR
   pub fn test() {}
+}
+
+/// Doc, but no code example and it's fine!
+pub const Const: u32 = 0;
+/// Doc, but no code example and it's fine!
+pub static Static: u32 = 0;
+/// Doc, but no code example and it's fine!
+pub type Type = u32;
+
+/// Doc
+//~^ ERROR
+pub struct Struct {
+    /// Doc, but no code example and it's fine!
+    pub field: u32,
+}
+
+/// Doc
+//~^ ERROR
+pub enum Enum {
+    /// Doc, but no code example and it's fine!
+    X,
+}
+
+/// Doc
+//~^ ERROR
+#[repr(C)]
+pub union Union {
+    /// Doc, but no code example and it's fine!
+    a: i32,
+    /// Doc, but no code example and it's fine!
+    b: f32,
+}
+
+
+#[doc(hidden)]
+pub mod foo {
+    pub fn bar() {}
+}
+
+fn babar() {}
+
+
+mod fofoo {
+    pub fn tadam() {}
 }

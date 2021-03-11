@@ -22,7 +22,7 @@ Available options:
 
 ```sh
 --report-time [plain|colored]
-                Show execution time of each test. Awailable values:
+                Show execution time of each test. Available values:
                 plain = do not colorize the execution time (default);
                 colored = colorize output according to the `color`
                 parameter value;
@@ -34,7 +34,7 @@ Available options:
                 Expected format of environment variable is
                 `VARIABLE=WARN_TIME,CRITICAL_TIME`.
                 Not available for --format=terse
---ensure-time 
+--ensure-time
                 Treat excess of the test execution time limit as
                 error.
                 Threshold values for this option can be configured via

@@ -1,10 +1,10 @@
-// ignore-emscripten
+// only-x86_64
 
 fn main() {
     unsafe {
         asm!("");
         //~^ ERROR inline assembly is not stable enough
         llvm_asm!("");
-        //~^ ERROR LLVM-style inline assembly will never be stabilized
+        //~^ ERROR prefer using the new asm! syntax instead
     }
 }

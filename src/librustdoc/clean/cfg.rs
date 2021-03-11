@@ -7,7 +7,7 @@ use std::fmt::{self, Write};
 use std::mem;
 use std::ops;
 
-use rustc_ast::ast::{LitKind, MetaItem, MetaItemKind, NestedMetaItem};
+use rustc_ast::{LitKind, MetaItem, MetaItemKind, NestedMetaItem};
 use rustc_feature::Features;
 use rustc_session::parse::ParseSess;
 use rustc_span::symbol::{sym, Symbol};
@@ -20,7 +20,7 @@ use crate::html::escape::Escape;
 mod tests;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum Cfg {
+crate enum Cfg {
     /// Accepts all configurations.
     True,
     /// Denies all configurations.
@@ -36,9 +36,9 @@ pub enum Cfg {
 }
 
 #[derive(PartialEq, Debug)]
-pub struct InvalidCfgError {
-    pub msg: &'static str,
-    pub span: Span,
+crate struct InvalidCfgError {
+    crate msg: &'static str,
+    crate span: Span,
 }
 
 impl Cfg {
@@ -59,7 +59,7 @@ impl Cfg {
     ///
     /// If the content is not properly formatted, it will return an error indicating what and where
     /// the error is.
-    pub fn parse(cfg: &MetaItem) -> Result<Cfg, InvalidCfgError> {
+    crate fn parse(cfg: &MetaItem) -> Result<Cfg, InvalidCfgError> {
         let name = match cfg.ident() {
             Some(ident) => ident.name,
             None => {
@@ -102,7 +102,7 @@ impl Cfg {
     ///
     /// Equivalent to `attr::cfg_matches`.
     // FIXME: Actually make use of `features`.
-    pub fn matches(&self, parse_sess: &ParseSess, features: Option<&Features>) -> bool {
+    crate fn matches(&self, parse_sess: &ParseSess, features: Option<&Features>) -> bool {
         match *self {
             Cfg::False => false,
             Cfg::True => true,
@@ -135,7 +135,7 @@ impl Cfg {
 
     /// Renders the configuration for human display, as a short HTML description.
     pub(crate) fn render_short_html(&self) -> String {
-        let mut msg = Html(self, true).to_string();
+        let mut msg = Display(self, Format::ShortHtml).to_string();
         if self.should_capitalize_first_letter() {
             if let Some(i) = msg.find(|c: char| c.is_ascii_alphanumeric()) {
                 msg[i..i + 1].make_ascii_uppercase();
@@ -148,11 +148,26 @@ impl Cfg {
     pub(crate) fn render_long_html(&self) -> String {
         let on = if self.should_use_with_in_description() { "with" } else { "on" };
 
-        let mut msg = format!("This is supported {} <strong>{}</strong>", on, Html(self, false));
+        let mut msg = format!(
+            "This is supported {} <strong>{}</strong>",
+            on,
+            Display(self, Format::LongHtml)
+        );
         if self.should_append_only_to_description() {
             msg.push_str(" only");
         }
         msg.push('.');
+        msg
+    }
+
+    /// Renders the configuration for long display, as a long plain text description.
+    pub(crate) fn render_long_plain(&self) -> String {
+        let on = if self.should_use_with_in_description() { "with" } else { "on" };
+
+        let mut msg = format!("This is supported {} {}", on, Display(self, Format::LongPlain));
+        if self.should_append_only_to_description() {
+            msg.push_str(" only");
+        }
         msg
     }
 
@@ -162,10 +177,7 @@ impl Cfg {
             Cfg::Any(ref sub_cfgs) | Cfg::All(ref sub_cfgs) => {
                 sub_cfgs.first().map(Cfg::should_capitalize_first_letter).unwrap_or(false)
             }
-            Cfg::Cfg(name, _) => match &*name.as_str() {
-                "debug_assertions" | "target_endian" => true,
-                _ => false,
-            },
+            Cfg::Cfg(name, _) => name == sym::debug_assertions || name == sym::target_endian,
         }
     }
 
@@ -173,18 +185,44 @@ impl Cfg {
         match *self {
             Cfg::False | Cfg::True => false,
             Cfg::Any(..) | Cfg::All(..) | Cfg::Cfg(..) => true,
-            Cfg::Not(ref child) => match **child {
-                Cfg::Cfg(..) => true,
-                _ => false,
-            },
+            Cfg::Not(box Cfg::Cfg(..)) => true,
+            Cfg::Not(..) => false,
         }
     }
 
     fn should_use_with_in_description(&self) -> bool {
-        match *self {
-            Cfg::Cfg(name, _) if name == sym::target_feature => true,
-            _ => false,
+        matches!(self, Cfg::Cfg(sym::target_feature, _))
+    }
+
+    /// Attempt to simplify this cfg by assuming that `assume` is already known to be true, will
+    /// return `None` if simplification managed to completely eliminate any requirements from this
+    /// `Cfg`.
+    ///
+    /// See `tests::test_simplify_with` for examples.
+    pub(crate) fn simplify_with(&self, assume: &Cfg) -> Option<Cfg> {
+        if self == assume {
+            return None;
         }
+
+        if let Cfg::All(a) = self {
+            let mut sub_cfgs: Vec<Cfg> = if let Cfg::All(b) = assume {
+                a.iter().filter(|a| !b.contains(a)).cloned().collect()
+            } else {
+                a.iter().filter(|&a| a != assume).cloned().collect()
+            };
+            let len = sub_cfgs.len();
+            return match len {
+                0 => None,
+                1 => sub_cfgs.pop(),
+                _ => Some(Cfg::All(sub_cfgs)),
+            };
+        } else if let Cfg::All(b) = assume {
+            if b.contains(self) {
+                return None;
+            }
+        }
+
+        Some(self.clone())
     }
 }
 
@@ -286,9 +324,31 @@ impl ops::BitOr for Cfg {
     }
 }
 
-/// Pretty-print wrapper for a `Cfg`. Also indicates whether the "short-form" rendering should be
-/// used.
-struct Html<'a>(&'a Cfg, bool);
+#[derive(Clone, Copy)]
+enum Format {
+    LongHtml,
+    LongPlain,
+    ShortHtml,
+}
+
+impl Format {
+    fn is_long(self) -> bool {
+        match self {
+            Format::LongHtml | Format::LongPlain => true,
+            Format::ShortHtml => false,
+        }
+    }
+
+    fn is_html(self) -> bool {
+        match self {
+            Format::LongHtml | Format::ShortHtml => true,
+            Format::LongPlain => false,
+        }
+    }
+}
+
+/// Pretty-print wrapper for a `Cfg`. Also indicates what form of rendering should be used.
+struct Display<'a>(&'a Cfg, Format);
 
 fn write_with_opt_paren<T: fmt::Display>(
     fmt: &mut fmt::Formatter<'_>,
@@ -305,7 +365,7 @@ fn write_with_opt_paren<T: fmt::Display>(
     Ok(())
 }
 
-impl<'a> fmt::Display for Html<'a> {
+impl<'a> fmt::Display for Display<'a> {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self.0 {
             Cfg::Not(ref child) => match **child {
@@ -314,31 +374,86 @@ impl<'a> fmt::Display for Html<'a> {
                         if sub_cfgs.iter().all(Cfg::is_simple) { " nor " } else { ", nor " };
                     for (i, sub_cfg) in sub_cfgs.iter().enumerate() {
                         fmt.write_str(if i == 0 { "neither " } else { separator })?;
-                        write_with_opt_paren(fmt, !sub_cfg.is_all(), Html(sub_cfg, self.1))?;
+                        write_with_opt_paren(fmt, !sub_cfg.is_all(), Display(sub_cfg, self.1))?;
                     }
                     Ok(())
                 }
-                ref simple @ Cfg::Cfg(..) => write!(fmt, "non-{}", Html(simple, self.1)),
-                ref c => write!(fmt, "not ({})", Html(c, self.1)),
+                ref simple @ Cfg::Cfg(..) => write!(fmt, "non-{}", Display(simple, self.1)),
+                ref c => write!(fmt, "not ({})", Display(c, self.1)),
             },
 
             Cfg::Any(ref sub_cfgs) => {
                 let separator = if sub_cfgs.iter().all(Cfg::is_simple) { " or " } else { ", or " };
+
+                let short_longhand = self.1.is_long() && {
+                    let all_crate_features = sub_cfgs
+                        .iter()
+                        .all(|sub_cfg| matches!(sub_cfg, Cfg::Cfg(sym::feature, Some(_))));
+                    let all_target_features = sub_cfgs
+                        .iter()
+                        .all(|sub_cfg| matches!(sub_cfg, Cfg::Cfg(sym::target_feature, Some(_))));
+
+                    if all_crate_features {
+                        fmt.write_str("crate features ")?;
+                        true
+                    } else if all_target_features {
+                        fmt.write_str("target features ")?;
+                        true
+                    } else {
+                        false
+                    }
+                };
+
                 for (i, sub_cfg) in sub_cfgs.iter().enumerate() {
                     if i != 0 {
                         fmt.write_str(separator)?;
                     }
-                    write_with_opt_paren(fmt, !sub_cfg.is_all(), Html(sub_cfg, self.1))?;
+                    if let (true, Cfg::Cfg(_, Some(feat))) = (short_longhand, sub_cfg) {
+                        if self.1.is_html() {
+                            write!(fmt, "<code>{}</code>", feat)?;
+                        } else {
+                            write!(fmt, "`{}`", feat)?;
+                        }
+                    } else {
+                        write_with_opt_paren(fmt, !sub_cfg.is_all(), Display(sub_cfg, self.1))?;
+                    }
                 }
                 Ok(())
             }
 
             Cfg::All(ref sub_cfgs) => {
+                let short_longhand = self.1.is_long() && {
+                    let all_crate_features = sub_cfgs
+                        .iter()
+                        .all(|sub_cfg| matches!(sub_cfg, Cfg::Cfg(sym::feature, Some(_))));
+                    let all_target_features = sub_cfgs
+                        .iter()
+                        .all(|sub_cfg| matches!(sub_cfg, Cfg::Cfg(sym::target_feature, Some(_))));
+
+                    if all_crate_features {
+                        fmt.write_str("crate features ")?;
+                        true
+                    } else if all_target_features {
+                        fmt.write_str("target features ")?;
+                        true
+                    } else {
+                        false
+                    }
+                };
+
                 for (i, sub_cfg) in sub_cfgs.iter().enumerate() {
                     if i != 0 {
                         fmt.write_str(" and ")?;
                     }
-                    write_with_opt_paren(fmt, !sub_cfg.is_simple(), Html(sub_cfg, self.1))?;
+                    if let (true, Cfg::Cfg(_, Some(feat))) = (short_longhand, sub_cfg) {
+                        if self.1.is_html() {
+                            write!(fmt, "<code>{}</code>", feat)?;
+                        } else {
+                            write!(fmt, "`{}`", feat)?;
+                        }
+                    } else {
+                        write_with_opt_paren(fmt, !sub_cfg.is_simple(), Display(sub_cfg, self.1))?;
+                    }
                 }
                 Ok(())
             }
@@ -347,12 +462,11 @@ impl<'a> fmt::Display for Html<'a> {
             Cfg::False => fmt.write_str("nowhere"),
 
             Cfg::Cfg(name, value) => {
-                let n = &*name.as_str();
-                let human_readable = match (n, value) {
-                    ("unix", None) => "Unix",
-                    ("windows", None) => "Windows",
-                    ("debug_assertions", None) => "debug-assertions enabled",
-                    ("target_os", Some(os)) => match &*os.as_str() {
+                let human_readable = match (name, value) {
+                    (sym::unix, None) => "Unix",
+                    (sym::windows, None) => "Windows",
+                    (sym::debug_assertions, None) => "debug-assertions enabled",
+                    (sym::target_os, Some(os)) => match &*os.as_str() {
                         "android" => "Android",
                         "dragonfly" => "DragonFly BSD",
                         "emscripten" => "Emscripten",
@@ -369,10 +483,11 @@ impl<'a> fmt::Display for Html<'a> {
                         "openbsd" => "OpenBSD",
                         "redox" => "Redox",
                         "solaris" => "Solaris",
+                        "wasi" => "WASI",
                         "windows" => "Windows",
                         _ => "",
                     },
-                    ("target_arch", Some(arch)) => match &*arch.as_str() {
+                    (sym::target_arch, Some(arch)) => match &*arch.as_str() {
                         "aarch64" => "AArch64",
                         "arm" => "ARM",
                         "asmjs" => "JavaScript",
@@ -388,15 +503,14 @@ impl<'a> fmt::Display for Html<'a> {
                         "x86_64" => "x86-64",
                         _ => "",
                     },
-                    ("target_vendor", Some(vendor)) => match &*vendor.as_str() {
+                    (sym::target_vendor, Some(vendor)) => match &*vendor.as_str() {
                         "apple" => "Apple",
                         "pc" => "PC",
-                        "rumprun" => "Rumprun",
                         "sun" => "Sun",
                         "fortanix" => "Fortanix",
                         _ => "",
                     },
-                    ("target_env", Some(env)) => match &*env.as_str() {
+                    (sym::target_env, Some(env)) => match &*env.as_str() {
                         "gnu" => "GNU",
                         "msvc" => "MSVC",
                         "musl" => "musl",
@@ -405,23 +519,41 @@ impl<'a> fmt::Display for Html<'a> {
                         "sgx" => "SGX",
                         _ => "",
                     },
-                    ("target_endian", Some(endian)) => return write!(fmt, "{}-endian", endian),
-                    ("target_pointer_width", Some(bits)) => return write!(fmt, "{}-bit", bits),
-                    ("target_feature", Some(feat)) => {
-                        if self.1 {
-                            return write!(fmt, "<code>{}</code>", feat);
-                        } else {
+                    (sym::target_endian, Some(endian)) => return write!(fmt, "{}-endian", endian),
+                    (sym::target_pointer_width, Some(bits)) => return write!(fmt, "{}-bit", bits),
+                    (sym::target_feature, Some(feat)) => match self.1 {
+                        Format::LongHtml => {
                             return write!(fmt, "target feature <code>{}</code>", feat);
                         }
-                    }
+                        Format::LongPlain => return write!(fmt, "target feature `{}`", feat),
+                        Format::ShortHtml => return write!(fmt, "<code>{}</code>", feat),
+                    },
+                    (sym::feature, Some(feat)) => match self.1 {
+                        Format::LongHtml => {
+                            return write!(fmt, "crate feature <code>{}</code>", feat);
+                        }
+                        Format::LongPlain => return write!(fmt, "crate feature `{}`", feat),
+                        Format::ShortHtml => return write!(fmt, "<code>{}</code>", feat),
+                    },
                     _ => "",
                 };
                 if !human_readable.is_empty() {
                     fmt.write_str(human_readable)
                 } else if let Some(v) = value {
-                    write!(fmt, "<code>{}=\"{}\"</code>", Escape(n), Escape(&v.as_str()))
+                    if self.1.is_html() {
+                        write!(
+                            fmt,
+                            r#"<code>{}="{}"</code>"#,
+                            Escape(&name.as_str()),
+                            Escape(&v.as_str())
+                        )
+                    } else {
+                        write!(fmt, r#"`{}="{}"`"#, name, v)
+                    }
+                } else if self.1.is_html() {
+                    write!(fmt, "<code>{}</code>", Escape(&name.as_str()))
                 } else {
-                    write!(fmt, "<code>{}</code>", Escape(n))
+                    write!(fmt, "`{}`", name)
                 }
             }
         }

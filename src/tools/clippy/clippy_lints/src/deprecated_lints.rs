@@ -54,26 +54,6 @@ declare_deprecated_lint! {
 declare_deprecated_lint! {
     /// **What it does:** Nothing. This lint has been deprecated.
     ///
-    /// **Deprecation reason:** This used to check for `.to_string()` method calls on values
-    /// of type `&str`. This is not unidiomatic and with specialization coming, `to_string` could be
-    /// specialized to be as efficient as `to_owned`.
-    pub STR_TO_STRING,
-    "using `str::to_string` is common even today and specialization will likely happen soon"
-}
-
-declare_deprecated_lint! {
-    /// **What it does:** Nothing. This lint has been deprecated.
-    ///
-    /// **Deprecation reason:** This used to check for `.to_string()` method calls on values
-    /// of type `String`. This is not unidiomatic and with specialization coming, `to_string` could be
-    /// specialized to be as efficient as `clone`.
-    pub STRING_TO_STRING,
-    "using `string::to_string` is common even today and specialization will likely happen soon"
-}
-
-declare_deprecated_lint! {
-    /// **What it does:** Nothing. This lint has been deprecated.
-    ///
     /// **Deprecation reason:** This lint should never have applied to non-pointer types, as transmuting
     /// between non-pointer types of differing alignment is well-defined behavior (it's semantically
     /// equivalent to a memcpy). This lint has thus been refactored into two separate lints:
@@ -153,5 +133,58 @@ declare_deprecated_lint! {
     ///
     /// **Deprecation reason:** Associated-constants are now preferred.
     pub REPLACE_CONSTS,
-    "associated-constants `MIN`/`MAX` of integers are prefer to `{min,max}_value()` and module constants"
+    "associated-constants `MIN`/`MAX` of integers are preferred to `{min,max}_value()` and module constants"
+}
+
+declare_deprecated_lint! {
+    /// **What it does:** Nothing. This lint has been deprecated.
+    ///
+    /// **Deprecation reason:** The regex! macro does not exist anymore.
+    pub REGEX_MACRO,
+    "the regex! macro has been removed from the regex crate in 2018"
+}
+
+declare_deprecated_lint! {
+    /// **What it does:** Nothing. This lint has been deprecated.
+    ///
+    /// **Deprecation reason:** This lint has been uplifted to rustc and is now called
+    /// `drop_bounds`.
+    pub DROP_BOUNDS,
+    "this lint has been uplifted to rustc and is now called `drop_bounds`"
+}
+
+declare_deprecated_lint! {
+    /// **What it does:** Nothing. This lint has been deprecated.
+    ///
+    /// **Deprecation reason:** This lint has been uplifted to rustc and is now called
+    /// `temporary_cstring_as_ptr`.
+    pub TEMPORARY_CSTRING_AS_PTR,
+    "this lint has been uplifted to rustc and is now called `temporary_cstring_as_ptr`"
+}
+
+declare_deprecated_lint! {
+    /// **What it does:** Nothing. This lint has been deprecated.
+    ///
+    /// **Deprecation reason:** This lint has been uplifted to rustc and is now called
+    /// `panic_fmt`.
+    pub PANIC_PARAMS,
+    "this lint has been uplifted to rustc and is now called `panic_fmt`"
+}
+
+declare_deprecated_lint! {
+    /// **What it does:** Nothing. This lint has been deprecated.
+    ///
+    /// **Deprecation reason:** This lint has been integrated into the `unknown_lints`
+    /// rustc lint.
+    pub UNKNOWN_CLIPPY_LINTS,
+    "this lint has been integrated into the `unknown_lints` rustc lint"
+}
+
+declare_deprecated_lint! {
+    /// **What it does:** Nothing. This lint has been deprecated.
+    ///
+    /// **Deprecation reason:** This lint has been replaced by `manual_find_map`, a
+    /// more specific lint.
+    pub FIND_MAP,
+    "this lint has been replaced by `manual_find_map`, a more specific lint"
 }

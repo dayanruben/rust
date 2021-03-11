@@ -190,6 +190,34 @@ function loadThings(thingsToLoad, kindOfLoad, funcToCall, fileContent) {
     return content;
 }
 
+function contentToDiffLine(key, value) {
+    return `"${key}": "${value}",`;
+}
+
+// This function is only called when no matching result was found and therefore will only display
+// the diff between the two items.
+function betterLookingDiff(entry, data) {
+    let output = ' {\n';
+    let spaces = '     ';
+    for (let key in entry) {
+        if (!entry.hasOwnProperty(key)) {
+            continue;
+        }
+        if (!data || !data.hasOwnProperty(key)) {
+            output += '-' + spaces + contentToDiffLine(key, entry[key]) + '\n';
+            continue;
+        }
+        let value = data[key];
+        if (value !== entry[key]) {
+            output += '-' + spaces + contentToDiffLine(key, entry[key]) + '\n';
+            output += '+' + spaces + contentToDiffLine(key, value) + '\n';
+        } else {
+            output += spaces + contentToDiffLine(key, value) + '\n';
+        }
+    }
+    return output + ' }';
+}
+
 function lookForEntry(entry, data) {
     for (var i = 0; i < data.length; ++i) {
         var allGood = true;
@@ -239,9 +267,8 @@ function loadMainJsAndIndex(mainJs, searchIndex, storageJs, crate) {
                            "handleAliases", "getQuery", "buildIndex", "execQuery", "execSearch"];
 
     ALIASES = {};
-    finalJS += 'window = { "currentCrate": "' + crate + '" };\n';
-    finalJS += 'var rootPath = "../";\n';
-    finalJS += loadThings(["onEach"], 'function', extractFunction, storageJs);
+    finalJS += 'window = { "currentCrate": "' + crate + '", rootPath: "../" };\n';
+    finalJS += loadThings(["hasOwnProperty", "onEach"], 'function', extractFunction, storageJs);
     finalJS += loadThings(arraysToLoad, 'array', extractArrayVariable, mainJs);
     finalJS += loadThings(variablesToLoad, 'variable', extractVariable, mainJs);
     finalJS += loadThings(functionsToLoad, 'function', extractFunction, mainJs);
@@ -269,12 +296,25 @@ function runSearch(query, expected, index, loaded, loadedFile, queryName) {
             break;
         }
         var entry = expected[key];
+
+        if (exact_check == true && entry.length !== results[key].length) {
+            error_text.push(queryName + "==> Expected exactly " + entry.length +
+                            " results but found " + results[key].length + " in '" + key + "'");
+        }
+
         var prev_pos = -1;
         for (var i = 0; i < entry.length; ++i) {
             var entry_pos = lookForEntry(entry[i], results[key]);
             if (entry_pos === null) {
                 error_text.push(queryName + "==> Result not found in '" + key + "': '" +
                                 JSON.stringify(entry[i]) + "'");
+                // By default, we just compare the two first items.
+                let item_to_diff = 0;
+                if ((ignore_order === false || exact_check === true) && i < results[key].length) {
+                    item_to_diff = i;
+                }
+                error_text.push("Diff of first error:\n" +
+                    betterLookingDiff(entry[i], results[key][item_to_diff]));
             } else if (exact_check === true && prev_pos + 1 !== entry_pos) {
                 error_text.push(queryName + "==> Exact check failed at position " + (prev_pos + 1) +
                                 ": expected '" + JSON.stringify(entry[i]) + "' but found '" +
@@ -307,8 +347,11 @@ function checkResult(error_text, loadedFile, displaySuccess) {
 }
 
 function runChecks(testFile, loaded, index) {
-    var loadedFile = loadContent(
-        readFile(testFile) + 'exports.QUERY = QUERY;exports.EXPECTED = EXPECTED;');
+    var testFileContent = readFile(testFile) + 'exports.QUERY = QUERY;exports.EXPECTED = EXPECTED;';
+    if (testFileContent.indexOf("FILTER_CRATE") !== -1) {
+        testFileContent += "exports.FILTER_CRATE = FILTER_CRATE;";
+    }
+    var loadedFile = loadContent(testFileContent);
 
     const expected = loadedFile.EXPECTED;
     const query = loadedFile.QUERY;

@@ -1,10 +1,11 @@
 #![feature(const_fn)]
-#![feature(const_transmute)]
+#![feature(const_fn_transmute)]
 
 const fn foo() -> ! {
     unsafe { std::mem::transmute(()) }
     //~^ WARN any use of this value will cause an error [const_err]
     //~| WARN the type `!` does not permit zero-initialization [invalid_value]
+    //~| WARN this was previously accepted by the compiler but is being phased out
 }
 
 #[derive(Clone, Copy)]

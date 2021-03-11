@@ -22,10 +22,13 @@ fn main() {
     let f = [0_usize; -1_isize];
     //~^ ERROR mismatched types
     //~| expected `usize`, found `isize`
+    let f = [0; 4u8];
+    //~^ ERROR mismatched types
+    //~| expected `usize`, found `u8`
     struct G {
         g: (),
     }
     let g = [0; G { g: () }];
     //~^ ERROR mismatched types
-    //~| expected `usize`, found struct `main::G`
+    //~| expected `usize`, found struct `G`
 }

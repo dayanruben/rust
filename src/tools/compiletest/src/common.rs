@@ -10,13 +10,12 @@ use test::ColorConfig;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Mode {
-    CompileFail,
-    RunFail,
     RunPassValgrind,
     Pretty,
     DebugInfo,
     Codegen,
     Rustdoc,
+    RustdocJson,
     CodegenUnits,
     Incremental,
     RunMake,
@@ -41,13 +40,12 @@ impl FromStr for Mode {
     type Err = ();
     fn from_str(s: &str) -> Result<Mode, ()> {
         match s {
-            "compile-fail" => Ok(CompileFail),
-            "run-fail" => Ok(RunFail),
             "run-pass-valgrind" => Ok(RunPassValgrind),
             "pretty" => Ok(Pretty),
             "debuginfo" => Ok(DebugInfo),
             "codegen" => Ok(Codegen),
             "rustdoc" => Ok(Rustdoc),
+            "rustdoc-json" => Ok(RustdocJson),
             "codegen-units" => Ok(CodegenUnits),
             "incremental" => Ok(Incremental),
             "run-make" => Ok(RunMake),
@@ -63,13 +61,12 @@ impl FromStr for Mode {
 impl fmt::Display for Mode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match *self {
-            CompileFail => "compile-fail",
-            RunFail => "run-fail",
             RunPassValgrind => "run-pass-valgrind",
             Pretty => "pretty",
             DebugInfo => "debuginfo",
             Codegen => "codegen",
             Rustdoc => "rustdoc",
+            RustdocJson => "rustdoc-json",
             CodegenUnits => "codegen-units",
             Incremental => "incremental",
             RunMake => "run-make",
@@ -123,6 +120,9 @@ pub enum FailMode {
 pub enum CompareMode {
     Nll,
     Polonius,
+    Chalk,
+    SplitDwarf,
+    SplitDwarfSingle,
 }
 
 impl CompareMode {
@@ -130,6 +130,9 @@ impl CompareMode {
         match *self {
             CompareMode::Nll => "nll",
             CompareMode::Polonius => "polonius",
+            CompareMode::Chalk => "chalk",
+            CompareMode::SplitDwarf => "split-dwarf",
+            CompareMode::SplitDwarfSingle => "split-dwarf-single",
         }
     }
 
@@ -137,6 +140,9 @@ impl CompareMode {
         match s.as_str() {
             "nll" => CompareMode::Nll,
             "polonius" => CompareMode::Polonius,
+            "chalk" => CompareMode::Chalk,
+            "split-dwarf" => CompareMode::SplitDwarf,
+            "split-dwarf-single" => CompareMode::SplitDwarfSingle,
             x => panic!("unknown --compare-mode option: {}", x),
         }
     }
@@ -166,9 +172,9 @@ impl fmt::Display for Debugger {
 }
 
 /// Configuration for compiletest
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Config {
-    /// `true` to to overwrite stderr/stdout files instead of complaining about changes in output.
+    /// `true` to overwrite stderr/stdout files instead of complaining about changes in output.
     pub bless: bool,
 
     /// The library paths required for running the compiler.
@@ -183,11 +189,17 @@ pub struct Config {
     /// The rustdoc executable.
     pub rustdoc_path: Option<PathBuf>,
 
+    /// The rust-demangler executable.
+    pub rust_demangler_path: Option<PathBuf>,
+
     /// The Python executable to use for LLDB.
     pub lldb_python: String,
 
     /// The Python executable to use for htmldocck.
     pub docck_python: String,
+
+    /// The jsondocck executable.
+    pub jsondocck_path: Option<String>,
 
     /// The LLVM `FileCheck` binary path.
     pub llvm_filecheck: Option<PathBuf>,
@@ -215,8 +227,12 @@ pub struct Config {
     /// The name of the stage being built (stage1, etc)
     pub stage_id: String,
 
-    /// The test mode, compile-fail, run-fail, ui
+    /// The test mode, e.g. ui or debuginfo.
     pub mode: Mode,
+
+    /// The test suite (essentially which directory is running, but without the
+    /// directory prefix such as src/test)
+    pub suite: String,
 
     /// The debugger to use in debuginfo mode. Unset otherwise.
     pub debugger: Option<Debugger>,
@@ -224,8 +240,8 @@ pub struct Config {
     /// Run ignored tests
     pub run_ignored: bool,
 
-    /// Only run tests that match this filter
-    pub filter: Option<String>,
+    /// Only run tests that match these filters
+    pub filters: Vec<String>,
 
     /// Exactly match the filter, rather than a substring
     pub filter_exact: bool,
@@ -255,6 +271,9 @@ pub struct Config {
     /// Path to / name of the Microsoft Console Debugger (CDB) executable
     pub cdb: Option<OsString>,
 
+    /// Version of CDB
+    pub cdb_version: Option<[u16; 4]>,
+
     /// Path to / name of the GDB executable
     pub gdb: Option<String>,
 
@@ -265,13 +284,13 @@ pub struct Config {
     pub gdb_native_rust: bool,
 
     /// Version of LLDB
-    pub lldb_version: Option<String>,
+    pub lldb_version: Option<u32>,
 
     /// Whether LLDB has native rust support
     pub lldb_native_rust: bool,
 
     /// Version of LLVM
-    pub llvm_version: Option<String>,
+    pub llvm_version: Option<u32>,
 
     /// Is LLVM a system LLVM
     pub system_llvm: bool,
@@ -311,6 +330,9 @@ pub struct Config {
     /// created in `/<build_base>/rustfix_missing_coverage.txt`
     pub rustfix_coverage: bool,
 
+    /// whether to run `tidy` when a rustdoc test fails
+    pub has_tidy: bool,
+
     // Configuration for various run-make tests frobbing things like C compilers
     // or querying about various LLVM component information.
     pub cc: String,
@@ -322,6 +344,8 @@ pub struct Config {
 
     /// Path to a NodeJS executable. Used for JS doctests, emscripten and WASM tests
     pub nodejs: Option<String>,
+    /// Path to a npm executable. Used for rustdoc GUI tests
+    pub npm: Option<String>,
 }
 
 #[derive(Debug, Clone)]

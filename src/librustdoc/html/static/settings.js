@@ -1,19 +1,37 @@
+// Local js definitions:
+/* global getSettingValue, getVirtualKey, onEachLazy, updateLocalStorage, updateSystemTheme */
+
 (function () {
-    function changeSetting(settingName, isEnabled) {
-        updateLocalStorage('rustdoc-' + settingName, isEnabled);
+    function changeSetting(settingName, value) {
+        updateLocalStorage("rustdoc-" + settingName, value);
+
+        switch (settingName) {
+            case "preferred-dark-theme":
+            case "preferred-light-theme":
+            case "use-system-theme":
+                updateSystemTheme();
+                break;
+        }
     }
 
-    function getSettingValue(settingName) {
-        return getCurrentValue('rustdoc-' + settingName);
+    function handleKey(ev) {
+        // Don't interfere with browser shortcuts
+        if (ev.ctrlKey || ev.altKey || ev.metaKey) {
+            return;
+        }
+        switch (getVirtualKey(ev)) {
+            case "Enter":
+            case "Return":
+            case "Space":
+                ev.target.checked = !ev.target.checked;
+                ev.preventDefault();
+                break;
+        }
     }
 
     function setEvents() {
-        var elems = document.getElementsByClassName("slider");
-        if (!elems || elems.length === 0) {
-            return;
-        }
-        for (var i = 0; i < elems.length; ++i) {
-            var toggle = elems[i].previousElementSibling;
+        onEachLazy(document.getElementsByClassName("slider"), function(elem) {
+            var toggle = elem.previousElementSibling;
             var settingId = toggle.id;
             var settingValue = getSettingValue(settingId);
             if (settingValue !== null) {
@@ -22,8 +40,21 @@
             toggle.onchange = function() {
                 changeSetting(this.id, this.checked);
             };
-        }
+            toggle.onkeyup = handleKey;
+            toggle.onkeyrelease = handleKey;
+        });
+        onEachLazy(document.getElementsByClassName("select-wrapper"), function(elem) {
+            var select = elem.getElementsByTagName("select")[0];
+            var settingId = select.id;
+            var settingValue = getSettingValue(settingId);
+            if (settingValue !== null) {
+                select.value = settingValue;
+            }
+            select.onchange = function() {
+                changeSetting(this.id, this.value);
+            };
+        });
     }
 
-    setEvents();
+    window.addEventListener("DOMContentLoaded", setEvents);
 })();

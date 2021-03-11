@@ -1,12 +1,12 @@
-// check-pass
-
-#![feature(const_generics)]
-//~^ WARN the feature `const_generics` is incomplete
+// revisions: full min
+#![cfg_attr(full, feature(const_generics))] //[full]~WARN the feature `const_generics` is incomplete
 
 struct Const<const N: usize>;
 
 impl<const C: usize> Const<{C}> {
     fn successor() -> Const<{C + 1}> {
+        //[full]~^ ERROR constant expression depends on a generic parameter
+        //[min]~^^ ERROR generic parameters may not be used
         Const
     }
 }

@@ -31,20 +31,19 @@ pub struct MainRecursion {
 
 impl_lint_pass!(MainRecursion => [MAIN_RECURSION]);
 
-impl LateLintPass<'_, '_> for MainRecursion {
-    fn check_crate(&mut self, _: &LateContext<'_, '_>, krate: &Crate<'_>) {
-        self.has_no_std_attr = is_no_std_crate(krate);
+impl LateLintPass<'_> for MainRecursion {
+    fn check_crate(&mut self, cx: &LateContext<'_>, _: &Crate<'_>) {
+        self.has_no_std_attr = is_no_std_crate(cx);
     }
 
-    fn check_expr_post(&mut self, cx: &LateContext<'_, '_>, expr: &Expr<'_>) {
+    fn check_expr_post(&mut self, cx: &LateContext<'_>, expr: &Expr<'_>) {
         if self.has_no_std_attr {
             return;
         }
 
         if_chain! {
             if let ExprKind::Call(func, _) = &expr.kind;
-            if let ExprKind::Path(path) = &func.kind;
-            if let QPath::Resolved(_, path) = &path;
+            if let ExprKind::Path(QPath::Resolved(_, path)) = &func.kind;
             if let Some(def_id) = path.res.opt_def_id();
             if is_entrypoint_fn(cx, def_id);
             then {

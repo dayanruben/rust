@@ -1,7 +1,6 @@
-// Regression test for #67739
-
-#![allow(incomplete_features)]
-#![feature(const_generics)]
+// revisions: full min
+#![cfg_attr(full, feature(const_generics))]
+#![cfg_attr(full, allow(incomplete_features))]
 
 use std::mem;
 

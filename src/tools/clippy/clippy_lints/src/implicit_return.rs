@@ -1,8 +1,4 @@
-use crate::utils::{
-    fn_has_unsatisfiable_preds, match_def_path,
-    paths::{BEGIN_PANIC, BEGIN_PANIC_FMT},
-    snippet_opt, span_lint_and_then,
-};
+use crate::utils::{fn_has_unsatisfiable_preds, match_panic_def_id, snippet_opt, span_lint_and_then};
 use if_chain::if_chain;
 use rustc_errors::Applicability;
 use rustc_hir::intravisit::FnKind;
@@ -44,7 +40,7 @@ declare_lint_pass!(ImplicitReturn => [IMPLICIT_RETURN]);
 static LINT_BREAK: &str = "change `break` to `return` as shown";
 static LINT_RETURN: &str = "add `return` as shown";
 
-fn lint(cx: &LateContext<'_, '_>, outer_span: Span, inner_span: Span, msg: &str) {
+fn lint(cx: &LateContext<'_>, outer_span: Span, inner_span: Span, msg: &str) {
     let outer_span = outer_span.source_callsite();
     let inner_span = inner_span.source_callsite();
 
@@ -60,7 +56,7 @@ fn lint(cx: &LateContext<'_, '_>, outer_span: Span, inner_span: Span, msg: &str)
     });
 }
 
-fn expr_match(cx: &LateContext<'_, '_>, expr: &Expr<'_>) {
+fn expr_match(cx: &LateContext<'_>, expr: &Expr<'_>) {
     match expr.kind {
         // loops could be using `break` instead of `return`
         ExprKind::Block(block, ..) | ExprKind::Loop(block, ..) => {
@@ -72,8 +68,7 @@ fn expr_match(cx: &LateContext<'_, '_>, expr: &Expr<'_>) {
                 if_chain! {
                     if let StmtKind::Semi(expr, ..) = &stmt.kind;
                     // make sure it's a break, otherwise we want to skip
-                    if let ExprKind::Break(.., break_expr) = &expr.kind;
-                    if let Some(break_expr) = break_expr;
+                    if let ExprKind::Break(.., Some(break_expr)) = &expr.kind;
                     then {
                             lint(cx, expr.span, break_expr.span, LINT_BREAK);
                     }
@@ -84,6 +79,13 @@ fn expr_match(cx: &LateContext<'_, '_>, expr: &Expr<'_>) {
         ExprKind::Break(.., break_expr) => {
             if let Some(break_expr) = break_expr {
                 lint(cx, expr.span, break_expr.span, LINT_BREAK);
+            }
+        },
+        ExprKind::If(.., if_expr, else_expr) => {
+            expr_match(cx, if_expr);
+
+            if let Some(else_expr) = else_expr {
+                expr_match(cx, else_expr);
             }
         },
         ExprKind::Match(.., arms, source) => {
@@ -108,9 +110,8 @@ fn expr_match(cx: &LateContext<'_, '_>, expr: &Expr<'_>) {
         ExprKind::Call(expr, ..) => {
             if_chain! {
                 if let ExprKind::Path(qpath) = &expr.kind;
-                if let Some(path_def_id) = cx.tables.qpath_res(qpath, expr.hir_id).opt_def_id();
-                if match_def_path(cx, path_def_id, &BEGIN_PANIC) ||
-                    match_def_path(cx, path_def_id, &BEGIN_PANIC_FMT);
+                if let Some(path_def_id) = cx.qpath_res(qpath, expr.hir_id).opt_def_id();
+                if match_panic_def_id(cx, path_def_id);
                 then { }
                 else {
                     lint(cx, expr.span, expr.span, LINT_RETURN)
@@ -122,10 +123,10 @@ fn expr_match(cx: &LateContext<'_, '_>, expr: &Expr<'_>) {
     }
 }
 
-impl<'a, 'tcx> LateLintPass<'a, 'tcx> for ImplicitReturn {
+impl<'tcx> LateLintPass<'tcx> for ImplicitReturn {
     fn check_fn(
         &mut self,
-        cx: &LateContext<'a, 'tcx>,
+        cx: &LateContext<'tcx>,
         _: FnKind<'tcx>,
         _: &'tcx FnDecl<'_>,
         body: &'tcx Body<'_>,

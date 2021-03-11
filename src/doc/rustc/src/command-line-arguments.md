@@ -204,7 +204,8 @@ out a longer explanation of a given error.
 ## `--test`: build a test harness
 
 When compiling this crate, `rustc` will ignore your `main` function
-and instead produce a test harness.
+and instead produce a test harness. See the [Tests chapter](tests/index.md)
+for more information about tests.
 
 <a id="option-target"></a>
 ## `--target`: select a target triple to build
@@ -273,9 +274,17 @@ This flag, when combined with other flags, makes them produce extra output.
 This flag allows you to pass the name and location for an external crate of a
 direct dependency. Indirect dependencies (dependencies of dependencies) are
 located using the [`-L` flag](#option-l-search-path). The given crate name is
-added to the [extern prelude], which is the same as specifying `extern crate`
-within the root module. The given crate name does not need to match the name
+added to the [extern prelude], similar to specifying `extern crate` within the
+root module. The given crate name does not need to match the name
 the library was built with.
+
+Specifying `--extern` has one behavior difference from `extern crate`:
+`--extern` merely makes the crate a _candidate_ for being linked; it does not
+actually link it unless it's actively used. In rare occasions you may wish
+to ensure a crate is linked even if you don't actively use it from your
+code: for example, if it changes the global allocator or if it contains
+`#[no_mangle]` symbols for use by other programming languages. In such
+cases you'll need to use `extern crate`.
 
 This flag may be specified multiple times. This flag takes an argument with
 either of the following formats:
@@ -292,7 +301,7 @@ flag][prefer-dynamic] may be used to influence which is used.
 If the same crate name is specified with and without a path, the one with the
 path is used and the pathless flag has no effect.
 
-[extern prelude]: ../reference/items/extern-crates.html#extern-prelude
+[extern prelude]: ../reference/names/preludes.html#extern-prelude
 [prefer-dynamic]: codegen-options/index.md#prefer-dynamic
 
 <a id="option-sysroot"></a>

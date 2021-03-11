@@ -1,13 +1,16 @@
-// run-pass
+//[full] run-pass
+// revisions: min full
 
-#![feature(const_generics)]
-//~^ WARN the feature `const_generics` is incomplete
+#![cfg_attr(full, feature(const_generics))]
+#![cfg_attr(full, allow(incomplete_features))]
 
 pub fn function_with_str<const STRING: &'static str>() -> &'static str {
+    //[min]~^ ERROR `&'static str` is forbidden
     STRING
 }
 
 pub fn function_with_bytes<const BYTES: &'static [u8]>() -> &'static [u8] {
+    //[min]~^ ERROR `&'static [u8]` is forbidden
     BYTES
 }
 

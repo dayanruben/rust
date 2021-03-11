@@ -25,31 +25,47 @@ declare_clippy_lint! {
     ///     BattenbergCake,
     /// }
     /// ```
+    /// Could be written as:
+    /// ```rust
+    /// enum Cake {
+    ///     BlackForest,
+    ///     Hummingbird,
+    ///     Battenberg,
+    /// }
+    /// ```
     pub ENUM_VARIANT_NAMES,
     style,
     "enums where all variants share a prefix/postfix"
 }
 
 declare_clippy_lint! {
-    /// **What it does:** Detects enumeration variants that are prefixed or suffixed
-    /// by the same characters.
+    /// **What it does:** Detects public enumeration variants that are
+    /// prefixed or suffixed by the same characters.
     ///
-    /// **Why is this bad?** Enumeration variant names should specify their variant,
+    /// **Why is this bad?** Public enumeration variant names should specify their variant,
     /// not repeat the enumeration name.
     ///
     /// **Known problems:** None.
     ///
     /// **Example:**
     /// ```rust
-    /// enum Cake {
+    /// pub enum Cake {
     ///     BlackForestCake,
     ///     HummingbirdCake,
     ///     BattenbergCake,
     /// }
     /// ```
+    /// Could be written as:
+    /// ```rust
+    /// pub enum Cake {
+    ///     BlackForest,
+    ///     Hummingbird,
+    ///     Battenberg,
+    /// }
+    /// ```
     pub PUB_ENUM_VARIANT_NAMES,
     pedantic,
-    "enums where all variants share a prefix/postfix"
+    "public enums where all variants share a prefix/postfix"
 }
 
 declare_clippy_lint! {
@@ -64,6 +80,12 @@ declare_clippy_lint! {
     /// ```rust
     /// mod cake {
     ///     struct BlackForestCake;
+    /// }
+    /// ```
+    /// Could be written as:
+    /// ```rust
+    /// mod cake {
+    ///     struct BlackForest;
     /// }
     /// ```
     pub MODULE_NAME_REPETITIONS,
@@ -161,10 +183,10 @@ fn check_variant(
             && name.chars().nth(item_name_chars).map_or(false, |c| !c.is_lowercase())
             && name.chars().nth(item_name_chars + 1).map_or(false, |c| !c.is_numeric())
         {
-            span_lint(cx, lint, var.span, "Variant name starts with the enum's name");
+            span_lint(cx, lint, var.span, "variant name starts with the enum's name");
         }
         if partial_rmatch(item_name, &name) == item_name_chars {
-            span_lint(cx, lint, var.span, "Variant name ends with the enum's name");
+            span_lint(cx, lint, var.span, "variant name ends with the enum's name");
         }
     }
     let first = &def.variants[0].ident.name.as_str();
@@ -205,7 +227,7 @@ fn check_variant(
         cx,
         lint,
         span,
-        &format!("All variants have the same {}fix: `{}`", what, value),
+        &format!("all variants have the same {}fix: `{}`", what, value),
         None,
         &format!(
             "remove the {}fixes and use full paths to \
@@ -263,7 +285,7 @@ impl EarlyLintPass for EnumVariantNames {
                             );
                         }
                     }
-                    if item.vis.node.is_pub() {
+                    if item.vis.kind.is_pub() {
                         let matching = partial_match(mod_camel, &item_camel);
                         let rmatching = partial_rmatch(mod_camel, &item_camel);
                         let nchars = mod_camel.chars().count();
@@ -294,7 +316,7 @@ impl EarlyLintPass for EnumVariantNames {
             }
         }
         if let ItemKind::Enum(ref def, _) = item.kind {
-            let lint = match item.vis.node {
+            let lint = match item.vis.kind {
                 VisibilityKind::Public => PUB_ENUM_VARIANT_NAMES,
                 _ => ENUM_VARIANT_NAMES,
             };

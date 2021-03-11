@@ -1,4 +1,4 @@
-#![deny(invalid_codeblock_attribute)]
+#![deny(rustdoc::invalid_codeblock_attributes)]
 
 /// foo
 //~^ ERROR

@@ -1,4 +1,3 @@
-use crate::reexport::Name;
 use crate::utils::{contains_name, higher, iter_input_pats, snippet, span_lint_and_then};
 use rustc_hir::intravisit::FnKind;
 use rustc_hir::{
@@ -10,6 +9,7 @@ use rustc_middle::lint::in_external_macro;
 use rustc_middle::ty;
 use rustc_session::{declare_lint_pass, declare_tool_lint};
 use rustc_span::source_map::Span;
+use rustc_span::symbol::Symbol;
 
 declare_clippy_lint! {
     /// **What it does:** Checks for bindings that shadow other bindings already in
@@ -25,7 +25,11 @@ declare_clippy_lint! {
     /// **Example:**
     /// ```rust
     /// # let x = 1;
+    /// // Bad
     /// let x = &x;
+    ///
+    /// // Good
+    /// let y = &x; // use different variable name
     /// ```
     pub SHADOW_SAME,
     restriction,
@@ -70,14 +74,21 @@ declare_clippy_lint! {
     /// names to bindings or introducing more scopes to contain the bindings.
     ///
     /// **Known problems:** This lint, as the other shadowing related lints,
-    /// currently only catches very simple patterns.
+    /// currently only catches very simple patterns. Note that
+    /// `allow`/`warn`/`deny`/`forbid` attributes only work on the function level
+    /// for this lint.
     ///
     /// **Example:**
     /// ```rust
     /// # let y = 1;
     /// # let z = 2;
     /// let x = y;
+    ///
+    /// // Bad
     /// let x = z; // shadows the earlier binding
+    ///
+    /// // Good
+    /// let w = z; // use different variable name
     /// ```
     pub SHADOW_UNRELATED,
     pedantic,
@@ -86,10 +97,10 @@ declare_clippy_lint! {
 
 declare_lint_pass!(Shadow => [SHADOW_SAME, SHADOW_REUSE, SHADOW_UNRELATED]);
 
-impl<'a, 'tcx> LateLintPass<'a, 'tcx> for Shadow {
+impl<'tcx> LateLintPass<'tcx> for Shadow {
     fn check_fn(
         &mut self,
-        cx: &LateContext<'a, 'tcx>,
+        cx: &LateContext<'tcx>,
         _: FnKind<'tcx>,
         decl: &'tcx FnDecl<'_>,
         body: &'tcx Body<'_>,
@@ -103,7 +114,7 @@ impl<'a, 'tcx> LateLintPass<'a, 'tcx> for Shadow {
     }
 }
 
-fn check_fn<'a, 'tcx>(cx: &LateContext<'a, 'tcx>, decl: &'tcx FnDecl<'_>, body: &'tcx Body<'_>) {
+fn check_fn<'tcx>(cx: &LateContext<'tcx>, decl: &'tcx FnDecl<'_>, body: &'tcx Body<'_>) {
     let mut bindings = Vec::with_capacity(decl.inputs.len());
     for arg in iter_input_pats(decl, body) {
         if let PatKind::Binding(.., ident, _) = arg.pat.kind {
@@ -113,7 +124,7 @@ fn check_fn<'a, 'tcx>(cx: &LateContext<'a, 'tcx>, decl: &'tcx FnDecl<'_>, body: 
     check_expr(cx, &body.value, &mut bindings);
 }
 
-fn check_block<'a, 'tcx>(cx: &LateContext<'a, 'tcx>, block: &'tcx Block<'_>, bindings: &mut Vec<(Name, Span)>) {
+fn check_block<'tcx>(cx: &LateContext<'tcx>, block: &'tcx Block<'_>, bindings: &mut Vec<(Symbol, Span)>) {
     let len = bindings.len();
     for stmt in block.stmts {
         match stmt.kind {
@@ -128,7 +139,7 @@ fn check_block<'a, 'tcx>(cx: &LateContext<'a, 'tcx>, block: &'tcx Block<'_>, bin
     bindings.truncate(len);
 }
 
-fn check_local<'a, 'tcx>(cx: &LateContext<'a, 'tcx>, local: &'tcx Local<'_>, bindings: &mut Vec<(Name, Span)>) {
+fn check_local<'tcx>(cx: &LateContext<'tcx>, local: &'tcx Local<'_>, bindings: &mut Vec<(Symbol, Span)>) {
     if in_external_macro(cx.sess(), local.span) {
         return;
     }
@@ -153,24 +164,17 @@ fn check_local<'a, 'tcx>(cx: &LateContext<'a, 'tcx>, local: &'tcx Local<'_>, bin
     }
 }
 
-fn is_binding(cx: &LateContext<'_, '_>, pat_id: HirId) -> bool {
-    let var_ty = cx.tables.node_type_opt(pat_id);
-    if let Some(var_ty) = var_ty {
-        match var_ty.kind {
-            ty::Adt(..) => false,
-            _ => true,
-        }
-    } else {
-        false
-    }
+fn is_binding(cx: &LateContext<'_>, pat_id: HirId) -> bool {
+    let var_ty = cx.typeck_results().node_type_opt(pat_id);
+    var_ty.map_or(false, |var_ty| !matches!(var_ty.kind(), ty::Adt(..)))
 }
 
-fn check_pat<'a, 'tcx>(
-    cx: &LateContext<'a, 'tcx>,
+fn check_pat<'tcx>(
+    cx: &LateContext<'tcx>,
     pat: &'tcx Pat<'_>,
     init: Option<&'tcx Expr<'_>>,
     span: Span,
-    bindings: &mut Vec<(Name, Span)>,
+    bindings: &mut Vec<(Symbol, Span)>,
 ) {
     // TODO: match more stuff / destructuring
     match pat.kind {
@@ -249,9 +253,9 @@ fn check_pat<'a, 'tcx>(
     }
 }
 
-fn lint_shadow<'a, 'tcx>(
-    cx: &LateContext<'a, 'tcx>,
-    name: Name,
+fn lint_shadow<'tcx>(
+    cx: &LateContext<'tcx>,
+    name: Symbol,
     span: Span,
     pattern_span: Span,
     init: Option<&'tcx Expr<'_>>,
@@ -292,11 +296,7 @@ fn lint_shadow<'a, 'tcx>(
                 cx,
                 SHADOW_UNRELATED,
                 pattern_span,
-                &format!(
-                    "`{}` is shadowed by `{}`",
-                    snippet(cx, pattern_span, "_"),
-                    snippet(cx, expr.span, "..")
-                ),
+                &format!("`{}` is being shadowed", snippet(cx, pattern_span, "_")),
                 |diag| {
                     diag.span_note(expr.span, "initialization happens here");
                     diag.span_note(prev_span, "previous binding is here");
@@ -316,7 +316,7 @@ fn lint_shadow<'a, 'tcx>(
     }
 }
 
-fn check_expr<'a, 'tcx>(cx: &LateContext<'a, 'tcx>, expr: &'tcx Expr<'_>, bindings: &mut Vec<(Name, Span)>) {
+fn check_expr<'tcx>(cx: &LateContext<'tcx>, expr: &'tcx Expr<'_>, bindings: &mut Vec<(Symbol, Span)>) {
     if in_external_macro(cx.sess(), expr.span) {
         return;
     }
@@ -325,12 +325,19 @@ fn check_expr<'a, 'tcx>(cx: &LateContext<'a, 'tcx>, expr: &'tcx Expr<'_>, bindin
         | ExprKind::Field(ref e, _)
         | ExprKind::AddrOf(_, _, ref e)
         | ExprKind::Box(ref e) => check_expr(cx, e, bindings),
-        ExprKind::Block(ref block, _) | ExprKind::Loop(ref block, _, _) => check_block(cx, block, bindings),
+        ExprKind::Block(ref block, _) | ExprKind::Loop(ref block, ..) => check_block(cx, block, bindings),
         // ExprKind::Call
         // ExprKind::MethodCall
         ExprKind::Array(v) | ExprKind::Tup(v) => {
             for e in v {
                 check_expr(cx, e, bindings)
+            }
+        },
+        ExprKind::If(ref cond, ref then, ref otherwise) => {
+            check_expr(cx, cond, bindings);
+            check_expr(cx, &**then, bindings);
+            if let Some(ref o) = *otherwise {
+                check_expr(cx, o, bindings);
             }
         },
         ExprKind::Match(ref init, arms, _) => {
@@ -342,6 +349,10 @@ fn check_expr<'a, 'tcx>(cx: &LateContext<'a, 'tcx>, expr: &'tcx Expr<'_>, bindin
                 if let Some(ref guard) = arm.guard {
                     match guard {
                         Guard::If(if_expr) => check_expr(cx, if_expr, bindings),
+                        Guard::IfLet(guard_pat, guard_expr) => {
+                            check_pat(cx, guard_pat, Some(*guard_expr), guard_pat.span, bindings);
+                            check_expr(cx, guard_expr, bindings);
+                        },
                     }
                 }
                 check_expr(cx, &arm.body, bindings);
@@ -352,7 +363,7 @@ fn check_expr<'a, 'tcx>(cx: &LateContext<'a, 'tcx>, expr: &'tcx Expr<'_>, bindin
     }
 }
 
-fn check_ty<'a, 'tcx>(cx: &LateContext<'a, 'tcx>, ty: &'tcx Ty<'_>, bindings: &mut Vec<(Name, Span)>) {
+fn check_ty<'tcx>(cx: &LateContext<'tcx>, ty: &'tcx Ty<'_>, bindings: &mut Vec<(Symbol, Span)>) {
     match ty.kind {
         TyKind::Slice(ref sty) => check_ty(cx, sty, bindings),
         TyKind::Array(ref fty, ref anon_const) => {
@@ -372,18 +383,18 @@ fn check_ty<'a, 'tcx>(cx: &LateContext<'a, 'tcx>, ty: &'tcx Ty<'_>, bindings: &m
     }
 }
 
-fn is_self_shadow(name: Name, expr: &Expr<'_>) -> bool {
+fn is_self_shadow(name: Symbol, expr: &Expr<'_>) -> bool {
     match expr.kind {
         ExprKind::Box(ref inner) | ExprKind::AddrOf(_, _, ref inner) => is_self_shadow(name, inner),
         ExprKind::Block(ref block, _) => {
             block.stmts.is_empty() && block.expr.as_ref().map_or(false, |e| is_self_shadow(name, e))
         },
-        ExprKind::Unary(op, ref inner) => (UnOp::UnDeref == op) && is_self_shadow(name, inner),
+        ExprKind::Unary(op, ref inner) => (UnOp::Deref == op) && is_self_shadow(name, inner),
         ExprKind::Path(QPath::Resolved(_, ref path)) => path_eq_name(name, path),
         _ => false,
     }
 }
 
-fn path_eq_name(name: Name, path: &Path<'_>) -> bool {
-    !path.is_global() && path.segments.len() == 1 && path.segments[0].ident.as_str() == name.as_str()
+fn path_eq_name(name: Symbol, path: &Path<'_>) -> bool {
+    !path.is_global() && path.segments.len() == 1 && path.segments[0].ident.name == name
 }

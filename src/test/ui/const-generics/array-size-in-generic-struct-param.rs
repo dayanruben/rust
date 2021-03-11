@@ -1,9 +1,13 @@
-#![feature(const_generics)]
-//~^ WARN the feature `const_generics` is incomplete
+// Tests that array sizes that depend on const-params are checked using `ConstEvaluatable`.
+// revisions: full min
+
+#![cfg_attr(full, feature(const_generics))]
+#![cfg_attr(full, allow(incomplete_features))]
 
 #[allow(dead_code)]
 struct ArithArrayLen<const N: usize>([u32; 0 + N]);
-//~^ ERROR constant expression depends on a generic parameter
+//[full]~^ ERROR constant expression depends on a generic parameter
+//[min]~^^ ERROR generic parameters may not be used in const operations
 
 #[derive(PartialEq, Eq)]
 struct Config {
@@ -11,7 +15,10 @@ struct Config {
 }
 
 struct B<const CFG: Config> {
-    arr: [u8; CFG.arr_size], //~ ERROR constant expression depends on a generic parameter
+    //[min]~^ ERROR `Config` is forbidden
+    arr: [u8; CFG.arr_size],
+    //[full]~^ ERROR constant expression depends on a generic parameter
+    //[min]~^^ ERROR generic parameters may not be used in const operations
 }
 
 const C: Config = Config { arr_size: 5 };

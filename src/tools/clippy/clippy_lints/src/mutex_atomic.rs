@@ -3,7 +3,6 @@
 //! This lint is **warn** by default
 
 use crate::utils::{is_type_diagnostic_item, span_lint};
-use rustc_ast::ast;
 use rustc_hir::Expr;
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_middle::ty::{self, Ty};
@@ -22,9 +21,15 @@ declare_clippy_lint! {
     ///
     /// **Example:**
     /// ```rust
+    /// # let y = true;
+    ///
+    /// // Bad
     /// # use std::sync::Mutex;
-    /// # let y = 1;
     /// let x = Mutex::new(&y);
+    ///
+    /// // Good
+    /// # use std::sync::atomic::AtomicBool;
+    /// let x = AtomicBool::new(y);
     /// ```
     pub MUTEX_ATOMIC,
     perf,
@@ -46,6 +51,10 @@ declare_clippy_lint! {
     /// ```rust
     /// # use std::sync::Mutex;
     /// let x = Mutex::new(0usize);
+    ///
+    /// // Good
+    /// # use std::sync::atomic::AtomicUsize;
+    /// let x = AtomicUsize::new(0usize);
     /// ```
     pub MUTEX_INTEGER,
     nursery,
@@ -54,21 +63,21 @@ declare_clippy_lint! {
 
 declare_lint_pass!(Mutex => [MUTEX_ATOMIC, MUTEX_INTEGER]);
 
-impl<'a, 'tcx> LateLintPass<'a, 'tcx> for Mutex {
-    fn check_expr(&mut self, cx: &LateContext<'a, 'tcx>, expr: &'tcx Expr<'_>) {
-        let ty = cx.tables.expr_ty(expr);
-        if let ty::Adt(_, subst) = ty.kind {
+impl<'tcx> LateLintPass<'tcx> for Mutex {
+    fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'_>) {
+        let ty = cx.typeck_results().expr_ty(expr);
+        if let ty::Adt(_, subst) = ty.kind() {
             if is_type_diagnostic_item(cx, ty, sym!(mutex_type)) {
                 let mutex_param = subst.type_at(0);
                 if let Some(atomic_name) = get_atomic_name(mutex_param) {
                     let msg = format!(
-                        "Consider using an `{}` instead of a `Mutex` here. If you just want the locking \
-                         behavior and not the internal type, consider using `Mutex<()>`.",
+                        "consider using an `{}` instead of a `Mutex` here; if you just want the locking \
+                         behavior and not the internal type, consider using `Mutex<()>`",
                         atomic_name
                     );
-                    match mutex_param.kind {
-                        ty::Uint(t) if t != ast::UintTy::Usize => span_lint(cx, MUTEX_INTEGER, expr.span, &msg),
-                        ty::Int(t) if t != ast::IntTy::Isize => span_lint(cx, MUTEX_INTEGER, expr.span, &msg),
+                    match *mutex_param.kind() {
+                        ty::Uint(t) if t != ty::UintTy::Usize => span_lint(cx, MUTEX_INTEGER, expr.span, &msg),
+                        ty::Int(t) if t != ty::IntTy::Isize => span_lint(cx, MUTEX_INTEGER, expr.span, &msg),
                         _ => span_lint(cx, MUTEX_ATOMIC, expr.span, &msg),
                     };
                 }
@@ -78,7 +87,7 @@ impl<'a, 'tcx> LateLintPass<'a, 'tcx> for Mutex {
 }
 
 fn get_atomic_name(ty: Ty<'_>) -> Option<&'static str> {
-    match ty.kind {
+    match ty.kind() {
         ty::Bool => Some("AtomicBool"),
         ty::Uint(_) => Some("AtomicUsize"),
         ty::Int(_) => Some("AtomicIsize"),

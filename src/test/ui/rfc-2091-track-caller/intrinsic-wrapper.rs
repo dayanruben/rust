@@ -1,6 +1,6 @@
 // run-pass
-
-#![feature(track_caller)]
+// revisions: default mir-opt
+//[mir-opt] compile-flags: -Zmir-opt-level=4
 
 macro_rules! caller_location_from_macro {
     () => (core::panic::Location::caller());

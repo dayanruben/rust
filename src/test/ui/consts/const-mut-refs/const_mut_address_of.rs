@@ -1,5 +1,4 @@
 // check-pass
-
 #![feature(const_mut_refs)]
 #![feature(const_fn)]
 #![feature(raw_ref_op)]

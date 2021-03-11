@@ -2,6 +2,7 @@
 
 #![warn(clippy::option_map_unit_fn)]
 #![allow(unused)]
+#![allow(clippy::unnecessary_wraps)]
 
 fn do_nothing<T>(_: T) {}
 
@@ -22,9 +23,9 @@ struct HasOption {
 }
 
 impl HasOption {
-    fn do_option_nothing(self: &Self, value: usize) {}
+    fn do_option_nothing(&self, value: usize) {}
 
-    fn do_option_plus_one(self: &Self, value: usize) -> usize {
+    fn do_option_plus_one(&self, value: usize) -> usize {
         value + 1
     }
 }

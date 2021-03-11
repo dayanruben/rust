@@ -3,11 +3,12 @@ use rustc_ast::ast::LitKind;
 use rustc_errors::Applicability;
 use rustc_hir::intravisit::FnKind;
 use rustc_hir::{
-    def, BinOpKind, BindingAnnotation, Body, Expr, ExprKind, FnDecl, HirId, Mutability, PatKind, Stmt, StmtKind, Ty,
-    TyKind, UnOp,
+    self as hir, def, BinOpKind, BindingAnnotation, Body, Expr, ExprKind, FnDecl, HirId, Mutability, PatKind, Stmt,
+    StmtKind, TyKind, UnOp,
 };
 use rustc_lint::{LateContext, LateLintPass};
-use rustc_middle::ty;
+use rustc_middle::lint::in_external_macro;
+use rustc_middle::ty::{self, Ty};
 use rustc_session::{declare_lint_pass, declare_tool_lint};
 use rustc_span::hygiene::DesugaringKind;
 use rustc_span::source_map::{ExpnKind, Span};
@@ -17,7 +18,7 @@ use crate::utils::sugg::Sugg;
 use crate::utils::{
     get_item_name, get_parent_expr, higher, implements_trait, in_constant, is_integer_const, iter_input_pats,
     last_path_segment, match_qpath, match_trait_method, paths, snippet, snippet_opt, span_lint, span_lint_and_sugg,
-    span_lint_and_then, span_lint_hir_and_then, walk_ptrs_ty, SpanlessEq,
+    span_lint_and_then, span_lint_hir_and_then, unsext, SpanlessEq,
 };
 
 declare_clippy_lint! {
@@ -38,8 +39,14 @@ declare_clippy_lint! {
     /// dereferences, e.g., changing `*x` to `x` within the function.
     ///
     /// **Example:**
-    /// ```rust
+    /// ```rust,ignore
+    /// // Bad
     /// fn foo(ref x: u8) -> bool {
+    ///     true
+    /// }
+    ///
+    /// // Good
+    /// fn foo(x: &u8) -> bool {
     ///     true
     /// }
     /// ```
@@ -60,7 +67,11 @@ declare_clippy_lint! {
     /// ```rust
     /// # let x = 1.0;
     ///
+    /// // Bad
     /// if x == f32::NAN { }
+    ///
+    /// // Good
+    /// if x.is_nan() { }
     /// ```
     pub CMP_NAN,
     correctness,
@@ -83,8 +94,17 @@ declare_clippy_lint! {
     /// ```rust
     /// let x = 1.2331f64;
     /// let y = 1.2332f64;
+    ///
+    /// // Bad
     /// if y == 1.23f64 { }
     /// if y != x {} // where both are floats
+    ///
+    /// // Good
+    /// let error_margin = f64::EPSILON; // Use an epsilon for comparison
+    /// // Or, if Rust <= 1.42, use `std::f64::EPSILON` constant instead.
+    /// // let error_margin = std::f64::EPSILON;
+    /// if (y - 1.23f64).abs() < error_margin { }
+    /// if (y - x).abs() > error_margin { }
     /// ```
     pub FLOAT_CMP,
     correctness,
@@ -119,12 +139,14 @@ declare_clippy_lint! {
 }
 
 declare_clippy_lint! {
-    /// **What it does:** Checks for getting the remainder of a division by one.
+    /// **What it does:** Checks for getting the remainder of a division by one or minus
+    /// one.
     ///
-    /// **Why is this bad?** The result can only ever be zero. No one will write
-    /// such code deliberately, unless trying to win an Underhanded Rust
-    /// Contest. Even for that contest, it's probably a bad idea. Use something more
-    /// underhanded.
+    /// **Why is this bad?** The result for a divisor of one can only ever be zero; for
+    /// minus one it can cause panic/overflow (if the left operand is the minimal value of
+    /// the respective integer type) or results in zero. No one will write such code
+    /// deliberately, unless trying to win an Underhanded Rust Contest. Even for that
+    /// contest, it's probably a bad idea. Use something more underhanded.
     ///
     /// **Known problems:** None.
     ///
@@ -132,10 +154,11 @@ declare_clippy_lint! {
     /// ```rust
     /// # let x = 1;
     /// let a = x % 1;
+    /// let a = x % -1;
     /// ```
     pub MODULO_ONE,
     correctness,
-    "taking a number modulo 1, which always returns 0"
+    "taking a number modulo +/-1, which can either panic/overflow or always returns 0"
 }
 
 declare_clippy_lint! {
@@ -191,7 +214,11 @@ declare_clippy_lint! {
     /// **Example:**
     ///
     /// ```rust
+    /// // Bad
     /// let a = 0 as *const u32;
+    ///
+    /// // Good
+    /// let a = std::ptr::null::<u32>();
     /// ```
     pub ZERO_PTR,
     style,
@@ -214,7 +241,15 @@ declare_clippy_lint! {
     /// ```rust
     /// let x: f64 = 1.0;
     /// const ONE: f64 = 1.00;
-    /// x == ONE;  // where both are floats
+    ///
+    /// // Bad
+    /// if x == ONE { } // where both are floats
+    ///
+    /// // Good
+    /// let error_margin = f64::EPSILON; // Use an epsilon for comparison
+    /// // Or, if Rust <= 1.42, use `std::f64::EPSILON` constant instead.
+    /// // let error_margin = std::f64::EPSILON;
+    /// if (x - ONE).abs() < error_margin { }
     /// ```
     pub FLOAT_CMP_CONST,
     restriction,
@@ -233,45 +268,48 @@ declare_lint_pass!(MiscLints => [
     FLOAT_CMP_CONST
 ]);
 
-impl<'a, 'tcx> LateLintPass<'a, 'tcx> for MiscLints {
+impl<'tcx> LateLintPass<'tcx> for MiscLints {
     fn check_fn(
         &mut self,
-        cx: &LateContext<'a, 'tcx>,
+        cx: &LateContext<'tcx>,
         k: FnKind<'tcx>,
         decl: &'tcx FnDecl<'_>,
         body: &'tcx Body<'_>,
-        _: Span,
+        span: Span,
         _: HirId,
     ) {
-        if let FnKind::Closure(_) = k {
+        if let FnKind::Closure = k {
             // Does not apply to closures
             return;
         }
+        if in_external_macro(cx.tcx.sess, span) {
+            return;
+        }
         for arg in iter_input_pats(decl, body) {
-            match arg.pat.kind {
-                PatKind::Binding(BindingAnnotation::Ref, ..) | PatKind::Binding(BindingAnnotation::RefMut, ..) => {
-                    span_lint(
-                        cx,
-                        TOPLEVEL_REF_ARG,
-                        arg.pat.span,
-                        "`ref` directly on a function argument is ignored. Consider using a reference type \
-                         instead.",
-                    );
-                },
-                _ => {},
+            if let PatKind::Binding(BindingAnnotation::Ref | BindingAnnotation::RefMut, ..) = arg.pat.kind {
+                span_lint(
+                    cx,
+                    TOPLEVEL_REF_ARG,
+                    arg.pat.span,
+                    "`ref` directly on a function argument is ignored. \
+                    Consider using a reference type instead.",
+                );
             }
         }
     }
 
-    fn check_stmt(&mut self, cx: &LateContext<'a, 'tcx>, stmt: &'tcx Stmt<'_>) {
+    fn check_stmt(&mut self, cx: &LateContext<'tcx>, stmt: &'tcx Stmt<'_>) {
         if_chain! {
+            if !in_external_macro(cx.tcx.sess, stmt.span);
             if let StmtKind::Local(ref local) = stmt.kind;
             if let PatKind::Binding(an, .., name, None) = local.pat.kind;
             if let Some(ref init) = local.init;
             if !higher::is_from_for_desugar(local);
             then {
                 if an == BindingAnnotation::Ref || an == BindingAnnotation::RefMut {
-                    let sugg_init = if init.span.from_expansion() {
+                    // use the macro callsite when the init span (but not the whole local span)
+                    // comes from an expansion like `vec![1, 2, 3]` in `let ref _ = vec![1, 2, 3];`
+                    let sugg_init = if init.span.from_expansion() && !local.span.from_expansion() {
                         Sugg::hir_with_macro_callsite(cx, init, "..")
                     } else {
                         Sugg::hir(cx, init, "..")
@@ -282,7 +320,7 @@ impl<'a, 'tcx> LateLintPass<'a, 'tcx> for MiscLints {
                         ("", sugg_init.addr())
                     };
                     let tyopt = if let Some(ref ty) = local.ty {
-                        format!(": &{mutopt}{ty}", mutopt=mutopt, ty=snippet(cx, ty.span, "_"))
+                        format!(": &{mutopt}{ty}", mutopt=mutopt, ty=snippet(cx, ty.span, ".."))
                     } else {
                         String::new()
                     };
@@ -298,7 +336,7 @@ impl<'a, 'tcx> LateLintPass<'a, 'tcx> for MiscLints {
                                 "try",
                                 format!(
                                     "let {name}{tyopt} = {initref};",
-                                    name=snippet(cx, name.span, "_"),
+                                    name=snippet(cx, name.span, ".."),
                                     tyopt=tyopt,
                                     initref=initref,
                                 ),
@@ -336,67 +374,15 @@ impl<'a, 'tcx> LateLintPass<'a, 'tcx> for MiscLints {
         };
     }
 
-    fn check_expr(&mut self, cx: &LateContext<'a, 'tcx>, expr: &'tcx Expr<'_>) {
+    fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'_>) {
         match expr.kind {
             ExprKind::Cast(ref e, ref ty) => {
                 check_cast(cx, expr.span, e, ty);
                 return;
             },
             ExprKind::Binary(ref cmp, ref left, ref right) => {
-                let op = cmp.node;
-                if op.is_comparison() {
-                    check_nan(cx, left, expr);
-                    check_nan(cx, right, expr);
-                    check_to_owned(cx, left, right);
-                    check_to_owned(cx, right, left);
-                }
-                if (op == BinOpKind::Eq || op == BinOpKind::Ne) && (is_float(cx, left) || is_float(cx, right)) {
-                    if is_allowed(cx, left) || is_allowed(cx, right) {
-                        return;
-                    }
-
-                    // Allow comparing the results of signum()
-                    if is_signum(cx, left) && is_signum(cx, right) {
-                        return;
-                    }
-
-                    if let Some(name) = get_item_name(cx, expr) {
-                        let name = name.as_str();
-                        if name == "eq"
-                            || name == "ne"
-                            || name == "is_nan"
-                            || name.starts_with("eq_")
-                            || name.ends_with("_eq")
-                        {
-                            return;
-                        }
-                    }
-                    let is_comparing_arrays = is_array(cx, left) || is_array(cx, right);
-                    let (lint, msg) = get_lint_and_message(
-                        is_named_constant(cx, left) || is_named_constant(cx, right),
-                        is_comparing_arrays,
-                    );
-                    span_lint_and_then(cx, lint, expr.span, msg, |diag| {
-                        let lhs = Sugg::hir(cx, left, "..");
-                        let rhs = Sugg::hir(cx, right, "..");
-
-                        if !is_comparing_arrays {
-                            diag.span_suggestion(
-                                expr.span,
-                                "consider comparing them within some error",
-                                format!(
-                                    "({}).abs() {} error",
-                                    lhs - rhs,
-                                    if op == BinOpKind::Eq { '<' } else { '>' }
-                                ),
-                                Applicability::HasPlaceholders, // snippet
-                            );
-                        }
-                        diag.note("`f32::EPSILON` and `f64::EPSILON` are available for the `error`");
-                    });
-                } else if op == BinOpKind::Rem && is_integer_const(cx, right, 1) {
-                    span_lint(cx, MODULO_ONE, expr.span, "any number modulo 1 will be 0");
-                }
+                check_binary(cx, expr, cmp, left, right);
+                return;
             },
             _ => {},
         }
@@ -405,14 +391,14 @@ impl<'a, 'tcx> LateLintPass<'a, 'tcx> for MiscLints {
             return;
         }
         let binding = match expr.kind {
-            ExprKind::Path(ref qpath) => {
+            ExprKind::Path(ref qpath) if !matches!(qpath, hir::QPath::LangItem(..)) => {
                 let binding = last_path_segment(qpath).ident.as_str();
                 if binding.starts_with('_') &&
                     !binding.starts_with("__") &&
                     binding != "_result" && // FIXME: #944
                     is_used(cx, expr) &&
                     // don't lint if the declaration is in a macro
-                    non_macro_local(cx, cx.tables.qpath_res(qpath, expr.hir_id))
+                    non_macro_local(cx, cx.qpath_res(qpath, expr.hir_id))
                 {
                     Some(binding)
                 } else {
@@ -469,10 +455,10 @@ fn get_lint_and_message(
     }
 }
 
-fn check_nan(cx: &LateContext<'_, '_>, expr: &Expr<'_>, cmp_expr: &Expr<'_>) {
+fn check_nan(cx: &LateContext<'_>, expr: &Expr<'_>, cmp_expr: &Expr<'_>) {
     if_chain! {
         if !in_constant(cx, cmp_expr.hir_id);
-        if let Some((value, _)) = constant(cx, cx.tables, expr);
+        if let Some((value, _)) = constant(cx, cx.typeck_results(), expr);
         then {
             let needs_lint = match value {
                 Constant::F32(num) => num.is_nan(),
@@ -492,16 +478,16 @@ fn check_nan(cx: &LateContext<'_, '_>, expr: &Expr<'_>, cmp_expr: &Expr<'_>) {
     }
 }
 
-fn is_named_constant<'a, 'tcx>(cx: &LateContext<'a, 'tcx>, expr: &'tcx Expr<'_>) -> bool {
-    if let Some((_, res)) = constant(cx, cx.tables, expr) {
+fn is_named_constant<'tcx>(cx: &LateContext<'tcx>, expr: &'tcx Expr<'_>) -> bool {
+    if let Some((_, res)) = constant(cx, cx.typeck_results(), expr) {
         res
     } else {
         false
     }
 }
 
-fn is_allowed<'a, 'tcx>(cx: &LateContext<'a, 'tcx>, expr: &'tcx Expr<'_>) -> bool {
-    match constant(cx, cx.tables, expr) {
+fn is_allowed<'tcx>(cx: &LateContext<'tcx>, expr: &'tcx Expr<'_>) -> bool {
+    match constant(cx, cx.typeck_results(), expr) {
         Some((Constant::F32(f), _)) => f == 0.0 || f.is_infinite(),
         Some((Constant::F64(f), _)) => f == 0.0 || f.is_infinite(),
         Some((Constant::Vec(vec), _)) => vec.iter().all(|f| match f {
@@ -514,14 +500,14 @@ fn is_allowed<'a, 'tcx>(cx: &LateContext<'a, 'tcx>, expr: &'tcx Expr<'_>) -> boo
 }
 
 // Return true if `expr` is the result of `signum()` invoked on a float value.
-fn is_signum(cx: &LateContext<'_, '_>, expr: &Expr<'_>) -> bool {
+fn is_signum(cx: &LateContext<'_>, expr: &Expr<'_>) -> bool {
     // The negation of a signum is still a signum
-    if let ExprKind::Unary(UnOp::UnNeg, ref child_expr) = expr.kind {
+    if let ExprKind::Unary(UnOp::Neg, ref child_expr) = expr.kind {
         return is_signum(cx, &child_expr);
     }
 
     if_chain! {
-        if let ExprKind::MethodCall(ref method_name, _, ref expressions) = expr.kind;
+        if let ExprKind::MethodCall(ref method_name, _, ref expressions, _) = expr.kind;
         if sym!(signum) == method_name.ident.name;
         // Check that the receiver of the signum() is a float (expressions[0] is the receiver of
         // the method call)
@@ -532,25 +518,44 @@ fn is_signum(cx: &LateContext<'_, '_>, expr: &Expr<'_>) -> bool {
     false
 }
 
-fn is_float(cx: &LateContext<'_, '_>, expr: &Expr<'_>) -> bool {
-    let value = &walk_ptrs_ty(cx.tables.expr_ty(expr)).kind;
+fn is_float(cx: &LateContext<'_>, expr: &Expr<'_>) -> bool {
+    let value = &cx.typeck_results().expr_ty(expr).peel_refs().kind();
 
     if let ty::Array(arr_ty, _) = value {
-        return matches!(arr_ty.kind, ty::Float(_));
+        return matches!(arr_ty.kind(), ty::Float(_));
     };
 
     matches!(value, ty::Float(_))
 }
 
-fn is_array(cx: &LateContext<'_, '_>, expr: &Expr<'_>) -> bool {
-    matches!(&walk_ptrs_ty(cx.tables.expr_ty(expr)).kind, ty::Array(_, _))
+fn is_array(cx: &LateContext<'_>, expr: &Expr<'_>) -> bool {
+    matches!(&cx.typeck_results().expr_ty(expr).peel_refs().kind(), ty::Array(_, _))
 }
 
-fn check_to_owned(cx: &LateContext<'_, '_>, expr: &Expr<'_>, other: &Expr<'_>) {
+fn check_to_owned(cx: &LateContext<'_>, expr: &Expr<'_>, other: &Expr<'_>, left: bool) {
+    #[derive(Default)]
+    struct EqImpl {
+        ty_eq_other: bool,
+        other_eq_ty: bool,
+    }
+
+    impl EqImpl {
+        fn is_implemented(&self) -> bool {
+            self.ty_eq_other || self.other_eq_ty
+        }
+    }
+
+    fn symmetric_partial_eq<'tcx>(cx: &LateContext<'tcx>, ty: Ty<'tcx>, other: Ty<'tcx>) -> Option<EqImpl> {
+        cx.tcx.lang_items().eq_trait().map(|def_id| EqImpl {
+            ty_eq_other: implements_trait(cx, ty, def_id, &[other.into()]),
+            other_eq_ty: implements_trait(cx, other, def_id, &[ty.into()]),
+        })
+    }
+
     let (arg_ty, snip) = match expr.kind {
-        ExprKind::MethodCall(.., ref args) if args.len() == 1 => {
+        ExprKind::MethodCall(.., ref args, _) if args.len() == 1 => {
             if match_trait_method(cx, expr, &paths::TO_STRING) || match_trait_method(cx, expr, &paths::TO_OWNED) {
-                (cx.tables.expr_ty_adjusted(&args[0]), snippet(cx, args[0].span, ".."))
+                (cx.typeck_results().expr_ty(&args[0]), snippet(cx, args[0].span, ".."))
             } else {
                 return;
             }
@@ -558,7 +563,7 @@ fn check_to_owned(cx: &LateContext<'_, '_>, expr: &Expr<'_>, other: &Expr<'_>) {
         ExprKind::Call(ref path, ref v) if v.len() == 1 => {
             if let ExprKind::Path(ref path) = path.kind {
                 if match_qpath(path, &["String", "from_str"]) || match_qpath(path, &["String", "from"]) {
-                    (cx.tables.expr_ty_adjusted(&v[0]), snippet(cx, v[0].span, ".."))
+                    (cx.typeck_results().expr_ty(&v[0]), snippet(cx, v[0].span, ".."))
                 } else {
                     return;
                 }
@@ -569,28 +574,19 @@ fn check_to_owned(cx: &LateContext<'_, '_>, expr: &Expr<'_>, other: &Expr<'_>) {
         _ => return,
     };
 
-    let other_ty = cx.tables.expr_ty_adjusted(other);
-    let partial_eq_trait_id = match cx.tcx.lang_items().eq_trait() {
-        Some(id) => id,
-        None => return,
-    };
+    let other_ty = cx.typeck_results().expr_ty(other);
 
-    let deref_arg_impl_partial_eq_other = arg_ty.builtin_deref(true).map_or(false, |tam| {
-        implements_trait(cx, tam.ty, partial_eq_trait_id, &[other_ty.into()])
-    });
-    let arg_impl_partial_eq_deref_other = other_ty.builtin_deref(true).map_or(false, |tam| {
-        implements_trait(cx, arg_ty, partial_eq_trait_id, &[tam.ty.into()])
-    });
-    let arg_impl_partial_eq_other = implements_trait(cx, arg_ty, partial_eq_trait_id, &[other_ty.into()]);
+    let without_deref = symmetric_partial_eq(cx, arg_ty, other_ty).unwrap_or_default();
+    let with_deref = arg_ty
+        .builtin_deref(true)
+        .and_then(|tam| symmetric_partial_eq(cx, tam.ty, other_ty))
+        .unwrap_or_default();
 
-    if !deref_arg_impl_partial_eq_other && !arg_impl_partial_eq_deref_other && !arg_impl_partial_eq_other {
+    if !with_deref.is_implemented() && !without_deref.is_implemented() {
         return;
     }
 
-    let other_gets_derefed = match other.kind {
-        ExprKind::Unary(UnOp::UnDeref, _) => true,
-        _ => false,
-    };
+    let other_gets_derefed = matches!(other.kind, ExprKind::Unary(UnOp::Deref, _));
 
     let lint_span = if other_gets_derefed {
         expr.span.to(other.span)
@@ -610,18 +606,34 @@ fn check_to_owned(cx: &LateContext<'_, '_>, expr: &Expr<'_>, other: &Expr<'_>) {
                 return;
             }
 
-            let try_hint = if deref_arg_impl_partial_eq_other {
-                // suggest deref on the left
-                format!("*{}", snip)
+            let expr_snip;
+            let eq_impl;
+            if with_deref.is_implemented() {
+                expr_snip = format!("*{}", snip);
+                eq_impl = with_deref;
             } else {
-                // suggest dropping the to_owned on the left
-                snip.to_string()
+                expr_snip = snip.to_string();
+                eq_impl = without_deref;
             };
 
+            let span;
+            let hint;
+            if (eq_impl.ty_eq_other && left) || (eq_impl.other_eq_ty && !left) {
+                span = expr.span;
+                hint = expr_snip;
+            } else {
+                span = expr.span.to(other.span);
+                if eq_impl.ty_eq_other {
+                    hint = format!("{} == {}", expr_snip, snippet(cx, other.span, ".."));
+                } else {
+                    hint = format!("{} == {}", snippet(cx, other.span, ".."), expr_snip);
+                }
+            }
+
             diag.span_suggestion(
-                lint_span,
+                span,
                 "try",
-                try_hint,
+                hint,
                 Applicability::MachineApplicable, // snippet
             );
         },
@@ -631,17 +643,11 @@ fn check_to_owned(cx: &LateContext<'_, '_>, expr: &Expr<'_>, other: &Expr<'_>) {
 /// Heuristic to see if an expression is used. Should be compatible with
 /// `unused_variables`'s idea
 /// of what it means for an expression to be "used".
-fn is_used(cx: &LateContext<'_, '_>, expr: &Expr<'_>) -> bool {
-    if let Some(parent) = get_parent_expr(cx, expr) {
-        match parent.kind {
-            ExprKind::Assign(_, ref rhs, _) | ExprKind::AssignOp(_, _, ref rhs) => {
-                SpanlessEq::new(cx).eq_expr(rhs, expr)
-            },
-            _ => is_used(cx, parent),
-        }
-    } else {
-        true
-    }
+fn is_used(cx: &LateContext<'_>, expr: &Expr<'_>) -> bool {
+    get_parent_expr(cx, expr).map_or(true, |parent| match parent.kind {
+        ExprKind::Assign(_, ref rhs, _) | ExprKind::AssignOp(_, _, ref rhs) => SpanlessEq::new(cx).eq_expr(rhs, expr),
+        _ => is_used(cx, parent),
+    })
 }
 
 /// Tests whether an expression is in a macro expansion (e.g., something
@@ -650,19 +656,14 @@ fn in_attributes_expansion(expr: &Expr<'_>) -> bool {
     use rustc_span::hygiene::MacroKind;
     if expr.span.from_expansion() {
         let data = expr.span.ctxt().outer_expn_data();
-
-        if let ExpnKind::Macro(MacroKind::Attr, _) = data.kind {
-            true
-        } else {
-            false
-        }
+        matches!(data.kind, ExpnKind::Macro(MacroKind::Attr, _))
     } else {
         false
     }
 }
 
 /// Tests whether `res` is a variable defined outside a macro.
-fn non_macro_local(cx: &LateContext<'_, '_>, res: def::Res) -> bool {
+fn non_macro_local(cx: &LateContext<'_>, res: def::Res) -> bool {
     if let def::Res::Local(id) = res {
         !cx.tcx.hir().span(id).from_expansion()
     } else {
@@ -670,7 +671,7 @@ fn non_macro_local(cx: &LateContext<'_, '_>, res: def::Res) -> bool {
     }
 }
 
-fn check_cast(cx: &LateContext<'_, '_>, span: Span, e: &Expr<'_>, ty: &Ty<'_>) {
+fn check_cast(cx: &LateContext<'_>, span: Span, e: &Expr<'_>, ty: &hir::Ty<'_>) {
     if_chain! {
         if let TyKind::Ptr(ref mut_ty) = ty.kind;
         if let ExprKind::Lit(ref lit) = e.kind;
@@ -692,5 +693,76 @@ fn check_cast(cx: &LateContext<'_, '_>, span: Span, e: &Expr<'_>, ty: &Ty<'_>) {
             };
             span_lint_and_sugg(cx, ZERO_PTR, span, msg, "try", sugg, appl);
         }
+    }
+}
+
+fn check_binary(
+    cx: &LateContext<'a>,
+    expr: &Expr<'_>,
+    cmp: &rustc_span::source_map::Spanned<rustc_hir::BinOpKind>,
+    left: &'a Expr<'_>,
+    right: &'a Expr<'_>,
+) {
+    let op = cmp.node;
+    if op.is_comparison() {
+        check_nan(cx, left, expr);
+        check_nan(cx, right, expr);
+        check_to_owned(cx, left, right, true);
+        check_to_owned(cx, right, left, false);
+    }
+    if (op == BinOpKind::Eq || op == BinOpKind::Ne) && (is_float(cx, left) || is_float(cx, right)) {
+        if is_allowed(cx, left) || is_allowed(cx, right) {
+            return;
+        }
+
+        // Allow comparing the results of signum()
+        if is_signum(cx, left) && is_signum(cx, right) {
+            return;
+        }
+
+        if let Some(name) = get_item_name(cx, expr) {
+            let name = name.as_str();
+            if name == "eq" || name == "ne" || name == "is_nan" || name.starts_with("eq_") || name.ends_with("_eq") {
+                return;
+            }
+        }
+        let is_comparing_arrays = is_array(cx, left) || is_array(cx, right);
+        let (lint, msg) = get_lint_and_message(
+            is_named_constant(cx, left) || is_named_constant(cx, right),
+            is_comparing_arrays,
+        );
+        span_lint_and_then(cx, lint, expr.span, msg, |diag| {
+            let lhs = Sugg::hir(cx, left, "..");
+            let rhs = Sugg::hir(cx, right, "..");
+
+            if !is_comparing_arrays {
+                diag.span_suggestion(
+                    expr.span,
+                    "consider comparing them within some margin of error",
+                    format!(
+                        "({}).abs() {} error_margin",
+                        lhs - rhs,
+                        if op == BinOpKind::Eq { '<' } else { '>' }
+                    ),
+                    Applicability::HasPlaceholders, // snippet
+                );
+            }
+            diag.note("`f32::EPSILON` and `f64::EPSILON` are available for the `error_margin`");
+        });
+    } else if op == BinOpKind::Rem {
+        if is_integer_const(cx, right, 1) {
+            span_lint(cx, MODULO_ONE, expr.span, "any number modulo 1 will be 0");
+        }
+
+        if let ty::Int(ity) = cx.typeck_results().expr_ty(right).kind() {
+            if is_integer_const(cx, right, unsext(cx.tcx, -1, *ity)) {
+                span_lint(
+                    cx,
+                    MODULO_ONE,
+                    expr.span,
+                    "any number modulo -1 will panic/overflow or result in 0",
+                );
+            }
+        };
     }
 }

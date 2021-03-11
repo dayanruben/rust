@@ -25,7 +25,7 @@ fn write_test_case(file: &Path, n: usize) -> HashSet<String> {
         writeln!(f, "#[link(name = \"S{}{}S\")]", prefix, i).unwrap();
         libs.insert(format!("{}{}", prefix, i));
     }
-    writeln!(f, "extern {{}}\nfn main() {{}}").unwrap();
+    writeln!(f, "extern \"C\" {{}}\nfn main() {{}}").unwrap();
     f.into_inner().unwrap();
 
     libs
@@ -90,7 +90,7 @@ fn main() {
         }
 
         let linker_args = read_linker_args(&ok);
-        for mut arg in linker_args.split('S') {
+        for arg in linker_args.split('S') {
             expected_libs.remove(arg);
         }
 

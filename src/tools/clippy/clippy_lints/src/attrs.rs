@@ -1,23 +1,22 @@
 //! checks for attributes
 
-use crate::reexport::Name;
 use crate::utils::{
-    first_line_of_span, is_present_in_source, match_def_path, paths, snippet_opt, span_lint, span_lint_and_sugg,
-    span_lint_and_then, without_block_comments,
+    first_line_of_span, is_present_in_source, match_panic_def_id, snippet_opt, span_lint, span_lint_and_help,
+    span_lint_and_sugg, span_lint_and_then, without_block_comments,
 };
 use if_chain::if_chain;
-use rustc_ast::ast::{AttrKind, AttrStyle, Attribute, Lit, LitKind, MetaItemKind, NestedMetaItem};
-use rustc_ast::util::lev_distance::find_best_match_for_name;
+use rustc_ast::{AttrKind, AttrStyle, Attribute, Lit, LitKind, MetaItemKind, NestedMetaItem};
 use rustc_errors::Applicability;
 use rustc_hir::{
     Block, Expr, ExprKind, ImplItem, ImplItemKind, Item, ItemKind, StmtKind, TraitFn, TraitItem, TraitItemKind,
 };
-use rustc_lint::{CheckLintNameResult, EarlyContext, EarlyLintPass, LateContext, LateLintPass, LintContext};
+use rustc_lint::{EarlyContext, EarlyLintPass, LateContext, LateLintPass, LintContext};
 use rustc_middle::lint::in_external_macro;
 use rustc_middle::ty;
 use rustc_session::{declare_lint_pass, declare_tool_lint};
 use rustc_span::source_map::Span;
-use rustc_span::symbol::Symbol;
+use rustc_span::sym;
+use rustc_span::symbol::{Symbol, SymbolStr};
 use semver::Version;
 
 static UNIX_SYSTEMS: &[&str] = &[
@@ -40,7 +39,7 @@ static UNIX_SYSTEMS: &[&str] = &[
 ];
 
 // NOTE: windows is excluded from the list because it's also a valid target family.
-static NON_UNIX_SYSTEMS: &[&str] = &["cloudabi", "hermit", "none", "wasi"];
+static NON_UNIX_SYSTEMS: &[&str] = &["hermit", "none", "wasi"];
 
 declare_clippy_lint! {
     /// **What it does:** Checks for items annotated with `#[inline(always)]`,
@@ -72,8 +71,9 @@ declare_clippy_lint! {
     /// **What it does:** Checks for `extern crate` and `use` items annotated with
     /// lint attributes.
     ///
-    /// This lint whitelists `#[allow(unused_imports)]`, `#[allow(deprecated)]` and
-    /// `#[allow(unreachable_pub)]` on `use` items and `#[allow(unused_imports)]` on
+    /// This lint permits `#[allow(unused_imports)]`, `#[allow(deprecated)]`,
+    /// `#[allow(unreachable_pub)]`, `#[allow(clippy::wildcard_imports)]` and
+    /// `#[allow(clippy::enum_glob_use)]` on `use` items and `#[allow(unused_imports)]` on
     /// `extern crate` items with a `#[macro_use]` attribute.
     ///
     /// **Why is this bad?** Lint attributes have no effect on crate imports. Most
@@ -137,17 +137,17 @@ declare_clippy_lint! {
     /// **Example:**
     /// ```rust
     /// // Good (as inner attribute)
-    /// #![inline(always)]
+    /// #![allow(dead_code)]
     ///
     /// fn this_is_fine() { }
     ///
     /// // Bad
-    /// #[inline(always)]
+    /// #[allow(dead_code)]
     ///
     /// fn not_quite_good_code() { }
     ///
     /// // Good (as outer attribute)
-    /// #[inline(always)]
+    /// #[allow(dead_code)]
     /// fn this_is_fine_too() { }
     /// ```
     pub EMPTY_LINE_AFTER_OUTER_ATTR,
@@ -156,30 +156,26 @@ declare_clippy_lint! {
 }
 
 declare_clippy_lint! {
-    /// **What it does:** Checks for `allow`/`warn`/`deny`/`forbid` attributes with scoped clippy
-    /// lints and if those lints exist in clippy. If there is an uppercase letter in the lint name
-    /// (not the tool name) and a lowercase version of this lint exists, it will suggest to lowercase
-    /// the lint name.
+    /// **What it does:** Checks for `warn`/`deny`/`forbid` attributes targeting the whole clippy::restriction category.
     ///
-    /// **Why is this bad?** A lint attribute with a mistyped lint name won't have an effect.
+    /// **Why is this bad?** Restriction lints sometimes are in contrast with other lints or even go against idiomatic rust.
+    /// These lints should only be enabled on a lint-by-lint basis and with careful consideration.
     ///
     /// **Known problems:** None.
     ///
     /// **Example:**
     /// Bad:
     /// ```rust
-    /// #![warn(if_not_els)]
-    /// #![deny(clippy::All)]
+    /// #![deny(clippy::restriction)]
     /// ```
     ///
     /// Good:
     /// ```rust
-    /// #![warn(if_not_else)]
-    /// #![deny(clippy::all)]
+    /// #![deny(clippy::as_conversions)]
     /// ```
-    pub UNKNOWN_CLIPPY_LINTS,
+    pub BLANKET_CLIPPY_RESTRICTION_LINTS,
     style,
-    "unknown_lints for scoped Clippy lints"
+    "enabling the complete restriction group"
 }
 
 declare_clippy_lint! {
@@ -248,28 +244,28 @@ declare_lint_pass!(Attributes => [
     INLINE_ALWAYS,
     DEPRECATED_SEMVER,
     USELESS_ATTRIBUTE,
-    EMPTY_LINE_AFTER_OUTER_ATTR,
-    UNKNOWN_CLIPPY_LINTS,
+    BLANKET_CLIPPY_RESTRICTION_LINTS,
 ]);
 
-impl<'a, 'tcx> LateLintPass<'a, 'tcx> for Attributes {
-    fn check_attribute(&mut self, cx: &LateContext<'a, 'tcx>, attr: &'tcx Attribute) {
+impl<'tcx> LateLintPass<'tcx> for Attributes {
+    fn check_attribute(&mut self, cx: &LateContext<'tcx>, attr: &'tcx Attribute) {
         if let Some(items) = &attr.meta_item_list() {
             if let Some(ident) = attr.ident() {
-                match &*ident.as_str() {
+                let ident = &*ident.as_str();
+                match ident {
                     "allow" | "warn" | "deny" | "forbid" => {
-                        check_clippy_lint_names(cx, items);
+                        check_clippy_lint_names(cx, ident, items);
                     },
                     _ => {},
                 }
-                if items.is_empty() || !attr.check_name(sym!(deprecated)) {
+                if items.is_empty() || !attr.has_name(sym::deprecated) {
                     return;
                 }
                 for item in items {
                     if_chain! {
                         if let NestedMetaItem::MetaItem(mi) = &item;
                         if let MetaItemKind::NameValue(lit) = &mi.kind;
-                        if mi.check_name(sym!(since));
+                        if mi.has_name(sym::since);
                         then {
                             check_semver(cx, item.span(), lit);
                         }
@@ -279,15 +275,16 @@ impl<'a, 'tcx> LateLintPass<'a, 'tcx> for Attributes {
         }
     }
 
-    fn check_item(&mut self, cx: &LateContext<'a, 'tcx>, item: &'tcx Item<'_>) {
+    fn check_item(&mut self, cx: &LateContext<'tcx>, item: &'tcx Item<'_>) {
+        let attrs = cx.tcx.hir().attrs(item.hir_id());
         if is_relevant_item(cx, item) {
-            check_attrs(cx, item.span, item.ident.name, &item.attrs)
+            check_attrs(cx, item.span, item.ident.name, attrs)
         }
         match item.kind {
             ItemKind::ExternCrate(..) | ItemKind::Use(..) => {
-                let skip_unused_imports = item.attrs.iter().any(|attr| attr.check_name(sym!(macro_use)));
+                let skip_unused_imports = attrs.iter().any(|attr| attr.has_name(sym::macro_use));
 
-                for attr in item.attrs {
+                for attr in attrs {
                     if in_external_macro(cx.sess(), attr.span) {
                         return;
                     }
@@ -295,15 +292,19 @@ impl<'a, 'tcx> LateLintPass<'a, 'tcx> for Attributes {
                         if let Some(ident) = attr.ident() {
                             match &*ident.as_str() {
                                 "allow" | "warn" | "deny" | "forbid" => {
-                                    // whitelist `unused_imports`, `deprecated` and `unreachable_pub` for `use` items
+                                    // permit `unused_imports`, `deprecated`, `unreachable_pub`,
+                                    // `clippy::wildcard_imports`, and `clippy::enum_glob_use` for `use` items
                                     // and `unused_imports` for `extern crate` items with `macro_use`
                                     for lint in lint_list {
                                         match item.kind {
                                             ItemKind::Use(..) => {
                                                 if is_word(lint, sym!(unused_imports))
-                                                    || is_word(lint, sym!(deprecated))
+                                                    || is_word(lint, sym::deprecated)
                                                     || is_word(lint, sym!(unreachable_pub))
                                                     || is_word(lint, sym!(unused))
+                                                    || extract_clippy_lint(lint)
+                                                        .map_or(false, |s| s == "wildcard_imports")
+                                                    || extract_clippy_lint(lint).map_or(false, |s| s == "enum_glob_use")
                                                 {
                                                     return;
                                                 }
@@ -351,121 +352,101 @@ impl<'a, 'tcx> LateLintPass<'a, 'tcx> for Attributes {
         }
     }
 
-    fn check_impl_item(&mut self, cx: &LateContext<'a, 'tcx>, item: &'tcx ImplItem<'_>) {
+    fn check_impl_item(&mut self, cx: &LateContext<'tcx>, item: &'tcx ImplItem<'_>) {
         if is_relevant_impl(cx, item) {
-            check_attrs(cx, item.span, item.ident.name, &item.attrs)
+            check_attrs(cx, item.span, item.ident.name, cx.tcx.hir().attrs(item.hir_id()))
         }
     }
 
-    fn check_trait_item(&mut self, cx: &LateContext<'a, 'tcx>, item: &'tcx TraitItem<'_>) {
+    fn check_trait_item(&mut self, cx: &LateContext<'tcx>, item: &'tcx TraitItem<'_>) {
         if is_relevant_trait(cx, item) {
-            check_attrs(cx, item.span, item.ident.name, &item.attrs)
+            check_attrs(cx, item.span, item.ident.name, cx.tcx.hir().attrs(item.hir_id()))
         }
     }
 }
 
-#[allow(clippy::single_match_else)]
-fn check_clippy_lint_names(cx: &LateContext<'_, '_>, items: &[NestedMetaItem]) {
-    let lint_store = cx.lints();
+/// Returns the lint name if it is clippy lint.
+fn extract_clippy_lint(lint: &NestedMetaItem) -> Option<SymbolStr> {
+    if_chain! {
+        if let Some(meta_item) = lint.meta_item();
+        if meta_item.path.segments.len() > 1;
+        if let tool_name = meta_item.path.segments[0].ident;
+        if tool_name.name == sym::clippy;
+        let lint_name = meta_item.path.segments.last().unwrap().ident.name;
+        then {
+            return Some(lint_name.as_str());
+        }
+    }
+    None
+}
+
+fn check_clippy_lint_names(cx: &LateContext<'_>, ident: &str, items: &[NestedMetaItem]) {
     for lint in items {
-        if_chain! {
-            if let Some(meta_item) = lint.meta_item();
-            if meta_item.path.segments.len() > 1;
-            if let tool_name = meta_item.path.segments[0].ident;
-            if tool_name.as_str() == "clippy";
-            let name = meta_item.path.segments.last().unwrap().ident.name;
-            if let CheckLintNameResult::Tool(Err((None, _))) = lint_store.check_lint_name(
-                &name.as_str(),
-                Some(tool_name.name),
-            );
-            then {
-                span_lint_and_then(
+        if let Some(lint_name) = extract_clippy_lint(lint) {
+            if lint_name == "restriction" && ident != "allow" {
+                span_lint_and_help(
                     cx,
-                    UNKNOWN_CLIPPY_LINTS,
+                    BLANKET_CLIPPY_RESTRICTION_LINTS,
                     lint.span(),
-                    &format!("unknown clippy lint: clippy::{}", name),
-                    |diag| {
-                        let name_lower = name.as_str().to_lowercase();
-                        let symbols = lint_store.get_lints().iter().map(
-                            |l| Symbol::intern(&l.name_lower())
-                        ).collect::<Vec<_>>();
-                        let sugg = find_best_match_for_name(
-                            symbols.iter(),
-                            &format!("clippy::{}", name_lower),
-                            None,
-                        );
-                        if name.as_str().chars().any(char::is_uppercase)
-                            && lint_store.find_lints(&format!("clippy::{}", name_lower)).is_ok() {
-                            diag.span_suggestion(
-                                lint.span(),
-                                "lowercase the lint name",
-                                format!("clippy::{}", name_lower),
-                                Applicability::MachineApplicable,
-                            );
-                        } else if let Some(sugg) = sugg {
-                            diag.span_suggestion(
-                                lint.span(),
-                                "did you mean",
-                                sugg.to_string(),
-                                Applicability::MachineApplicable,
-                            );
-                        }
-                    }
+                    "restriction lints are not meant to be all enabled",
+                    None,
+                    "try enabling only the lints you really need",
                 );
             }
-        };
+        }
     }
 }
 
-fn is_relevant_item(cx: &LateContext<'_, '_>, item: &Item<'_>) -> bool {
+fn is_relevant_item(cx: &LateContext<'_>, item: &Item<'_>) -> bool {
     if let ItemKind::Fn(_, _, eid) = item.kind {
-        is_relevant_expr(cx, cx.tcx.body_tables(eid), &cx.tcx.hir().body(eid).value)
+        is_relevant_expr(cx, cx.tcx.typeck_body(eid), &cx.tcx.hir().body(eid).value)
     } else {
         true
     }
 }
 
-fn is_relevant_impl(cx: &LateContext<'_, '_>, item: &ImplItem<'_>) -> bool {
+fn is_relevant_impl(cx: &LateContext<'_>, item: &ImplItem<'_>) -> bool {
     match item.kind {
-        ImplItemKind::Fn(_, eid) => is_relevant_expr(cx, cx.tcx.body_tables(eid), &cx.tcx.hir().body(eid).value),
+        ImplItemKind::Fn(_, eid) => is_relevant_expr(cx, cx.tcx.typeck_body(eid), &cx.tcx.hir().body(eid).value),
         _ => false,
     }
 }
 
-fn is_relevant_trait(cx: &LateContext<'_, '_>, item: &TraitItem<'_>) -> bool {
+fn is_relevant_trait(cx: &LateContext<'_>, item: &TraitItem<'_>) -> bool {
     match item.kind {
         TraitItemKind::Fn(_, TraitFn::Required(_)) => true,
         TraitItemKind::Fn(_, TraitFn::Provided(eid)) => {
-            is_relevant_expr(cx, cx.tcx.body_tables(eid), &cx.tcx.hir().body(eid).value)
+            is_relevant_expr(cx, cx.tcx.typeck_body(eid), &cx.tcx.hir().body(eid).value)
         },
         _ => false,
     }
 }
 
-fn is_relevant_block(cx: &LateContext<'_, '_>, tables: &ty::TypeckTables<'_>, block: &Block<'_>) -> bool {
-    if let Some(stmt) = block.stmts.first() {
-        match &stmt.kind {
+fn is_relevant_block(cx: &LateContext<'_>, typeck_results: &ty::TypeckResults<'_>, block: &Block<'_>) -> bool {
+    block.stmts.first().map_or(
+        block
+            .expr
+            .as_ref()
+            .map_or(false, |e| is_relevant_expr(cx, typeck_results, e)),
+        |stmt| match &stmt.kind {
             StmtKind::Local(_) => true,
-            StmtKind::Expr(expr) | StmtKind::Semi(expr) => is_relevant_expr(cx, tables, expr),
+            StmtKind::Expr(expr) | StmtKind::Semi(expr) => is_relevant_expr(cx, typeck_results, expr),
             _ => false,
-        }
-    } else {
-        block.expr.as_ref().map_or(false, |e| is_relevant_expr(cx, tables, e))
-    }
+        },
+    )
 }
 
-fn is_relevant_expr(cx: &LateContext<'_, '_>, tables: &ty::TypeckTables<'_>, expr: &Expr<'_>) -> bool {
+fn is_relevant_expr(cx: &LateContext<'_>, typeck_results: &ty::TypeckResults<'_>, expr: &Expr<'_>) -> bool {
     match &expr.kind {
-        ExprKind::Block(block, _) => is_relevant_block(cx, tables, block),
-        ExprKind::Ret(Some(e)) => is_relevant_expr(cx, tables, e),
+        ExprKind::Block(block, _) => is_relevant_block(cx, typeck_results, block),
+        ExprKind::Ret(Some(e)) => is_relevant_expr(cx, typeck_results, e),
         ExprKind::Ret(None) | ExprKind::Break(_, None) => false,
         ExprKind::Call(path_expr, _) => {
             if let ExprKind::Path(qpath) = &path_expr.kind {
-                if let Some(fun_id) = tables.qpath_res(qpath, path_expr.hir_id).opt_def_id() {
-                    !match_def_path(cx, fun_id, &paths::BEGIN_PANIC)
-                } else {
-                    true
-                }
+                typeck_results
+                    .qpath_res(qpath, path_expr.hir_id)
+                    .opt_def_id()
+                    .map_or(true, |fun_id| !match_panic_def_id(cx, fun_id))
             } else {
                 true
             }
@@ -474,47 +455,17 @@ fn is_relevant_expr(cx: &LateContext<'_, '_>, tables: &ty::TypeckTables<'_>, exp
     }
 }
 
-fn check_attrs(cx: &LateContext<'_, '_>, span: Span, name: Name, attrs: &[Attribute]) {
+fn check_attrs(cx: &LateContext<'_>, span: Span, name: Symbol, attrs: &[Attribute]) {
     if span.from_expansion() {
         return;
     }
 
     for attr in attrs {
-        let attr_item = if let AttrKind::Normal(ref attr) = attr.kind {
-            attr
-        } else {
-            continue;
-        };
-
-        if attr.style == AttrStyle::Outer {
-            if attr_item.args.inner_tokens().is_empty() || !is_present_in_source(cx, attr.span) {
-                return;
-            }
-
-            let begin_of_attr_to_item = Span::new(attr.span.lo(), span.lo(), span.ctxt());
-            let end_of_attr_to_item = Span::new(attr.span.hi(), span.lo(), span.ctxt());
-
-            if let Some(snippet) = snippet_opt(cx, end_of_attr_to_item) {
-                let lines = snippet.split('\n').collect::<Vec<_>>();
-                let lines = without_block_comments(lines);
-
-                if lines.iter().filter(|l| l.trim().is_empty()).count() > 2 {
-                    span_lint(
-                        cx,
-                        EMPTY_LINE_AFTER_OUTER_ATTR,
-                        begin_of_attr_to_item,
-                        "Found an empty line after an outer attribute. \
-                         Perhaps you forgot to add a `!` to make it an inner attribute?",
-                    );
-                }
-            }
-        }
-
         if let Some(values) = attr.meta_item_list() {
-            if values.len() != 1 || !attr.check_name(sym!(inline)) {
+            if values.len() != 1 || !attr.has_name(sym::inline) {
                 continue;
             }
-            if is_word(&values[0], sym!(always)) {
+            if is_word(&values[0], sym::always) {
                 span_lint(
                     cx,
                     INLINE_ALWAYS,
@@ -529,7 +480,7 @@ fn check_attrs(cx: &LateContext<'_, '_>, span: Span, name: Name, attrs: &[Attrib
     }
 }
 
-fn check_semver(cx: &LateContext<'_, '_>, span: Span, lit: &Lit) {
+fn check_semver(cx: &LateContext<'_>, span: Span, lit: &Lit) {
     if let LitKind::Str(is, _) = lit.kind {
         if Version::parse(&is.as_str()).is_ok() {
             return;
@@ -545,33 +496,75 @@ fn check_semver(cx: &LateContext<'_, '_>, span: Span, lit: &Lit) {
 
 fn is_word(nmi: &NestedMetaItem, expected: Symbol) -> bool {
     if let NestedMetaItem::MetaItem(mi) = &nmi {
-        mi.is_word() && mi.check_name(expected)
+        mi.is_word() && mi.has_name(expected)
     } else {
         false
     }
 }
 
-declare_lint_pass!(EarlyAttributes => [DEPRECATED_CFG_ATTR, MISMATCHED_TARGET_OS]);
+declare_lint_pass!(EarlyAttributes => [
+    DEPRECATED_CFG_ATTR,
+    MISMATCHED_TARGET_OS,
+    EMPTY_LINE_AFTER_OUTER_ATTR,
+]);
 
 impl EarlyLintPass for EarlyAttributes {
+    fn check_item(&mut self, cx: &EarlyContext<'_>, item: &rustc_ast::Item) {
+        check_empty_line_after_outer_attr(cx, item);
+    }
+
     fn check_attribute(&mut self, cx: &EarlyContext<'_>, attr: &Attribute) {
         check_deprecated_cfg_attr(cx, attr);
         check_mismatched_target_os(cx, attr);
     }
 }
 
+fn check_empty_line_after_outer_attr(cx: &EarlyContext<'_>, item: &rustc_ast::Item) {
+    for attr in &item.attrs {
+        let attr_item = if let AttrKind::Normal(ref attr, _) = attr.kind {
+            attr
+        } else {
+            return;
+        };
+
+        if attr.style == AttrStyle::Outer {
+            if attr_item.args.inner_tokens().is_empty() || !is_present_in_source(cx, attr.span) {
+                return;
+            }
+
+            let begin_of_attr_to_item = Span::new(attr.span.lo(), item.span.lo(), item.span.ctxt());
+            let end_of_attr_to_item = Span::new(attr.span.hi(), item.span.lo(), item.span.ctxt());
+
+            if let Some(snippet) = snippet_opt(cx, end_of_attr_to_item) {
+                let lines = snippet.split('\n').collect::<Vec<_>>();
+                let lines = without_block_comments(lines);
+
+                if lines.iter().filter(|l| l.trim().is_empty()).count() > 2 {
+                    span_lint(
+                        cx,
+                        EMPTY_LINE_AFTER_OUTER_ATTR,
+                        begin_of_attr_to_item,
+                        "found an empty line after an outer attribute. \
+                        Perhaps you forgot to add a `!` to make it an inner attribute?",
+                    );
+                }
+            }
+        }
+    }
+}
+
 fn check_deprecated_cfg_attr(cx: &EarlyContext<'_>, attr: &Attribute) {
     if_chain! {
         // check cfg_attr
-        if attr.check_name(sym!(cfg_attr));
+        if attr.has_name(sym::cfg_attr);
         if let Some(items) = attr.meta_item_list();
         if items.len() == 2;
         // check for `rustfmt`
         if let Some(feature_item) = items[0].meta_item();
-        if feature_item.check_name(sym!(rustfmt));
+        if feature_item.has_name(sym::rustfmt);
         // check for `rustfmt_skip` and `rustfmt::skip`
         if let Some(skip_item) = &items[1].meta_item();
-        if skip_item.check_name(sym!(rustfmt_skip)) ||
+        if skip_item.has_name(sym!(rustfmt_skip)) ||
             skip_item.path.segments.last().expect("empty path in attribute").ident.name == sym!(skip);
         // Only lint outer attributes, because custom inner attributes are unstable
         // Tracking issue: https://github.com/rust-lang/rust/issues/54726
@@ -630,7 +623,7 @@ fn check_mismatched_target_os(cx: &EarlyContext<'_>, attr: &Attribute) {
     }
 
     if_chain! {
-        if attr.check_name(sym!(cfg));
+        if attr.has_name(sym::cfg);
         if let Some(list) = attr.meta_item_list();
         let mismatched = find_mismatched_target_os(&list);
         if !mismatched.is_empty();

@@ -2,21 +2,22 @@
 #![feature(target_feature, cfg_target_feature)]
 
 // @has doc_cfg/struct.Portable.html
-// @!has - '//*[@id="main"]/*[@class="stability"]/*[@class="stab portability"]' ''
+// @!has - '//*[@id="main"]/*[@class="item-info"]/*[@class="stab portability"]' ''
 // @has - '//*[@id="method.unix_and_arm_only_function"]' 'fn unix_and_arm_only_function()'
 // @has - '//*[@class="stab portability"]' 'This is supported on Unix and ARM only.'
+// @has - '//*[@id="method.wasi_and_wasm32_only_function"]' 'fn wasi_and_wasm32_only_function()'
+// @has - '//*[@class="stab portability"]' 'This is supported on WASI and WebAssembly only.'
 pub struct Portable;
 
 // @has doc_cfg/unix_only/index.html \
-//  '//*[@id="main"]/*[@class="stability"]/*[@class="stab portability"]' \
+//  '//*[@id="main"]/*[@class="item-info"]/*[@class="stab portability"]' \
 //  'This is supported on Unix only.'
-// @matches - '//*[@class="module-item"]//*[@class="stab portability"]' '\AUnix\Z'
-// @matches - '//*[@class="module-item"]//*[@class="stab portability"]' '\AUnix and ARM\Z'
-// @count - '//*[@class="stab portability"]' 3
+// @matches - '//*[@class="module-item"]//*[@class="stab portability"]' '\AARM\Z'
+// @count - '//*[@class="stab portability"]' 2
 #[doc(cfg(unix))]
 pub mod unix_only {
     // @has doc_cfg/unix_only/fn.unix_only_function.html \
-    //  '//*[@id="main"]/*[@class="stability"]/*[@class="stab portability"]' \
+    //  '//*[@id="main"]/*[@class="item-info"]/*[@class="stab portability"]' \
     //  'This is supported on Unix only.'
     // @count - '//*[@class="stab portability"]' 1
     pub fn unix_only_function() {
@@ -24,16 +25,47 @@ pub mod unix_only {
     }
 
     // @has doc_cfg/unix_only/trait.ArmOnly.html \
-    //  '//*[@id="main"]/*[@class="stability"]/*[@class="stab portability"]' \
+    //  '//*[@id="main"]/*[@class="item-info"]/*[@class="stab portability"]' \
     //  'This is supported on Unix and ARM only.'
-    // @count - '//*[@class="stab portability"]' 3
+    // @count - '//*[@class="stab portability"]' 1
     #[doc(cfg(target_arch = "arm"))]
     pub trait ArmOnly {
         fn unix_and_arm_only_function();
     }
 
+    #[doc(cfg(target_arch = "arm"))]
     impl ArmOnly for super::Portable {
         fn unix_and_arm_only_function() {}
+    }
+}
+
+// @has doc_cfg/wasi_only/index.html \
+//  '//*[@id="main"]/*[@class="item-info"]/*[@class="stab portability"]' \
+//  'This is supported on WASI only.'
+// @matches - '//*[@class="module-item"]//*[@class="stab portability"]' '\AWebAssembly\Z'
+// @count - '//*[@class="stab portability"]' 2
+#[doc(cfg(target_os = "wasi"))]
+pub mod wasi_only {
+    // @has doc_cfg/wasi_only/fn.wasi_only_function.html \
+    //  '//*[@id="main"]/*[@class="item-info"]/*[@class="stab portability"]' \
+    //  'This is supported on WASI only.'
+    // @count - '//*[@class="stab portability"]' 1
+    pub fn wasi_only_function() {
+        content::should::be::irrelevant();
+    }
+
+    // @has doc_cfg/wasi_only/trait.Wasm32Only.html \
+    //  '//*[@id="main"]/*[@class="item-info"]/*[@class="stab portability"]' \
+    //  'This is supported on WASI and WebAssembly only.'
+    // @count - '//*[@class="stab portability"]' 1
+    #[doc(cfg(target_arch = "wasm32"))]
+    pub trait Wasm32Only {
+        fn wasi_and_wasm32_only_function();
+    }
+
+    #[doc(cfg(target_arch = "wasm32"))]
+    impl Wasm32Only for super::Portable {
+        fn wasi_and_wasm32_only_function() {}
     }
 }
 
@@ -45,7 +77,7 @@ pub mod unix_only {
 // @matches - '//*[@class="module-item"]//*[@class="stab portability"]' '\Aavx\Z'
 
 // @has doc_cfg/fn.uses_target_feature.html
-// @has - '//*[@id="main"]/*[@class="stability"]/*[@class="stab portability"]' \
+// @has - '//*[@id="main"]/*[@class="item-info"]/*[@class="stab portability"]' \
 //        'This is supported with target feature avx only.'
 #[target_feature(enable = "avx")]
 pub unsafe fn uses_target_feature() {
@@ -53,7 +85,7 @@ pub unsafe fn uses_target_feature() {
 }
 
 // @has doc_cfg/fn.uses_cfg_target_feature.html
-// @has - '//*[@id="main"]/*[@class="stability"]/*[@class="stab portability"]' \
+// @has - '//*[@id="main"]/*[@class="item-info"]/*[@class="stab portability"]' \
 //        'This is supported with target feature avx only.'
 #[doc(cfg(target_feature = "avx"))]
 pub fn uses_cfg_target_feature() {

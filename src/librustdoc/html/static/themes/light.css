@@ -5,13 +5,15 @@ body {
 	color: black;
 }
 
-h1, h2, h3:not(.impl):not(.method):not(.type):not(.tymethod), h4:not(.method):not(.type):not(.tymethod) {
+h1, h2, h3:not(.impl):not(.method):not(.type):not(.tymethod),
+h4:not(.method):not(.type):not(.tymethod) {
 	color: black;
 }
 h1.fqn {
 	border-bottom-color: #D5D5D5;
 }
-h2, h3:not(.impl):not(.method):not(.type):not(.tymethod), h4:not(.method):not(.type):not(.tymethod) {
+h2, h3:not(.impl):not(.method):not(.type):not(.tymethod),
+h4:not(.method):not(.type):not(.tymethod) {
 	border-bottom-color: #DDDDDD;
 }
 
@@ -41,6 +43,10 @@ pre {
 
 .sidebar {
 	scrollbar-color: rgba(36, 37, 39, 0.6) #d9d9d9;
+}
+
+.logo-container.rust-logo > img {
+	/* No need for a border in here! */
 }
 
 /* Improve the scrollbar display on webkit-based browsers */
@@ -128,7 +134,7 @@ pre {
 .content .highlighted.primitive { background-color: #9aecff; }
 .content .highlighted.keyword { background-color: #f99650; }
 
-.content .stability::before { color: #ccc; }
+.content .item-info::before { color: #ccc; }
 
 .content span.enum, .content a.enum, .block a.current.enum { color: #508157; }
 .content span.struct, .content a.struct, .block a.current.struct { color: #ad448e; }
@@ -169,12 +175,9 @@ a {
 }
 
 .docblock:not(.type-decl) a:not(.srclink):not(.test-arrow),
-.docblock-short a:not(.srclink):not(.test-arrow), .stability a {
+.docblock-short a:not(.srclink):not(.test-arrow), .item-info a,
+#help a {
 	color: #3873AD;
-}
-
-.stab.internal a {
-	color: #304FFE;
 }
 
 a.test-arrow {
@@ -215,7 +218,6 @@ a.test-arrow {
 }
 
 .stab.unstable { background: #FFF5D6; border-color: #FFC600; }
-.stab.internal { background: #FFB9B3; border-color: #B71C1C; }
 .stab.deprecated { background: #F3DFFF; border-color: #7F0087; }
 .stab.portability { background: #C4ECFF; border-color: #7BA5DB; }
 
@@ -226,6 +228,10 @@ a.test-arrow {
 #help > div {
 	background: #e9e9e9;
 	border-color: #bfbfbf;
+}
+
+#help > div > span {
+	border-bottom-color: #bfbfbf;
 }
 
 .since {
@@ -268,6 +274,7 @@ a.test-arrow:hover{
 
 :target > code, :target > .in-band {
 	background: #FDFFD3;
+	border-right: 3px solid #ffb44c;
 }
 
 pre.compile_fail {
@@ -275,6 +282,14 @@ pre.compile_fail {
 }
 
 pre.compile_fail:hover, .information:hover + pre.compile_fail {
+	border-left: 2px solid #f00;
+}
+
+pre.should_panic {
+	border-left: 2px solid rgba(255,0,0,.5);
+}
+
+pre.should_panic:hover, .information:hover + pre.should_panic {
 	border-left: 2px solid #f00;
 }
 
@@ -294,6 +309,14 @@ pre.ignore:hover, .information:hover + pre.ignore {
 	color: #f00;
 }
 
+.tooltip.should_panic {
+	color: rgba(255,0,0,.5);
+}
+
+.information > .should_panic:hover {
+	color: #f00;
+}
+
 .tooltip.ignore {
 	color: rgba(255,142,0,.6);
 }
@@ -306,25 +329,31 @@ pre.ignore:hover, .information:hover + pre.ignore {
 	color: #0089ff;
 }
 
-.tooltip .tooltiptext {
+.tooltip::after {
 	background-color: #000;
 	color: #fff;
 }
 
-.tooltip .tooltiptext::after {
+.tooltip::before {
 	border-color: transparent black transparent transparent;
 }
 
-#titles > div:not(.selected) {
+.notable-traits-tooltiptext {
+	background-color: #eee;
+	border-color: #999;
+}
+
+#titles > button:not(.selected) {
 	background-color: #e6e6e6;
 	border-top-color: #e6e6e6;
 }
 
-#titles > div:hover, #titles > div.selected {
+#titles > button:hover, #titles > button.selected {
+	background-color: #ffffff;
 	border-top-color: #0089ff;
 }
 
-#titles > div > div.count {
+#titles > button > div.count {
 	color: #888;
 }
 
@@ -354,13 +383,14 @@ kbd {
 	box-shadow-color: #c6cbd1;
 }
 
-#theme-picker, #settings-menu {
+#theme-picker, #settings-menu, .help-button {
 	border-color: #e0e0e0;
 	background-color: #fff;
 }
 
 #theme-picker:hover, #theme-picker:focus,
-#settings-menu:hover, #settings-menu:focus {
+#settings-menu:hover, #settings-menu:focus,
+.help-button:hover, .help-button:focus {
 	border-color: #717171;
 }
 

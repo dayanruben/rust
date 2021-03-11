@@ -12,7 +12,7 @@ This option is deprecated and does nothing.
 This option lets you choose which code model to use. \
 Code models put constraints on address ranges that the program and its symbols may use. \
 With smaller address ranges machine instructions
-may be able to use use more compact addressing modes.
+may be able to use more compact addressing modes.
 
 The specific ranges depend on target architectures and addressing modes available to them. \
 For x86 more detailed description of its code models can be found in
@@ -41,6 +41,18 @@ generated code, but may be slower to compile.
 
 The default value, if not specified, is 16 for non-incremental builds. For
 incremental builds the default is 256 which allows caching to be more granular.
+
+## control-flow-guard
+
+This flag controls whether LLVM enables the Windows [Control Flow
+Guard](https://docs.microsoft.com/en-us/windows/win32/secbp/control-flow-guard)
+platform security feature. This flag is currently ignored for non-Windows targets.
+It takes one of the following values:
+
+* `y`, `yes`, `on`, `checks`, or no value: enable Control Flow Guard.
+* `nochecks`: emit Control Flow Guard metadata without runtime enforcement checks (this
+should only be used for testing purposes as it does not provide security enforcement).
+* `n`, `no`, `off`: do not enable Control Flow Guard (the default).
 
 ## debug-assertions
 
@@ -188,6 +200,18 @@ the following values:
 An example of when this flag might be useful is when trying to construct code coverage
 metrics.
 
+## link-self-contained
+
+On targets that support it this flag controls whether the linker will use libraries and objects
+shipped with Rust instead or those in the system.
+It takes one of the following values:
+
+* no value: rustc will use heuristic to disable self-contained mode if system has necessary tools.
+* `y`, `yes`, `on`: use only libraries/objects shipped with Rust.
+* `n`, `no`, or `off`: rely on the user or the linker to provide non-Rust libraries/objects.
+
+This allows overriding cases when detection fails or user wants to use shipped libraries.
+
 ## linker
 
 This flag controls which linker `rustc` invokes to link your code. It takes a
@@ -275,9 +299,9 @@ opt-level=0`](#opt-level)). That is:
 * When `-C lto` is not specified:
   * `codegen-units=1`: disable LTO.
   * `opt-level=0`: disable LTO.
-* When `-C lto=true`:
-  * `lto=true`: 16 codegen units, perform fat LTO across crates.
-  * `codegen-units=1` + `lto=true`: 1 codegen unit, fat LTO across crates.
+* When `-C lto` is specified:
+  * `lto`: 16 codegen units, perform fat LTO across crates.
+  * `codegen-units=1` + `lto`: 1 codegen unit, fat LTO across crates.
 
 See also [linker-plugin-lto](#linker-plugin-lto) for cross-language LTO.
 
@@ -468,13 +492,43 @@ point instructions in software. It takes one of the following values:
 * `y`, `yes`, `on`, or no value: use soft floats.
 * `n`, `no`, or `off`: use hardware floats (the default).
 
+## split-debuginfo
+
+This option controls the emission of "split debuginfo" for debug information
+that `rustc` generates. The default behavior of this option is
+platform-specific, and not all possible values for this option work on all
+platform. Possible values are:
+
+* `off` - This is the default for platforms with ELF binaries and windows-gnu
+  (not Windows MSVC and not macOS). This typically means that dwarf debug
+  information can be found in the final artifact in sections of the executable.
+  This option is not supported on Windows MSVC. On macOS this options prevents
+  the final execution of `dsymutil` to generate debuginfo.
+
+* `packed` - This is the default for Windows MSVC and macOS platforms. The term
+  "packed" here means that all the debug information is packed into a separate
+  file from the main executable. On Windows MSVC this is a `*.pdb` file, on
+  macOS this is a `*.dSYM` folder, and on other platforms this is a `*.dwp`
+  files.
+
+* `unpacked` - This means that debug information will be found in separate
+  files for each compilation unit (object file). This is not supported on
+  Windows MSVC. On macOS this means the original object files will contain
+  debug information. On other Unix platforms this means that `*.dwo` files will
+  contain debug information.
+
+Note that `packed` and `unpacked` gated behind `-Zunstable-options` on
+non-macOS platforms at this time.
+
 ## target-cpu
 
 This instructs `rustc` to generate code specifically for a particular processor.
 
 You can run `rustc --print target-cpus` to see the valid options to pass
-here. Additionally, `native` can be passed to use the processor of the host
-machine. Each target has a default base CPU.
+here. Each target has a default base CPU. Special values include:
+
+* `native` can be passed to use the processor of the host machine.
+* `generic` refers to an LLVM target with minimal features but modern tuning.
 
 ## target-feature
 
@@ -505,6 +559,20 @@ This also supports the feature `+crt-static` and `-crt-static` to control
 
 Each target and [`target-cpu`](#target-cpu) has a default set of enabled
 features.
+
+## tune-cpu
+
+This instructs `rustc` to schedule code specifically for a particular
+processor. This does not affect the compatibility (instruction sets or ABI),
+but should make your code slightly more efficient on the selected CPU.
+
+The valid options are the same as those for [`target-cpu`](#target-cpu).
+The default is `None`, which LLVM translates as the `target-cpu`.
+
+This is an unstable option. Use `-Z tune-cpu=machine` to specify a value.
+
+Due to limitations in LLVM (12.0.0-git9218f92), this option is currently
+effective only for x86 targets.
 
 [option-emit]: ../command-line-arguments.md#option-emit
 [option-o-optimize]: ../command-line-arguments.md#option-o-optimize

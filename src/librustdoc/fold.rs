@@ -1,27 +1,27 @@
 use crate::clean::*;
 
-pub struct StripItem(pub Item);
+crate struct StripItem(pub Item);
 
 impl StripItem {
-    pub fn strip(self) -> Option<Item> {
+    crate fn strip(self) -> Item {
         match self.0 {
-            Item { inner: StrippedItem(..), .. } => Some(self.0),
+            Item { kind: box StrippedItem(..), .. } => self.0,
             mut i => {
-                i.inner = StrippedItem(box i.inner);
-                Some(i)
+                i.kind = box StrippedItem(i.kind);
+                i
             }
         }
     }
 }
 
-pub trait DocFolder: Sized {
+crate trait DocFolder: Sized {
     fn fold_item(&mut self, item: Item) -> Option<Item> {
-        self.fold_item_recur(item)
+        Some(self.fold_item_recur(item))
     }
 
     /// don't override!
-    fn fold_inner_recur(&mut self, inner: ItemEnum) -> ItemEnum {
-        match inner {
+    fn fold_inner_recur(&mut self, kind: ItemKind) -> ItemKind {
+        match kind {
             StrippedItem(..) => unreachable!(),
             ModuleItem(i) => ModuleItem(self.fold_mod(i)),
             StructItem(mut i) => {
@@ -55,13 +55,13 @@ pub trait DocFolder: Sized {
             }
             VariantItem(i) => {
                 let i2 = i.clone(); // this clone is small
-                match i.kind {
-                    VariantKind::Struct(mut j) => {
+                match i {
+                    Variant::Struct(mut j) => {
                         let num_fields = j.fields.len();
                         j.fields = j.fields.into_iter().filter_map(|x| self.fold_item(x)).collect();
                         j.fields_stripped |= num_fields != j.fields.len()
                             || j.fields.iter().any(|f| f.is_stripped());
-                        VariantItem(Variant { kind: VariantKind::Struct(j), ..i2 })
+                        VariantItem(Variant::Struct(j))
                     }
                     _ => VariantItem(i2),
                 }
@@ -71,15 +71,12 @@ pub trait DocFolder: Sized {
     }
 
     /// don't override!
-    fn fold_item_recur(&mut self, item: Item) -> Option<Item> {
-        let Item { attrs, name, source, visibility, def_id, inner, stability, deprecation } = item;
-
-        let inner = match inner {
+    fn fold_item_recur(&mut self, mut item: Item) -> Item {
+        item.kind = box match *item.kind {
             StrippedItem(box i) => StrippedItem(box self.fold_inner_recur(i)),
-            _ => self.fold_inner_recur(inner),
+            _ => self.fold_inner_recur(*item.kind),
         };
-
-        Some(Item { attrs, name, source, inner, visibility, stability, deprecation, def_id })
+        item
     }
 
     fn fold_mod(&mut self, m: Module) -> Module {
@@ -93,15 +90,12 @@ pub trait DocFolder: Sized {
         c.module = c.module.take().and_then(|module| self.fold_item(module));
 
         {
-            let mut guard = c.external_traits.borrow_mut();
-            let external_traits = std::mem::replace(&mut *guard, Default::default());
-            *guard = external_traits
-                .into_iter()
-                .map(|(k, mut v)| {
-                    v.items = v.items.into_iter().filter_map(|i| self.fold_item(i)).collect();
-                    (k, v)
-                })
-                .collect();
+            let external_traits = { std::mem::take(&mut *c.external_traits.borrow_mut()) };
+            for (k, mut v) in external_traits {
+                v.trait_.items =
+                    v.trait_.items.into_iter().filter_map(|i| self.fold_item(i)).collect();
+                c.external_traits.borrow_mut().insert(k, v);
+            }
         }
         c
     }

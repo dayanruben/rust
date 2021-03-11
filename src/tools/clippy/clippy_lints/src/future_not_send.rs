@@ -3,7 +3,8 @@ use rustc_hir::intravisit::FnKind;
 use rustc_hir::{Body, FnDecl, HirId};
 use rustc_infer::infer::TyCtxtInferExt;
 use rustc_lint::{LateContext, LateLintPass};
-use rustc_middle::ty::{Opaque, PredicateKind::Trait, ToPolyTraitRef};
+use rustc_middle::ty::subst::Subst;
+use rustc_middle::ty::{Opaque, PredicateKind::Trait};
 use rustc_session::{declare_lint_pass, declare_tool_lint};
 use rustc_span::{sym, Span};
 use rustc_trait_selection::traits::error_reporting::suggestions::InferCtxtExt;
@@ -47,26 +48,27 @@ declare_clippy_lint! {
 
 declare_lint_pass!(FutureNotSend => [FUTURE_NOT_SEND]);
 
-impl<'a, 'tcx> LateLintPass<'a, 'tcx> for FutureNotSend {
+impl<'tcx> LateLintPass<'tcx> for FutureNotSend {
     fn check_fn(
         &mut self,
-        cx: &LateContext<'a, 'tcx>,
+        cx: &LateContext<'tcx>,
         kind: FnKind<'tcx>,
         decl: &'tcx FnDecl<'tcx>,
         _: &'tcx Body<'tcx>,
         _: Span,
         hir_id: HirId,
     ) {
-        if let FnKind::Closure(_) = kind {
+        if let FnKind::Closure = kind {
             return;
         }
         let ret_ty = utils::return_ty(cx, hir_id);
-        if let Opaque(id, subst) = ret_ty.kind {
-            let preds = cx.tcx.predicates_of(id).instantiate(cx.tcx, subst);
+        if let Opaque(id, subst) = *ret_ty.kind() {
+            let preds = cx.tcx.explicit_item_bounds(id);
             let mut is_future = false;
-            for p in preds.predicates {
+            for &(p, _span) in preds {
+                let p = p.subst(cx.tcx, subst);
                 if let Some(trait_ref) = p.to_opt_poly_trait_ref() {
-                    if Some(trait_ref.def_id()) == cx.tcx.lang_items().future_trait() {
+                    if Some(trait_ref.value.def_id()) == cx.tcx.lang_items().future_trait() {
                         is_future = true;
                         break;
                     }
@@ -91,12 +93,11 @@ impl<'a, 'tcx> LateLintPass<'a, 'tcx> for FutureNotSend {
                             cx.tcx.infer_ctxt().enter(|infcx| {
                                 for FulfillmentError { obligation, .. } in send_errors {
                                     infcx.maybe_note_obligation_cause_for_async_await(db, &obligation);
-                                    if let Trait(trait_pred, _) = obligation.predicate.kind() {
-                                        let trait_ref = trait_pred.to_poly_trait_ref();
-                                        db.note(&*format!(
+                                    if let Trait(trait_pred, _) = obligation.predicate.kind().skip_binder() {
+                                        db.note(&format!(
                                             "`{}` doesn't implement `{}`",
-                                            trait_ref.self_ty(),
-                                            trait_ref.print_only_trait_path(),
+                                            trait_pred.self_ty(),
+                                            trait_pred.trait_ref.print_only_trait_path(),
                                         ));
                                     }
                                 }

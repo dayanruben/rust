@@ -7,17 +7,16 @@ use std::fs::read_to_string;
 use std::path::Path;
 
 // A few of those error codes can't be tested but all the others can and *should* be tested!
-const WHITELIST: &[&str] = &[
-    "E0183", "E0227", "E0279", "E0280", "E0311", "E0313", "E0314", "E0315", "E0377", "E0456",
-    "E0461", "E0462", "E0464", "E0465", "E0472", "E0473", "E0474", "E0475", "E0476", "E0479",
-    "E0480", "E0481", "E0482", "E0483", "E0484", "E0485", "E0486", "E0487", "E0488", "E0489",
-    "E0514", "E0519", "E0523", "E0553", "E0554", "E0570", "E0629", "E0630", "E0640", "E0717",
-    "E0727", "E0729",
+const EXEMPTED_FROM_TEST: &[&str] = &[
+    "E0183", "E0227", "E0279", "E0280", "E0311", "E0313", "E0314", "E0315", "E0377", "E0461",
+    "E0462", "E0464", "E0465", "E0472", "E0473", "E0474", "E0475", "E0476", "E0479", "E0480",
+    "E0481", "E0482", "E0483", "E0484", "E0485", "E0486", "E0487", "E0488", "E0489", "E0514",
+    "E0519", "E0523", "E0553", "E0554", "E0570", "E0629", "E0630", "E0640", "E0717", "E0727",
+    "E0729",
 ];
 
 // Some error codes don't have any tests apparently...
-const IGNORE_EXPLANATION_CHECK: &[&str] =
-    &["E0570", "E0601", "E0602", "E0639", "E0729", "E0749", "E0750"];
+const IGNORE_EXPLANATION_CHECK: &[&str] = &["E0570", "E0601", "E0602", "E0639", "E0729"];
 
 fn check_error_code_explanation(
     f: &str,
@@ -48,9 +47,7 @@ fn check_error_code_explanation(
     invalid_compile_fail_format
 }
 
-fn check_if_error_code_is_test_in_explanation(f: &str, err_code: &String) -> bool {
-    let mut can_be_ignored = false;
-
+fn check_if_error_code_is_test_in_explanation(f: &str, err_code: &str) -> bool {
     for line in f.lines() {
         let s = line.trim();
         if s.starts_with("#### Note: this error code is no longer emitted by the compiler") {
@@ -59,13 +56,13 @@ fn check_if_error_code_is_test_in_explanation(f: &str, err_code: &String) -> boo
         if s.starts_with("```") {
             if s.contains("compile_fail") && s.contains(err_code) {
                 return true;
-            } else if s.contains("(") {
+            } else if s.contains('(') {
                 // It's very likely that we can't actually make it fail compilation...
-                can_be_ignored = true;
+                return true;
             }
         }
     }
-    can_be_ignored
+    false
 }
 
 macro_rules! some_or_continue {
@@ -88,47 +85,61 @@ fn extract_error_codes(
     for line in f.lines() {
         let s = line.trim();
         if !reached_no_explanation && s.starts_with('E') && s.contains("include_str!(\"") {
-            if let Some(err_code) = s.splitn(2, ':').next() {
-                let err_code = err_code.to_owned();
-                if !error_codes.contains_key(&err_code) {
-                    error_codes.insert(err_code.clone(), false);
+            let err_code = s
+                .split_once(':')
+                .expect(
+                    format!(
+                        "Expected a line with the format `E0xxx: include_str!(\"..\")`, but got {} without a `:` delimiter",
+                        s,
+                    ).as_str()
+                )
+                .0
+                .to_owned();
+            if !error_codes.contains_key(&err_code) {
+                error_codes.insert(err_code.clone(), false);
+            }
+            // Now we extract the tests from the markdown file!
+            let md_file_name = match s.split_once("include_str!(\"") {
+                None => continue,
+                Some((_, md)) => match md.split_once("\")") {
+                    None => continue,
+                    Some((file_name, _)) => file_name,
+                },
+            };
+            let path = some_or_continue!(path.parent())
+                .join(md_file_name)
+                .canonicalize()
+                .expect("failed to canonicalize error explanation file path");
+            match read_to_string(&path) {
+                Ok(content) => {
+                    if !IGNORE_EXPLANATION_CHECK.contains(&err_code.as_str())
+                        && !check_if_error_code_is_test_in_explanation(&content, &err_code)
+                    {
+                        errors.push(format!(
+                            "`{}` doesn't use its own error code in compile_fail example",
+                            path.display(),
+                        ));
+                    }
+                    if check_error_code_explanation(&content, error_codes, err_code) {
+                        errors.push(format!(
+                            "`{}` uses invalid tag `compile-fail` instead of `compile_fail`",
+                            path.display(),
+                        ));
+                    }
                 }
-                // Now we extract the tests from the markdown file!
-                let md = some_or_continue!(s.splitn(2, "include_str!(\"").nth(1));
-                let md_file_name = some_or_continue!(md.splitn(2, "\")").next());
-                let path = some_or_continue!(path.parent())
-                    .join(md_file_name)
-                    .canonicalize()
-                    .expect("failed to canonicalize error explanation file path");
-                match read_to_string(&path) {
-                    Ok(content) => {
-                        if !IGNORE_EXPLANATION_CHECK.contains(&err_code.as_str())
-                            && !check_if_error_code_is_test_in_explanation(&content, &err_code)
-                        {
-                            errors.push(format!(
-                                "`{}` doesn't use its own error code in compile_fail example",
-                                path.display(),
-                            ));
-                        }
-                        if check_error_code_explanation(&content, error_codes, err_code) {
-                            errors.push(format!(
-                                "`{}` uses invalid tag `compile-fail` instead of `compile_fail`",
-                                path.display(),
-                            ));
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("Couldn't read `{}`: {}", path.display(), e);
-                    }
+                Err(e) => {
+                    eprintln!("Couldn't read `{}`: {}", path.display(), e);
                 }
             }
         } else if reached_no_explanation && s.starts_with('E') {
-            if let Some(err_code) = s.splitn(2, ',').next() {
-                let err_code = err_code.to_owned();
-                if !error_codes.contains_key(&err_code) {
-                    // this check should *never* fail!
-                    error_codes.insert(err_code, false);
-                }
+            let err_code = match s.split_once(',') {
+                None => s,
+                Some((err_code, _)) => err_code,
+            }
+            .to_string();
+            if !error_codes.contains_key(&err_code) {
+                // this check should *never* fail!
+                error_codes.insert(err_code, false);
             }
         } else if s == ";" {
             reached_no_explanation = true;
@@ -140,12 +151,15 @@ fn extract_error_codes_from_tests(f: &str, error_codes: &mut HashMap<String, boo
     for line in f.lines() {
         let s = line.trim();
         if s.starts_with("error[E") || s.starts_with("warning[E") {
-            if let Some(err_code) = s.splitn(2, ']').next() {
-                if let Some(err_code) = err_code.splitn(2, '[').nth(1) {
-                    let nb = error_codes.entry(err_code.to_owned()).or_insert(false);
-                    *nb = true;
-                }
-            }
+            let err_code = match s.split_once(']') {
+                None => continue,
+                Some((err_code, _)) => match err_code.split_once('[') {
+                    None => continue,
+                    Some((_, err_code)) => err_code,
+                },
+            };
+            let nb = error_codes.entry(err_code.to_owned()).or_insert(false);
+            *nb = true;
         }
     }
 }
@@ -166,7 +180,7 @@ pub fn check(path: &Path, bad: &mut bool) {
         println!("Found {} error codes", error_codes.len());
 
         for (err_code, nb) in &error_codes {
-            if !*nb && !WHITELIST.contains(&err_code.as_str()) {
+            if !*nb && !EXEMPTED_FROM_TEST.contains(&err_code.as_str()) {
                 errors.push(format!("Error code {} needs to have at least one UI test!", err_code));
             }
         }

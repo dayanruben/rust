@@ -1,4 +1,3 @@
-#![feature(const_if_match)]
 #![warn(indirect_structural_match)]
 
 struct NoEq;
@@ -21,7 +20,6 @@ fn main() {
     match Foo::Qux(NoEq) {
         BAR_BAZ => panic!(),
         //~^ ERROR must be annotated with `#[derive(PartialEq, Eq)]`
-        //~| ERROR must be annotated with `#[derive(PartialEq, Eq)]`
         _ => {}
     }
 }

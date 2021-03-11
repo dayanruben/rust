@@ -6,7 +6,9 @@
     unused_variables,
     dead_code,
     clippy::single_match,
-    clippy::wildcard_in_or_patterns
+    clippy::wildcard_in_or_patterns,
+    clippy::unnested_or_patterns,
+    clippy::diverging_sub_expression
 )]
 
 use std::io::ErrorKind;

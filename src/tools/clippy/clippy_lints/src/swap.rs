@@ -1,7 +1,6 @@
 use crate::utils::sugg::Sugg;
 use crate::utils::{
-    differing_macro_contexts, is_type_diagnostic_item, snippet_with_applicability, span_lint_and_then, walk_ptrs_ty,
-    SpanlessEq,
+    differing_macro_contexts, eq_expr_value, is_type_diagnostic_item, snippet_with_applicability, span_lint_and_then,
 };
 use if_chain::if_chain;
 use rustc_errors::Applicability;
@@ -9,6 +8,7 @@ use rustc_hir::{Block, Expr, ExprKind, PatKind, QPath, StmtKind};
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_middle::ty;
 use rustc_session::{declare_lint_pass, declare_tool_lint};
+use rustc_span::sym;
 
 declare_clippy_lint! {
     /// **What it does:** Checks for manual swapping.
@@ -65,15 +65,15 @@ declare_clippy_lint! {
 
 declare_lint_pass!(Swap => [MANUAL_SWAP, ALMOST_SWAPPED]);
 
-impl<'a, 'tcx> LateLintPass<'a, 'tcx> for Swap {
-    fn check_block(&mut self, cx: &LateContext<'a, 'tcx>, block: &'tcx Block<'_>) {
+impl<'tcx> LateLintPass<'tcx> for Swap {
+    fn check_block(&mut self, cx: &LateContext<'tcx>, block: &'tcx Block<'_>) {
         check_manual_swap(cx, block);
         check_suspicious_swap(cx, block);
     }
 }
 
 /// Implementation of the `MANUAL_SWAP` lint.
-fn check_manual_swap(cx: &LateContext<'_, '_>, block: &Block<'_>) {
+fn check_manual_swap(cx: &LateContext<'_>, block: &Block<'_>) {
     for w in block.stmts.windows(3) {
         if_chain! {
             // let t = foo();
@@ -91,9 +91,9 @@ fn check_manual_swap(cx: &LateContext<'_, '_>, block: &Block<'_>) {
             if let ExprKind::Path(QPath::Resolved(None, ref rhs2)) = rhs2.kind;
             if rhs2.segments.len() == 1;
 
-            if ident.as_str() == rhs2.segments[0].ident.as_str();
-            if SpanlessEq::new(cx).ignore_fn().eq_expr(tmp_init, lhs1);
-            if SpanlessEq::new(cx).ignore_fn().eq_expr(rhs1, lhs2);
+            if ident.name == rhs2.segments[0].ident.name;
+            if eq_expr_value(cx, tmp_init, lhs1);
+            if eq_expr_value(cx, rhs1, lhs2);
             then {
                 if let ExprKind::Field(ref lhs1, _) = lhs1.kind {
                     if let ExprKind::Field(ref lhs2, _) = lhs2.kind {
@@ -190,16 +190,16 @@ enum Slice<'a> {
 }
 
 /// Checks if both expressions are index operations into "slice-like" types.
-fn check_for_slice<'a>(cx: &LateContext<'_, '_>, lhs1: &'a Expr<'_>, lhs2: &'a Expr<'_>) -> Slice<'a> {
+fn check_for_slice<'a>(cx: &LateContext<'_>, lhs1: &'a Expr<'_>, lhs2: &'a Expr<'_>) -> Slice<'a> {
     if let ExprKind::Index(ref lhs1, ref idx1) = lhs1.kind {
         if let ExprKind::Index(ref lhs2, ref idx2) = lhs2.kind {
-            if SpanlessEq::new(cx).ignore_fn().eq_expr(lhs1, lhs2) {
-                let ty = walk_ptrs_ty(cx.tables.expr_ty(lhs1));
+            if eq_expr_value(cx, lhs1, lhs2) {
+                let ty = cx.typeck_results().expr_ty(lhs1).peel_refs();
 
-                if matches!(ty.kind, ty::Slice(_))
-                    || matches!(ty.kind, ty::Array(_, _))
-                    || is_type_diagnostic_item(cx, ty, sym!(vec_type))
-                    || is_type_diagnostic_item(cx, ty, sym!(vecdeque_type))
+                if matches!(ty.kind(), ty::Slice(_))
+                    || matches!(ty.kind(), ty::Array(_, _))
+                    || is_type_diagnostic_item(cx, ty, sym::vec_type)
+                    || is_type_diagnostic_item(cx, ty, sym::vecdeque_type)
                 {
                     return Slice::Swappable(lhs1, idx1, idx2);
                 }
@@ -213,7 +213,7 @@ fn check_for_slice<'a>(cx: &LateContext<'_, '_>, lhs1: &'a Expr<'_>, lhs2: &'a E
 }
 
 /// Implementation of the `ALMOST_SWAPPED` lint.
-fn check_suspicious_swap(cx: &LateContext<'_, '_>, block: &Block<'_>) {
+fn check_suspicious_swap(cx: &LateContext<'_>, block: &Block<'_>) {
     for w in block.stmts.windows(2) {
         if_chain! {
             if let StmtKind::Semi(ref first) = w[0].kind;
@@ -221,8 +221,8 @@ fn check_suspicious_swap(cx: &LateContext<'_, '_>, block: &Block<'_>) {
             if !differing_macro_contexts(first.span, second.span);
             if let ExprKind::Assign(ref lhs0, ref rhs0, _) = first.kind;
             if let ExprKind::Assign(ref lhs1, ref rhs1, _) = second.kind;
-            if SpanlessEq::new(cx).ignore_fn().eq_expr(lhs0, rhs1);
-            if SpanlessEq::new(cx).ignore_fn().eq_expr(lhs1, rhs0);
+            if eq_expr_value(cx, lhs0, rhs1);
+            if eq_expr_value(cx, lhs1, rhs0);
             then {
                 let lhs0 = Sugg::hir_opt(cx, lhs0);
                 let rhs0 = Sugg::hir_opt(cx, rhs0);

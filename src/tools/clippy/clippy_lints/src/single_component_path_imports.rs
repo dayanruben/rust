@@ -1,6 +1,6 @@
 use crate::utils::{in_macro, span_lint_and_sugg};
 use if_chain::if_chain;
-use rustc_ast::ast::{Item, ItemKind, UseTreeKind};
+use rustc_ast::{Item, ItemKind, UseTreeKind};
 use rustc_errors::Applicability;
 use rustc_lint::{EarlyContext, EarlyLintPass};
 use rustc_session::{declare_lint_pass, declare_tool_lint};
@@ -16,7 +16,7 @@ declare_clippy_lint! {
     ///
     /// **Example:**
     ///
-    /// ```rust, ignore
+    /// ```rust,ignore
     /// use regex;
     ///
     /// fn main() {
@@ -24,7 +24,7 @@ declare_clippy_lint! {
     /// }
     /// ```
     /// Better as
-    /// ```rust, ignore
+    /// ```rust,ignore
     /// fn main() {
     ///     regex::Regex::new(r"^\d{4}-\d{2}-\d{2}$").unwrap();
     /// }
@@ -40,8 +40,8 @@ impl EarlyLintPass for SingleComponentPathImports {
     fn check_item(&mut self, cx: &EarlyContext<'_>, item: &Item) {
         if_chain! {
             if !in_macro(item.span);
-            if cx.sess.opts.edition == Edition::Edition2018;
-            if !item.vis.node.is_pub();
+            if cx.sess.opts.edition >= Edition::Edition2018;
+            if !item.vis.kind.is_pub();
             if let ItemKind::Use(use_tree) = &item.kind;
             if let segments = &use_tree.prefix.segments;
             if segments.len() == 1;

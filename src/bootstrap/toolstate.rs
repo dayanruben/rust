@@ -152,7 +152,7 @@ impl Step for ToolStateCheck {
     /// error if there are any.
     ///
     /// This also handles publishing the results to the `history` directory of
-    /// the toolstate repo https://github.com/rust-lang-nursery/rust-toolstate
+    /// the toolstate repo <https://github.com/rust-lang-nursery/rust-toolstate>
     /// if the env var `TOOLSTATE_PUBLISH` is set. Note that there is a
     /// *separate* step of updating the `latest.json` file and creating GitHub
     /// issues and comments in `src/ci/publish_toolstate.sh`, which is only
@@ -162,7 +162,7 @@ impl Step for ToolStateCheck {
     /// The rules for failure are:
     /// * If the PR modifies a tool, the status must be test-pass.
     ///   NOTE: There is intent to change this, see
-    ///   https://github.com/rust-lang/rust/issues/65000.
+    ///   <https://github.com/rust-lang/rust/issues/65000>.
     /// * All "stable" tools must be test-pass on the stable or beta branches.
     /// * During beta promotion week, a PR is not allowed to "regress" a
     ///   stable tool. That is, the status is not allowed to get worse
@@ -272,6 +272,18 @@ impl Builder<'_> {
     /// `rust.save-toolstates` in `config.toml`. If unspecified, nothing will be
     /// done. The file is updated immediately after this function completes.
     pub fn save_toolstate(&self, tool: &str, state: ToolState) {
+        // If we're in a dry run setting we don't want to save toolstates as
+        // that means if we e.g. panic down the line it'll look like we tested
+        // everything (but we actually haven't).
+        if self.config.dry_run {
+            return;
+        }
+        // Toolstate isn't tracked for clippy, but since most tools do, we avoid
+        // checking in all the places we could save toolstate and just do so
+        // here.
+        if tool == "clippy-driver" {
+            return;
+        }
         if let Some(ref path) = self.config.save_toolstates {
             if let Some(parent) = path.parent() {
                 // Ensure the parent directory always exists

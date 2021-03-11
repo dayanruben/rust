@@ -1,6 +1,8 @@
 // check-pass
-#![allow(incomplete_features)]
-#![feature(const_generics)]
+// revisions: full min
+
+#![cfg_attr(full, feature(const_generics))]
+#![cfg_attr(full, allow(incomplete_features))]
 
 struct Const<const N: usize>;
 trait Foo<const N: usize> {}

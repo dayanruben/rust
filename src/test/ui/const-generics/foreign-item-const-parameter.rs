@@ -1,5 +1,7 @@
-#![feature(const_generics)]
-//~^ WARN the feature `const_generics` is incomplete
+// revisions: full min
+
+#![cfg_attr(full, feature(const_generics))]
+#![cfg_attr(full, allow(incomplete_features))]
 
 extern "C" {
     fn foo<const X: usize>(); //~ ERROR foreign items may not have const parameters

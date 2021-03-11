@@ -6,7 +6,7 @@ use rustc_lint::{LateContext, LateLintPass};
 use rustc_session::{declare_lint_pass, declare_tool_lint};
 use rustc_span::source_map::Span;
 
-use crate::utils::{snippet_with_applicability, span_lint_and_sugg, SpanlessEq};
+use crate::utils::{eq_expr_value, snippet_with_applicability, span_lint_and_sugg};
 
 declare_clippy_lint! {
     /// **What it does:** Checks for double comparisons that could be simplified to a single expression.
@@ -37,17 +37,16 @@ declare_clippy_lint! {
 
 declare_lint_pass!(DoubleComparisons => [DOUBLE_COMPARISONS]);
 
-impl<'a, 'tcx> DoubleComparisons {
+impl<'tcx> DoubleComparisons {
     #[allow(clippy::similar_names)]
-    fn check_binop(cx: &LateContext<'a, 'tcx>, op: BinOpKind, lhs: &'tcx Expr<'_>, rhs: &'tcx Expr<'_>, span: Span) {
+    fn check_binop(cx: &LateContext<'tcx>, op: BinOpKind, lhs: &'tcx Expr<'_>, rhs: &'tcx Expr<'_>, span: Span) {
         let (lkind, llhs, lrhs, rkind, rlhs, rrhs) = match (&lhs.kind, &rhs.kind) {
             (ExprKind::Binary(lb, llhs, lrhs), ExprKind::Binary(rb, rlhs, rrhs)) => {
                 (lb.node, llhs, lrhs, rb.node, rlhs, rrhs)
             },
             _ => return,
         };
-        let mut spanless_eq = SpanlessEq::new(cx).ignore_fn();
-        if !(spanless_eq.eq_expr(&llhs, &rlhs) && spanless_eq.eq_expr(&lrhs, &rrhs)) {
+        if !(eq_expr_value(cx, &llhs, &rlhs) && eq_expr_value(cx, &lrhs, &rrhs)) {
             return;
         }
         macro_rules! lint_double_comparison {
@@ -60,7 +59,7 @@ impl<'a, 'tcx> DoubleComparisons {
                     cx,
                     DOUBLE_COMPARISONS,
                     span,
-                    "This binary expression can be simplified",
+                    "this binary expression can be simplified",
                     "try",
                     sugg,
                     applicability,
@@ -86,8 +85,8 @@ impl<'a, 'tcx> DoubleComparisons {
     }
 }
 
-impl<'a, 'tcx> LateLintPass<'a, 'tcx> for DoubleComparisons {
-    fn check_expr(&mut self, cx: &LateContext<'a, 'tcx>, expr: &'tcx Expr<'_>) {
+impl<'tcx> LateLintPass<'tcx> for DoubleComparisons {
+    fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'_>) {
         if let ExprKind::Binary(ref kind, ref lhs, ref rhs) = expr.kind {
             Self::check_binop(cx, kind.node, lhs, rhs, expr.span);
         }

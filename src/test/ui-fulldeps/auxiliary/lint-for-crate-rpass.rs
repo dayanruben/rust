@@ -26,10 +26,11 @@ macro_rules! fake_lint_pass {
             }
         }
 
-        impl<'a, 'tcx> LateLintPass<'a, 'tcx> for $struct {
+        impl LateLintPass<'_> for $struct {
             fn check_crate(&mut self, cx: &LateContext, krate: &rustc_hir::Crate) {
+                let attrs = cx.tcx.hir().attrs(rustc_hir::CRATE_HIR_ID);
                 $(
-                    if !attr::contains_name(&krate.item.attrs, $attr) {
+                    if !cx.sess().contains_name(attrs, $attr) {
                         cx.lint(CRATE_NOT_OKAY, |lint| {
                              let msg = format!("crate is not marked with #![{}]", $attr);
                              lint.build(&msg).set_span(krate.item.span).emit()

@@ -1,9 +1,11 @@
-use crate::utils::{in_macro, snippet_with_applicability, span_lint_and_sugg};
+use crate::utils::sugg::Sugg;
+use crate::utils::{in_macro, snippet_opt, snippet_with_applicability, span_lint_and_sugg};
 use if_chain::if_chain;
-use rustc_ast::ast::{Expr, ExprKind, UnOp};
+use rustc_ast::ast::{Expr, ExprKind, Mutability, UnOp};
 use rustc_errors::Applicability;
 use rustc_lint::{EarlyContext, EarlyLintPass};
 use rustc_session::{declare_lint_pass, declare_tool_lint};
+use rustc_span::BytePos;
 
 declare_clippy_lint! {
     /// **What it does:** Checks for usage of `*&` and `*&mut` in expressions.
@@ -16,8 +18,13 @@ declare_clippy_lint! {
     ///
     /// **Example:**
     /// ```rust,ignore
+    /// // Bad
     /// let a = f(*&mut b);
     /// let c = *&d;
+    ///
+    /// // Good
+    /// let a = f(b);
+    /// let c = d;
     /// ```
     pub DEREF_ADDROF,
     complexity,
@@ -37,19 +44,55 @@ impl EarlyLintPass for DerefAddrOf {
     fn check_expr(&mut self, cx: &EarlyContext<'_>, e: &Expr) {
         if_chain! {
             if let ExprKind::Unary(UnOp::Deref, ref deref_target) = e.kind;
-            if let ExprKind::AddrOf(_, _, ref addrof_target) = without_parens(deref_target).kind;
+            if let ExprKind::AddrOf(_, ref mutability, ref addrof_target) = without_parens(deref_target).kind;
             if !in_macro(addrof_target.span);
             then {
                 let mut applicability = Applicability::MachineApplicable;
-                span_lint_and_sugg(
-                    cx,
-                    DEREF_ADDROF,
-                    e.span,
-                    "immediately dereferencing a reference",
-                    "try this",
-                    format!("{}", snippet_with_applicability(cx, addrof_target.span, "_", &mut applicability)),
-                    applicability,
-                );
+                let sugg = if e.span.from_expansion() {
+                    if let Ok(macro_source) = cx.sess.source_map().span_to_snippet(e.span) {
+                        // Remove leading whitespace from the given span
+                        // e.g: ` $visitor` turns into `$visitor`
+                        let trim_leading_whitespaces = |span| {
+                            snippet_opt(cx, span).and_then(|snip| {
+                                #[allow(clippy::cast_possible_truncation)]
+                                snip.find(|c: char| !c.is_whitespace()).map(|pos| {
+                                    span.lo() + BytePos(pos as u32)
+                                })
+                            }).map_or(span, |start_no_whitespace| e.span.with_lo(start_no_whitespace))
+                        };
+
+                        let mut generate_snippet = |pattern: &str| {
+                            #[allow(clippy::cast_possible_truncation)]
+                            macro_source.rfind(pattern).map(|pattern_pos| {
+                                let rpos = pattern_pos + pattern.len();
+                                let span_after_ref = e.span.with_lo(BytePos(e.span.lo().0 + rpos as u32));
+                                let span = trim_leading_whitespaces(span_after_ref);
+                                snippet_with_applicability(cx, span, "_", &mut applicability)
+                            })
+                        };
+
+                        if *mutability == Mutability::Mut {
+                            generate_snippet("mut")
+                        } else {
+                            generate_snippet("&")
+                        }
+                    } else {
+                        Some(snippet_with_applicability(cx, e.span, "_", &mut applicability))
+                    }
+                } else {
+                    Some(snippet_with_applicability(cx, addrof_target.span, "_", &mut applicability))
+                };
+                if let Some(sugg) = sugg {
+                    span_lint_and_sugg(
+                        cx,
+                        DEREF_ADDROF,
+                        e.span,
+                        "immediately dereferencing a reference",
+                        "try this",
+                        sugg.to_string(),
+                        applicability,
+                    );
+                }
             }
         }
     }
@@ -68,6 +111,12 @@ declare_clippy_lint! {
     /// let point = Point(30, 20);
     /// let x = (&point).0;
     /// ```
+    /// Use instead:
+    /// ```rust
+    /// # struct Point(u32, u32);
+    /// # let point = Point(30, 20);
+    /// let x = point.0;
+    /// ```
     pub REF_IN_DEREF,
     complexity,
     "Use of reference in auto dereference expression."
@@ -82,14 +131,19 @@ impl EarlyLintPass for RefInDeref {
             if let ExprKind::Paren(ref parened) = object.kind;
             if let ExprKind::AddrOf(_, _, ref inner) = parened.kind;
             then {
-                let mut applicability = Applicability::MachineApplicable;
+                let applicability = if inner.span.from_expansion() {
+                    Applicability::MaybeIncorrect
+                } else {
+                    Applicability::MachineApplicable
+                };
+                let sugg = Sugg::ast(cx, inner, "_").maybe_par();
                 span_lint_and_sugg(
                     cx,
                     REF_IN_DEREF,
                     object.span,
-                    "Creating a reference that is immediately dereferenced.",
+                    "creating a reference that is immediately dereferenced",
                     "try this",
-                    snippet_with_applicability(cx, inner.span, "_", &mut applicability).to_string(),
+                    sugg.to_string(),
                     applicability,
                 );
             }

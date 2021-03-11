@@ -1,8 +1,10 @@
 use crate::utils::{
-    implements_trait, in_macro, is_copy, multispan_sugg, snippet, span_lint, span_lint_and_then, SpanlessEq,
+    ast_utils::is_useless_with_eq_exprs, eq_expr_value, higher, implements_trait, in_macro, is_copy, is_expn_of,
+    multispan_sugg, snippet, span_lint, span_lint_and_then,
 };
+use if_chain::if_chain;
 use rustc_errors::Applicability;
-use rustc_hir::{BinOp, BinOpKind, BorrowKind, Expr, ExprKind};
+use rustc_hir::{BinOpKind, BorrowKind, Expr, ExprKind, StmtKind};
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_session::{declare_lint_pass, declare_tool_lint};
 
@@ -16,12 +18,18 @@ declare_clippy_lint! {
     /// **Known problems:** False negatives: We had some false positives regarding
     /// calls (notably [racer](https://github.com/phildawes/racer) had one instance
     /// of `x.pop() && x.pop()`), so we removed matching any function or method
-    /// calls. We may introduce a whitelist of known pure functions in the future.
+    /// calls. We may introduce a list of known pure functions in the future.
     ///
     /// **Example:**
     /// ```rust
     /// # let x = 1;
     /// if x + 1 == x + 1 {}
+    /// ```
+    /// or
+    /// ```rust
+    /// # let a = 3;
+    /// # let b = 4;
+    /// assert_eq!(a, a);
     /// ```
     pub EQ_OP,
     correctness,
@@ -39,7 +47,11 @@ declare_clippy_lint! {
     ///
     /// **Example:**
     /// ```ignore
+    /// // Bad
     /// &x == y
+    ///
+    /// // Good
+    /// x == *y
     /// ```
     pub OP_REF,
     style,
@@ -48,9 +60,34 @@ declare_clippy_lint! {
 
 declare_lint_pass!(EqOp => [EQ_OP, OP_REF]);
 
-impl<'a, 'tcx> LateLintPass<'a, 'tcx> for EqOp {
+const ASSERT_MACRO_NAMES: [&str; 4] = ["assert_eq", "assert_ne", "debug_assert_eq", "debug_assert_ne"];
+
+impl<'tcx> LateLintPass<'tcx> for EqOp {
     #[allow(clippy::similar_names, clippy::too_many_lines)]
-    fn check_expr(&mut self, cx: &LateContext<'a, 'tcx>, e: &'tcx Expr<'_>) {
+    fn check_expr(&mut self, cx: &LateContext<'tcx>, e: &'tcx Expr<'_>) {
+        if let ExprKind::Block(ref block, _) = e.kind {
+            for stmt in block.stmts {
+                for amn in &ASSERT_MACRO_NAMES {
+                    if_chain! {
+                        if is_expn_of(stmt.span, amn).is_some();
+                        if let StmtKind::Semi(ref matchexpr) = stmt.kind;
+                        if let Some(macro_args) = higher::extract_assert_macro_args(matchexpr);
+                        if macro_args.len() == 2;
+                        let (lhs, rhs) = (macro_args[0], macro_args[1]);
+                        if eq_expr_value(cx, lhs, rhs);
+
+                        then {
+                            span_lint(
+                                cx,
+                                EQ_OP,
+                                lhs.span.to(rhs.span),
+                                &format!("identical args used in this `{}!` macro call", amn),
+                            );
+                        }
+                    }
+                }
+            }
+        }
         if let ExprKind::Binary(op, ref left, ref right) = e.kind {
             if e.span.from_expansion() {
                 return;
@@ -65,7 +102,7 @@ impl<'a, 'tcx> LateLintPass<'a, 'tcx> for EqOp {
             if macro_with_not_op(&left.kind) || macro_with_not_op(&right.kind) {
                 return;
             }
-            if is_valid_operator(op) && SpanlessEq::new(cx).ignore_fn().eq_expr(left, right) {
+            if is_useless_with_eq_exprs(higher::binop(op.node)) && eq_expr_value(cx, left, right) {
                 span_lint(
                     cx,
                     EQ_OP,
@@ -99,8 +136,8 @@ impl<'a, 'tcx> LateLintPass<'a, 'tcx> for EqOp {
                     (&ExprKind::Lit(..), _) | (_, &ExprKind::Lit(..)) => {},
                     // &foo == &bar
                     (&ExprKind::AddrOf(BorrowKind::Ref, _, ref l), &ExprKind::AddrOf(BorrowKind::Ref, _, ref r)) => {
-                        let lty = cx.tables.expr_ty(l);
-                        let rty = cx.tables.expr_ty(r);
+                        let lty = cx.typeck_results().expr_ty(l);
+                        let rty = cx.typeck_results().expr_ty(r);
                         let lcpy = is_copy(cx, lty);
                         let rcpy = is_copy(cx, rty);
                         // either operator autorefs or both args are copyable
@@ -122,7 +159,7 @@ impl<'a, 'tcx> LateLintPass<'a, 'tcx> for EqOp {
                             )
                         } else if lcpy
                             && !rcpy
-                            && implements_trait(cx, lty, trait_id, &[cx.tables.expr_ty(right).into()])
+                            && implements_trait(cx, lty, trait_id, &[cx.typeck_results().expr_ty(right).into()])
                         {
                             span_lint_and_then(
                                 cx,
@@ -141,7 +178,7 @@ impl<'a, 'tcx> LateLintPass<'a, 'tcx> for EqOp {
                             )
                         } else if !lcpy
                             && rcpy
-                            && implements_trait(cx, cx.tables.expr_ty(left), trait_id, &[rty.into()])
+                            && implements_trait(cx, cx.typeck_results().expr_ty(left), trait_id, &[rty.into()])
                         {
                             span_lint_and_then(
                                 cx,
@@ -162,10 +199,10 @@ impl<'a, 'tcx> LateLintPass<'a, 'tcx> for EqOp {
                     },
                     // &foo == bar
                     (&ExprKind::AddrOf(BorrowKind::Ref, _, ref l), _) => {
-                        let lty = cx.tables.expr_ty(l);
+                        let lty = cx.typeck_results().expr_ty(l);
                         let lcpy = is_copy(cx, lty);
                         if (requires_ref || lcpy)
-                            && implements_trait(cx, lty, trait_id, &[cx.tables.expr_ty(right).into()])
+                            && implements_trait(cx, lty, trait_id, &[cx.typeck_results().expr_ty(right).into()])
                         {
                             span_lint_and_then(
                                 cx,
@@ -186,10 +223,10 @@ impl<'a, 'tcx> LateLintPass<'a, 'tcx> for EqOp {
                     },
                     // foo == &bar
                     (_, &ExprKind::AddrOf(BorrowKind::Ref, _, ref r)) => {
-                        let rty = cx.tables.expr_ty(r);
+                        let rty = cx.typeck_results().expr_ty(r);
                         let rcpy = is_copy(cx, rty);
                         if (requires_ref || rcpy)
-                            && implements_trait(cx, cx.tables.expr_ty(left), trait_id, &[rty.into()])
+                            && implements_trait(cx, cx.typeck_results().expr_ty(left), trait_id, &[rty.into()])
                         {
                             span_lint_and_then(cx, OP_REF, e.span, "taken reference of right operand", |diag| {
                                 let rsnip = snippet(cx, r.span, "...").to_string();
@@ -206,24 +243,5 @@ impl<'a, 'tcx> LateLintPass<'a, 'tcx> for EqOp {
                 }
             }
         }
-    }
-}
-
-fn is_valid_operator(op: BinOp) -> bool {
-    match op.node {
-        BinOpKind::Sub
-        | BinOpKind::Div
-        | BinOpKind::Eq
-        | BinOpKind::Lt
-        | BinOpKind::Le
-        | BinOpKind::Gt
-        | BinOpKind::Ge
-        | BinOpKind::Ne
-        | BinOpKind::And
-        | BinOpKind::Or
-        | BinOpKind::BitXor
-        | BinOpKind::BitAnd
-        | BinOpKind::BitOr => true,
-        _ => false,
     }
 }

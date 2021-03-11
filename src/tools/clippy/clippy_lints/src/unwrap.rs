@@ -1,6 +1,5 @@
 use crate::utils::{
-    differing_macro_contexts, higher::if_block, is_type_diagnostic_item, span_lint_and_then,
-    usage::is_potentially_mutated,
+    differing_macro_contexts, is_type_diagnostic_item, span_lint_and_then, usage::is_potentially_mutated,
 };
 use if_chain::if_chain;
 use rustc_hir::intravisit::{walk_expr, walk_fn, FnKind, NestedVisitorMap, Visitor};
@@ -11,6 +10,7 @@ use rustc_middle::lint::in_external_macro;
 use rustc_middle::ty::Ty;
 use rustc_session::{declare_lint_pass, declare_tool_lint};
 use rustc_span::source_map::Span;
+use rustc_span::sym;
 
 declare_clippy_lint! {
     /// **What it does:** Checks for calls of `unwrap[_err]()` that cannot fail.
@@ -68,7 +68,7 @@ declare_clippy_lint! {
 /// Visitor that keeps track of which variables are unwrappable.
 struct UnwrappableVariablesVisitor<'a, 'tcx> {
     unwrappables: Vec<UnwrapInfo<'tcx>>,
-    cx: &'a LateContext<'a, 'tcx>,
+    cx: &'a LateContext<'tcx>,
 }
 /// Contains information about whether a variable can be unwrapped.
 #[derive(Copy, Clone, Debug)]
@@ -85,36 +85,36 @@ struct UnwrapInfo<'tcx> {
 
 /// Collects the information about unwrappable variables from an if condition
 /// The `invert` argument tells us whether the condition is negated.
-fn collect_unwrap_info<'a, 'tcx>(
-    cx: &'a LateContext<'a, 'tcx>,
+fn collect_unwrap_info<'tcx>(
+    cx: &LateContext<'tcx>,
     expr: &'tcx Expr<'_>,
     branch: &'tcx Expr<'_>,
     invert: bool,
 ) -> Vec<UnwrapInfo<'tcx>> {
-    fn is_relevant_option_call(cx: &LateContext<'_, '_>, ty: Ty<'_>, method_name: &str) -> bool {
-        is_type_diagnostic_item(cx, ty, sym!(option_type)) && ["is_some", "is_none"].contains(&method_name)
+    fn is_relevant_option_call(cx: &LateContext<'_>, ty: Ty<'_>, method_name: &str) -> bool {
+        is_type_diagnostic_item(cx, ty, sym::option_type) && ["is_some", "is_none"].contains(&method_name)
     }
 
-    fn is_relevant_result_call(cx: &LateContext<'_, '_>, ty: Ty<'_>, method_name: &str) -> bool {
-        is_type_diagnostic_item(cx, ty, sym!(result_type)) && ["is_ok", "is_err"].contains(&method_name)
+    fn is_relevant_result_call(cx: &LateContext<'_>, ty: Ty<'_>, method_name: &str) -> bool {
+        is_type_diagnostic_item(cx, ty, sym::result_type) && ["is_ok", "is_err"].contains(&method_name)
     }
 
     if let ExprKind::Binary(op, left, right) = &expr.kind {
         match (invert, op.node) {
-            (false, BinOpKind::And) | (false, BinOpKind::BitAnd) | (true, BinOpKind::Or) | (true, BinOpKind::BitOr) => {
+            (false, BinOpKind::And | BinOpKind::BitAnd) | (true, BinOpKind::Or | BinOpKind::BitOr) => {
                 let mut unwrap_info = collect_unwrap_info(cx, left, branch, invert);
                 unwrap_info.append(&mut collect_unwrap_info(cx, right, branch, invert));
                 return unwrap_info;
             },
             _ => (),
         }
-    } else if let ExprKind::Unary(UnOp::UnNot, expr) = &expr.kind {
+    } else if let ExprKind::Unary(UnOp::Not, expr) = &expr.kind {
         return collect_unwrap_info(cx, expr, branch, !invert);
     } else {
         if_chain! {
-            if let ExprKind::MethodCall(method_name, _, args) = &expr.kind;
+            if let ExprKind::MethodCall(method_name, _, args, _) = &expr.kind;
             if let ExprKind::Path(QPath::Resolved(None, path)) = &args[0].kind;
-            let ty = cx.tables.expr_ty(&args[0]);
+            let ty = cx.typeck_results().expr_ty(&args[0]);
             let name = method_name.ident.as_str();
             if is_relevant_option_call(cx, ty, &name) || is_relevant_result_call(cx, ty, &name);
             then {
@@ -157,7 +157,7 @@ impl<'a, 'tcx> Visitor<'tcx> for UnwrappableVariablesVisitor<'a, 'tcx> {
         if in_external_macro(self.cx.tcx.sess, expr.span) {
             return;
         }
-        if let Some((cond, then, els)) = if_block(&expr) {
+        if let ExprKind::If(cond, then, els) = &expr.kind {
             walk_expr(self, cond);
             self.visit_branch(cond, then, false);
             if let Some(els) = els {
@@ -166,10 +166,10 @@ impl<'a, 'tcx> Visitor<'tcx> for UnwrappableVariablesVisitor<'a, 'tcx> {
         } else {
             // find `unwrap[_err]()` calls:
             if_chain! {
-                if let ExprKind::MethodCall(ref method_name, _, ref args) = expr.kind;
+                if let ExprKind::MethodCall(ref method_name, _, ref args, _) = expr.kind;
                 if let ExprKind::Path(QPath::Resolved(None, ref path)) = args[0].kind;
-                if [sym!(unwrap), sym!(unwrap_err)].contains(&method_name.ident.name);
-                let call_to_unwrap = method_name.ident.name == sym!(unwrap);
+                if [sym::unwrap, sym!(unwrap_err)].contains(&method_name.ident.name);
+                let call_to_unwrap = method_name.ident.name == sym::unwrap;
                 if let Some(unwrappable) = self.unwrappables.iter()
                     .find(|u| u.ident.res == path.res);
                 // Span contexts should not differ with the conditional branch
@@ -181,8 +181,8 @@ impl<'a, 'tcx> Visitor<'tcx> for UnwrappableVariablesVisitor<'a, 'tcx> {
                             self.cx,
                             UNNECESSARY_UNWRAP,
                             expr.span,
-                            &format!("You checked before that `{}()` cannot fail. \
-                            Instead of checking and unwrapping, it's better to use `if let` or `match`.",
+                            &format!("you checked before that `{}()` cannot fail, \
+                            instead of checking and unwrapping, it's better to use `if let` or `match`",
                             method_name.ident.name),
                             |diag| { diag.span_label(unwrappable.check.span, "the check is happening here"); },
                         );
@@ -191,7 +191,7 @@ impl<'a, 'tcx> Visitor<'tcx> for UnwrappableVariablesVisitor<'a, 'tcx> {
                             self.cx,
                             PANICKING_UNWRAP,
                             expr.span,
-                            &format!("This call to `{}()` will always panic.",
+                            &format!("this call to `{}()` will always panic",
                             method_name.ident.name),
                             |diag| { diag.span_label(unwrappable.check.span, "because of this check"); },
                         );
@@ -209,10 +209,10 @@ impl<'a, 'tcx> Visitor<'tcx> for UnwrappableVariablesVisitor<'a, 'tcx> {
 
 declare_lint_pass!(Unwrap => [PANICKING_UNWRAP, UNNECESSARY_UNWRAP]);
 
-impl<'a, 'tcx> LateLintPass<'a, 'tcx> for Unwrap {
+impl<'tcx> LateLintPass<'tcx> for Unwrap {
     fn check_fn(
         &mut self,
-        cx: &LateContext<'a, 'tcx>,
+        cx: &LateContext<'tcx>,
         kind: FnKind<'tcx>,
         decl: &'tcx FnDecl<'_>,
         body: &'tcx Body<'_>,
