@@ -1,13 +1,14 @@
 #![doc(html_root_url = "https://doc.rust-lang.org/nightly/nightly-rustc/")]
+#![feature(assert_matches)]
 #![feature(bool_to_option)]
-#![feature(option_expect_none)]
 #![feature(box_patterns)]
 #![feature(drain_filter)]
 #![feature(try_blocks)]
 #![feature(in_band_lifetimes)]
 #![feature(nll)]
-#![feature(or_patterns)]
+#![cfg_attr(bootstrap, feature(or_patterns))]
 #![feature(associated_type_bounds)]
+#![feature(iter_zip)]
 #![recursion_limit = "256"]
 #![feature(box_syntax)]
 
@@ -113,11 +114,12 @@ pub struct NativeLib {
     pub kind: NativeLibKind,
     pub name: Option<Symbol>,
     pub cfg: Option<ast::MetaItem>,
+    pub verbatim: Option<bool>,
 }
 
 impl From<&cstore::NativeLib> for NativeLib {
     fn from(lib: &cstore::NativeLib) -> Self {
-        NativeLib { kind: lib.kind, name: lib.name, cfg: lib.cfg.clone() }
+        NativeLib { kind: lib.kind, name: lib.name, cfg: lib.cfg.clone(), verbatim: lib.verbatim }
     }
 }
 
@@ -138,7 +140,6 @@ pub struct CrateInfo {
     pub native_libraries: FxHashMap<CrateNum, Vec<NativeLib>>,
     pub crate_name: FxHashMap<CrateNum, String>,
     pub used_libraries: Vec<NativeLib>,
-    pub link_args: Lrc<Vec<String>>,
     pub used_crate_source: FxHashMap<CrateNum, Lrc<CrateSource>>,
     pub used_crates_static: Vec<(CrateNum, LibSource)>,
     pub used_crates_dynamic: Vec<(CrateNum, LibSource)>,

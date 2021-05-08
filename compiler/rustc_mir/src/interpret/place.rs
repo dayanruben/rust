@@ -375,7 +375,7 @@ where
         assert!(place.mplace.align <= align, "dynamic alignment less strict than static one?");
         // Check (stricter) dynamic alignment, unless forced otherwise.
         place.mplace.align = force_align.unwrap_or(align);
-        // When dereferencing a pointer, it must be non-NULL, aligned, and live.
+        // When dereferencing a pointer, it must be non-null, aligned, and live.
         if let Some(ptr) = self.check_mplace_access(&place, Some(size))? {
             place.mplace.ptr = ptr.into();
         }
@@ -531,7 +531,7 @@ where
         base.offset(from_offset, meta, layout, self)
     }
 
-    pub(super) fn mplace_downcast(
+    pub(crate) fn mplace_downcast(
         &self,
         base: &MPlaceTy<'tcx, M::PointerTag>,
         variant: VariantIdx,

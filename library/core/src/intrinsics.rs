@@ -65,9 +65,13 @@ use crate::sync::atomic::{self, AtomicBool, AtomicI32, AtomicIsize, AtomicU32, O
 #[stable(feature = "drop_in_place", since = "1.8.0")]
 #[rustc_deprecated(
     reason = "no longer an intrinsic - use `ptr::drop_in_place` directly",
-    since = "1.18.0"
+    since = "1.52.0"
 )]
-pub use crate::ptr::drop_in_place;
+#[inline]
+pub unsafe fn drop_in_place<T: ?Sized>(to_drop: *mut T) {
+    // SAFETY: see `ptr::drop_in_place`
+    unsafe { crate::ptr::drop_in_place(to_drop) }
+}
 
 extern "rust-intrinsic" {
     // N.B., these intrinsics take raw pointers because they mutate aliased
@@ -719,7 +723,7 @@ extern "rust-intrinsic" {
     /// macro, which panics when it is executed, it is *undefined behavior* to
     /// reach code marked with this function.
     ///
-    /// The stabilized version of this intrinsic is [`core::hint::unreachable_unchecked`](crate::hint::unreachable_unchecked).
+    /// The stabilized version of this intrinsic is [`core::hint::unreachable_unchecked`].
     #[rustc_const_unstable(feature = "const_unreachable_unchecked", issue = "53188")]
     pub fn unreachable() -> !;
 
@@ -764,13 +768,13 @@ extern "rust-intrinsic" {
     /// More specifically, this is the offset in bytes between successive
     /// items of the same type, including alignment padding.
     ///
-    /// The stabilized version of this intrinsic is [`core::mem::size_of`](crate::mem::size_of).
+    /// The stabilized version of this intrinsic is [`core::mem::size_of`].
     #[rustc_const_stable(feature = "const_size_of", since = "1.40.0")]
     pub fn size_of<T>() -> usize;
 
     /// The minimum alignment of a type.
     ///
-    /// The stabilized version of this intrinsic is [`core::mem::align_of`](crate::mem::align_of).
+    /// The stabilized version of this intrinsic is [`core::mem::align_of`].
     #[rustc_const_stable(feature = "const_min_align_of", since = "1.40.0")]
     pub fn min_align_of<T>() -> usize;
     /// The preferred alignment of a type.
@@ -786,13 +790,13 @@ extern "rust-intrinsic" {
     pub fn size_of_val<T: ?Sized>(_: *const T) -> usize;
     /// The required alignment of the referenced value.
     ///
-    /// The stabilized version of this intrinsic is [`core::mem::align_of_val`](crate::mem::align_of_val).
+    /// The stabilized version of this intrinsic is [`core::mem::align_of_val`].
     #[rustc_const_unstable(feature = "const_align_of_val", issue = "46571")]
     pub fn min_align_of_val<T: ?Sized>(_: *const T) -> usize;
 
     /// Gets a static string slice containing the name of a type.
     ///
-    /// The stabilized version of this intrinsic is [`core::any::type_name`](crate::any::type_name).
+    /// The stabilized version of this intrinsic is [`core::any::type_name`].
     #[rustc_const_unstable(feature = "const_type_name", issue = "63084")]
     pub fn type_name<T: ?Sized>() -> &'static str;
 
@@ -800,7 +804,7 @@ extern "rust-intrinsic" {
     /// function will return the same value for a type regardless of whichever
     /// crate it is invoked in.
     ///
-    /// The stabilized version of this intrinsic is [`core::any::TypeId::of`](crate::any::TypeId::of).
+    /// The stabilized version of this intrinsic is [`core::any::TypeId::of`].
     #[rustc_const_unstable(feature = "const_type_id", issue = "77125")]
     pub fn type_id<T: ?Sized + 'static>() -> u64;
 
@@ -825,7 +829,7 @@ extern "rust-intrinsic" {
 
     /// Gets a reference to a static `Location` indicating where it was called.
     ///
-    /// Consider using [`core::panic::Location::caller`](crate::panic::Location::caller) instead.
+    /// Consider using [`core::panic::Location::caller`] instead.
     #[rustc_const_unstable(feature = "const_caller_location", issue = "76156")]
     pub fn caller_location() -> &'static crate::panic::Location<'static>;
 
@@ -1154,11 +1158,11 @@ extern "rust-intrinsic" {
 
     /// Performs a volatile load from the `src` pointer.
     ///
-    /// The stabilized version of this intrinsic is [`core::ptr::read_volatile`](crate::ptr::read_volatile).
+    /// The stabilized version of this intrinsic is [`core::ptr::read_volatile`].
     pub fn volatile_load<T>(src: *const T) -> T;
     /// Performs a volatile store to the `dst` pointer.
     ///
-    /// The stabilized version of this intrinsic is [`core::ptr::write_volatile`](crate::ptr::write_volatile).
+    /// The stabilized version of this intrinsic is [`core::ptr::write_volatile`].
     pub fn volatile_store<T>(dst: *mut T, val: T);
 
     /// Performs a volatile load from the `src` pointer
@@ -1539,7 +1543,7 @@ extern "rust-intrinsic" {
     /// let num_trailing = unsafe { cttz_nonzero(x) };
     /// assert_eq!(num_trailing, 3);
     /// ```
-    #[rustc_const_unstable(feature = "const_cttz", issue = "none")]
+    #[rustc_const_stable(feature = "const_cttz", since = "1.53.0")]
     pub fn cttz_nonzero<T: Copy>(x: T) -> T;
 
     /// Reverses the bytes in an integer type `T`.
@@ -1699,7 +1703,7 @@ extern "rust-intrinsic" {
     /// Returns the value of the discriminant for the variant in 'v';
     /// if `T` has no discriminant, returns `0`.
     ///
-    /// The stabilized version of this intrinsic is [`core::mem::discriminant`](crate::mem::discriminant).
+    /// The stabilized version of this intrinsic is [`core::mem::discriminant`].
     #[rustc_const_unstable(feature = "const_discriminant", issue = "69821")]
     pub fn discriminant_value<T>(v: &T) -> <T as DiscriminantKind>::Discriminant;
 
@@ -1769,7 +1773,7 @@ extern "rust-intrinsic" {
     /// [violate memory safety][read-ownership].
     ///
     /// Note that even if the effectively copied size (`count * size_of::<T>()`) is
-    /// `0`, the pointers must be non-NULL and properly aligned.
+    /// `0`, the pointers must be non-null and properly aligned.
     ///
     /// [`read`]: crate::ptr::read
     /// [read-ownership]: crate::ptr::read#ownership-of-the-returned-value
@@ -1853,7 +1857,7 @@ extern "rust-intrinsic" {
     /// [violate memory safety][read-ownership].
     ///
     /// Note that even if the effectively copied size (`count * size_of::<T>()`) is
-    /// `0`, the pointers must be non-NULL and properly aligned.
+    /// `0`, the pointers must be non-null and properly aligned.
     ///
     /// [`read`]: crate::ptr::read
     /// [read-ownership]: crate::ptr::read#ownership-of-the-returned-value
@@ -1902,18 +1906,6 @@ pub(crate) fn is_aligned_and_not_null<T>(ptr: *const T) -> bool {
     !ptr.is_null() && ptr as usize % mem::align_of::<T>() == 0
 }
 
-/// Checks whether the regions of memory starting at `src` and `dst` of size
-/// `count * size_of::<T>()` do *not* overlap.
-pub(crate) fn is_nonoverlapping<T>(src: *const T, dst: *const T, count: usize) -> bool {
-    let src_usize = src as usize;
-    let dst_usize = dst as usize;
-    let size = mem::size_of::<T>().checked_mul(count).unwrap();
-    let diff = if src_usize > dst_usize { src_usize - dst_usize } else { dst_usize - src_usize };
-    // If the absolute distance between the ptrs is at least as big as the size of the buffer,
-    // they do not overlap.
-    diff >= size
-}
-
 /// Sets `count * size_of::<T>()` bytes of memory starting at `dst` to
 /// `val`.
 ///
@@ -1936,7 +1928,7 @@ pub(crate) fn is_nonoverlapping<T>(src: *const T, dst: *const T, count: usize) -
 /// invalid value of `T` is undefined behavior.
 ///
 /// Note that even if the effectively copied size (`count * size_of::<T>()`) is
-/// `0`, the pointer must be non-NULL and properly aligned.
+/// `0`, the pointer must be non-null and properly aligned.
 ///
 /// [valid]: crate::ptr#safety
 ///

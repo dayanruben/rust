@@ -87,10 +87,6 @@ impl DefPathTable {
         hash
     }
 
-    pub fn num_def_ids(&self) -> usize {
-        self.index_to_key.len()
-    }
-
     pub fn enumerated_keys_and_path_hashes(
         &self,
     ) -> impl Iterator<Item = (DefIndex, &DefKey, &DefPathHash)> + '_ {
@@ -319,12 +315,6 @@ impl Definitions {
         self.table.def_path_hash(id.local_def_index)
     }
 
-    #[inline]
-    pub fn def_path_hash_to_def_id(&self, def_path_hash: DefPathHash) -> LocalDefId {
-        let local_def_index = self.table.def_path_hash_to_index[&def_path_hash];
-        LocalDefId { local_def_index }
-    }
-
     /// Returns the path from the crate root to `index`. The root
     /// nodes are not included in the path (i.e., this will be an
     /// empty vector for the crate root). For an inlined item, this
@@ -340,11 +330,6 @@ impl Definitions {
     #[track_caller]
     pub fn local_def_id_to_hir_id(&self, id: LocalDefId) -> hir::HirId {
         self.def_id_to_hir_id[id].unwrap()
-    }
-
-    #[inline]
-    pub fn opt_local_def_id_to_hir_id(&self, id: LocalDefId) -> Option<hir::HirId> {
-        self.def_id_to_hir_id[id]
     }
 
     #[inline]

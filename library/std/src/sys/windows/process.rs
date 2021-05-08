@@ -19,9 +19,9 @@ use crate::sys::c;
 use crate::sys::cvt;
 use crate::sys::fs::{File, OpenOptions};
 use crate::sys::handle::Handle;
-use crate::sys::mutex::Mutex;
 use crate::sys::pipe::{self, AnonPipe};
 use crate::sys::stdio;
+use crate::sys_common::mutex::StaticMutex;
 use crate::sys_common::process::{CommandEnv, CommandEnvs};
 use crate::sys_common::AsInner;
 
@@ -62,7 +62,7 @@ impl AsRef<OsStr> for EnvKey {
 
 fn ensure_no_nuls<T: AsRef<OsStr>>(str: T) -> io::Result<T> {
     if str.as_ref().encode_wide().any(|b| b == 0) {
-        Err(io::Error::new(ErrorKind::InvalidInput, "nul byte found in provided data"))
+        Err(io::Error::new_const(ErrorKind::InvalidInput, &"nul byte found in provided data"))
     } else {
         Ok(str)
     }
@@ -92,10 +92,6 @@ pub struct StdioPipes {
     pub stdin: Option<AnonPipe>,
     pub stdout: Option<AnonPipe>,
     pub stderr: Option<AnonPipe>,
-}
-
-struct DropGuard<'a> {
-    lock: &'a Mutex,
 }
 
 impl Command {
@@ -209,8 +205,9 @@ impl Command {
         //
         // For more information, msdn also has an article about this race:
         // http://support.microsoft.com/kb/315939
-        static CREATE_PROCESS_LOCK: Mutex = Mutex::new();
-        let _guard = DropGuard::new(&CREATE_PROCESS_LOCK);
+        static CREATE_PROCESS_LOCK: StaticMutex = StaticMutex::new();
+
+        let _guard = unsafe { CREATE_PROCESS_LOCK.lock() };
 
         let mut pipes = StdioPipes { stdin: None, stdout: None, stderr: None };
         let null = Stdio::Null;
@@ -256,23 +253,6 @@ impl fmt::Debug for Command {
             write!(f, " {:?}", arg)?;
         }
         Ok(())
-    }
-}
-
-impl<'a> DropGuard<'a> {
-    fn new(lock: &'a Mutex) -> DropGuard<'a> {
-        unsafe {
-            lock.lock();
-            DropGuard { lock }
-        }
-    }
-}
-
-impl<'a> Drop for DropGuard<'a> {
-    fn drop(&mut self) {
-        unsafe {
-            self.lock.unlock();
-        }
     }
 }
 

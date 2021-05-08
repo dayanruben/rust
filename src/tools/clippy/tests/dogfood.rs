@@ -1,9 +1,14 @@
+//! This test is a part of quality control and makes clippy eat what it produces. Awesome lints and
+//! long error messages
+//!
+//! See [Eating your own dog food](https://en.wikipedia.org/wiki/Eating_your_own_dog_food) for context
+
 // Dogfood cannot run on Windows
 #![cfg(not(windows))]
 #![feature(once_cell)]
 
 use std::lazy::SyncLazy;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 
 mod cargo;
@@ -17,13 +22,15 @@ fn dogfood_clippy() {
         return;
     }
     let root_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let enable_metadata_collection = std::env::var("ENABLE_METADATA_COLLECTION").unwrap_or_else(|_| "0".to_string());
 
     let mut command = Command::new(&*CLIPPY_PATH);
     command
         .current_dir(root_dir)
         .env("CLIPPY_DOGFOOD", "1")
         .env("CARGO_INCREMENTAL", "0")
-        .arg("clippy-preview")
+        .env("ENABLE_METADATA_COLLECTION", &enable_metadata_collection)
+        .arg("clippy")
         .arg("--all-targets")
         .arg("--all-features")
         .arg("--")
@@ -45,53 +52,45 @@ fn dogfood_clippy() {
     assert!(output.status.success());
 }
 
-#[test]
-fn dogfood_subprojects() {
-    fn test_no_deps_ignores_path_deps_in_workspaces() {
-        fn clean(cwd: &Path, target_dir: &Path) {
-            Command::new("cargo")
-                .current_dir(cwd)
-                .env("CARGO_TARGET_DIR", target_dir)
-                .arg("clean")
-                .args(&["-p", "subcrate"])
-                .args(&["-p", "path_dep"])
-                .output()
-                .unwrap();
-        }
+fn test_no_deps_ignores_path_deps_in_workspaces() {
+    if cargo::is_rustc_test_suite() {
+        return;
+    }
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let target_dir = root.join("target").join("dogfood");
+    let cwd = root.join("clippy_workspace_tests");
 
-        if cargo::is_rustc_test_suite() {
-            return;
-        }
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let target_dir = root.join("target").join("dogfood");
-        let cwd = root.join("clippy_workspace_tests");
+    // Make sure we start with a clean state
+    Command::new("cargo")
+        .current_dir(&cwd)
+        .env("CARGO_TARGET_DIR", &target_dir)
+        .arg("clean")
+        .args(&["-p", "subcrate"])
+        .args(&["-p", "path_dep"])
+        .output()
+        .unwrap();
 
-        // Make sure we start with a clean state
-        clean(&cwd, &target_dir);
+    // `path_dep` is a path dependency of `subcrate` that would trigger a denied lint.
+    // Make sure that with the `--no-deps` argument Clippy does not run on `path_dep`.
+    let output = Command::new(&*CLIPPY_PATH)
+        .current_dir(&cwd)
+        .env("CLIPPY_DOGFOOD", "1")
+        .env("CARGO_INCREMENTAL", "0")
+        .arg("clippy")
+        .args(&["-p", "subcrate"])
+        .arg("--")
+        .arg("--no-deps")
+        .arg("-Cdebuginfo=0") // disable debuginfo to generate less data in the target dir
+        .args(&["--cfg", r#"feature="primary_package_test""#])
+        .output()
+        .unwrap();
+    println!("status: {}", output.status);
+    println!("stdout: {}", String::from_utf8_lossy(&output.stdout));
+    println!("stderr: {}", String::from_utf8_lossy(&output.stderr));
 
-        // `path_dep` is a path dependency of `subcrate` that would trigger a denied lint.
-        // Make sure that with the `--no-deps` argument Clippy does not run on `path_dep`.
-        let output = Command::new(&*CLIPPY_PATH)
-            .current_dir(&cwd)
-            .env("CLIPPY_DOGFOOD", "1")
-            .env("CARGO_INCREMENTAL", "0")
-            .arg("clippy")
-            .args(&["-p", "subcrate"])
-            .arg("--")
-            .arg("--no-deps")
-            .arg("-Cdebuginfo=0") // disable debuginfo to generate less data in the target dir
-            .args(&["--cfg", r#"feature="primary_package_test""#])
-            .output()
-            .unwrap();
-        println!("status: {}", output.status);
-        println!("stdout: {}", String::from_utf8_lossy(&output.stdout));
-        println!("stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(output.status.success());
 
-        assert!(output.status.success());
-
-        // Make sure we start with a clean state
-        clean(&cwd, &target_dir);
-
+    let lint_path_dep = || {
         // Test that without the `--no-deps` argument, `path_dep` is linted.
         let output = Command::new(&*CLIPPY_PATH)
             .current_dir(&cwd)
@@ -109,8 +108,51 @@ fn dogfood_subprojects() {
         println!("stderr: {}", String::from_utf8_lossy(&output.stderr));
 
         assert!(!output.status.success());
-    }
+        assert!(
+            String::from_utf8(output.stderr)
+                .unwrap()
+                .contains("error: empty `loop {}` wastes CPU cycles")
+        );
+    };
 
+    // Make sure Cargo is aware of the removal of `--no-deps`.
+    lint_path_dep();
+
+    let successful_build = || {
+        let output = Command::new(&*CLIPPY_PATH)
+            .current_dir(&cwd)
+            .env("CLIPPY_DOGFOOD", "1")
+            .env("CARGO_INCREMENTAL", "0")
+            .arg("clippy")
+            .args(&["-p", "subcrate"])
+            .arg("--")
+            .arg("-Cdebuginfo=0") // disable debuginfo to generate less data in the target dir
+            .output()
+            .unwrap();
+        println!("status: {}", output.status);
+        println!("stdout: {}", String::from_utf8_lossy(&output.stdout));
+        println!("stderr: {}", String::from_utf8_lossy(&output.stderr));
+
+        assert!(output.status.success());
+
+        output
+    };
+
+    // Trigger a sucessful build, so Cargo would like to cache the build result.
+    successful_build();
+
+    // Make sure there's no spurious rebuild when nothing changes.
+    let stderr = String::from_utf8(successful_build().stderr).unwrap();
+    assert!(!stderr.contains("Compiling"));
+    assert!(!stderr.contains("Checking"));
+    assert!(stderr.contains("Finished"));
+
+    // Make sure Cargo is aware of the new `--cfg` flag.
+    lint_path_dep();
+}
+
+#[test]
+fn dogfood_subprojects() {
     // run clippy on remaining subprojects and fail the test if lint warnings are reported
     if cargo::is_rustc_test_suite() {
         return;
@@ -124,19 +166,30 @@ fn dogfood_subprojects() {
         "clippy_workspace_tests/subcrate",
         "clippy_workspace_tests/subcrate/src",
         "clippy_dev",
+        "clippy_lints",
+        "clippy_utils",
         "rustc_tools_util",
     ] {
-        let output = Command::new(&*CLIPPY_PATH)
+        let mut command = Command::new(&*CLIPPY_PATH);
+        command
             .current_dir(root_dir.join(d))
             .env("CLIPPY_DOGFOOD", "1")
             .env("CARGO_INCREMENTAL", "0")
             .arg("clippy")
+            .arg("--all-targets")
+            .arg("--all-features")
             .arg("--")
             .args(&["-D", "clippy::all"])
             .args(&["-D", "clippy::pedantic"])
-            .arg("-Cdebuginfo=0") // disable debuginfo to generate less data in the target dir
-            .output()
-            .unwrap();
+            .arg("-Cdebuginfo=0"); // disable debuginfo to generate less data in the target dir
+
+        // internal lints only exist if we build with the internal-lints feature
+        if cfg!(feature = "internal-lints") {
+            command.args(&["-D", "clippy::internal"]);
+        }
+
+        let output = command.output().unwrap();
+
         println!("status: {}", output.status);
         println!("stdout: {}", String::from_utf8_lossy(&output.stdout));
         println!("stderr: {}", String::from_utf8_lossy(&output.stderr));

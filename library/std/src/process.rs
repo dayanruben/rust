@@ -71,11 +71,15 @@
 //!     .spawn()
 //!     .expect("failed to execute child");
 //!
-//! {
-//!     // limited borrow of stdin
-//!     let stdin = child.stdin.as_mut().expect("failed to get stdin");
+//! // If the child process fills its stdout buffer, it may end up
+//! // waiting until the parent reads the stdout, and not be able to
+//! // read stdin in the meantime, causing a deadlock.
+//! // Writing from another thread ensures that stdout is being read
+//! // at the same time, avoiding the problem.
+//! let mut stdin = child.stdin.take().expect("failed to get stdin");
+//! std::thread::spawn(move || {
 //!     stdin.write_all(b"test").expect("failed to write to stdin");
-//! }
+//! });
 //!
 //! let output = child
 //!     .wait_with_output()
@@ -230,7 +234,7 @@ impl fmt::Debug for Child {
             .field("stdin", &self.stdin)
             .field("stdout", &self.stdout)
             .field("stderr", &self.stderr)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -308,7 +312,7 @@ impl FromInner<AnonPipe> for ChildStdin {
 #[stable(feature = "std_debug", since = "1.16.0")]
 impl fmt::Debug for ChildStdin {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.pad("ChildStdin { .. }")
+        f.debug_struct("ChildStdin").finish_non_exhaustive()
     }
 }
 
@@ -369,7 +373,7 @@ impl FromInner<AnonPipe> for ChildStdout {
 #[stable(feature = "std_debug", since = "1.16.0")]
 impl fmt::Debug for ChildStdout {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.pad("ChildStdout { .. }")
+        f.debug_struct("ChildStdout").finish_non_exhaustive()
     }
 }
 
@@ -430,7 +434,7 @@ impl FromInner<AnonPipe> for ChildStderr {
 #[stable(feature = "std_debug", since = "1.16.0")]
 impl fmt::Debug for ChildStderr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.pad("ChildStderr { .. }")
+        f.debug_struct("ChildStderr").finish_non_exhaustive()
     }
 }
 
@@ -1145,14 +1149,21 @@ impl Stdio {
     ///     .spawn()
     ///     .expect("Failed to spawn child process");
     ///
-    /// {
-    ///     let stdin = child.stdin.as_mut().expect("Failed to open stdin");
+    /// let mut stdin = child.stdin.take().expect("Failed to open stdin");
+    /// std::thread::spawn(move || {
     ///     stdin.write_all("Hello, world!".as_bytes()).expect("Failed to write to stdin");
-    /// }
+    /// });
     ///
     /// let output = child.wait_with_output().expect("Failed to read stdout");
     /// assert_eq!(String::from_utf8_lossy(&output.stdout), "!dlrow ,olleH");
     /// ```
+    ///
+    /// Writing more than a pipe buffer's worth of input to stdin without also reading
+    /// stdout and stderr at the same time may cause a deadlock.
+    /// This is an issue when running any program that doesn't guarantee that it reads
+    /// its entire stdin before writing more than a pipe buffer's worth of output.
+    /// The size of a pipe buffer varies on different targets.
+    ///
     #[stable(feature = "process", since = "1.0.0")]
     pub fn piped() -> Stdio {
         Stdio(imp::Stdio::MakePipe)
@@ -1246,7 +1257,7 @@ impl FromInner<imp::Stdio> for Stdio {
 #[stable(feature = "std_debug", since = "1.16.0")]
 impl fmt::Debug for Stdio {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.pad("Stdio { .. }")
+        f.debug_struct("Stdio").finish_non_exhaustive()
     }
 }
 
@@ -1738,7 +1749,7 @@ impl Child {
 /// [platform-specific behavior]: #platform-specific-behavior
 #[stable(feature = "rust1", since = "1.0.0")]
 pub fn exit(code: i32) -> ! {
-    crate::sys_common::cleanup();
+    crate::sys_common::rt::cleanup();
     crate::sys::os::exit(code)
 }
 

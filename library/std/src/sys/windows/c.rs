@@ -168,6 +168,8 @@ pub const ERROR_FILE_NOT_FOUND: DWORD = 2;
 pub const ERROR_PATH_NOT_FOUND: DWORD = 3;
 pub const ERROR_ACCESS_DENIED: DWORD = 5;
 pub const ERROR_INVALID_HANDLE: DWORD = 6;
+pub const ERROR_NOT_ENOUGH_MEMORY: DWORD = 8;
+pub const ERROR_OUTOFMEMORY: DWORD = 14;
 pub const ERROR_NO_MORE_FILES: DWORD = 18;
 pub const ERROR_HANDLE_EOF: DWORD = 38;
 pub const ERROR_FILE_EXISTS: DWORD = 80;
@@ -284,8 +286,6 @@ pub const PIPE_READMODE_BYTE: DWORD = 0x00000000;
 pub const FD_SETSIZE: usize = 64;
 
 pub const STACK_SIZE_PARAM_IS_A_RESERVATION: DWORD = 0x00010000;
-
-pub const HEAP_ZERO_MEMORY: DWORD = 0x00000008;
 
 pub const STATUS_SUCCESS: NTSTATUS = 0x00000000;
 
@@ -1016,11 +1016,6 @@ extern "system" {
         exceptfds: *mut fd_set,
         timeout: *const timeval,
     ) -> c_int;
-
-    pub fn GetProcessHeap() -> HANDLE;
-    pub fn HeapAlloc(hHeap: HANDLE, dwFlags: DWORD, dwBytes: SIZE_T) -> LPVOID;
-    pub fn HeapReAlloc(hHeap: HANDLE, dwFlags: DWORD, lpMem: LPVOID, dwBytes: SIZE_T) -> LPVOID;
-    pub fn HeapFree(hHeap: HANDLE, dwFlags: DWORD, lpMem: LPVOID) -> BOOL;
 
     // >= Vista / Server 2008
     // https://docs.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-createsymboliclinkw

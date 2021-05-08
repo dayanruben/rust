@@ -22,6 +22,8 @@ use rustc_span::lev_distance::find_best_match_for_name;
 use rustc_span::symbol::{kw, sym, Ident, Symbol};
 use rustc_span::{BytePos, MultiSpan, Span, DUMMY_SP};
 
+use std::iter;
+
 use tracing::debug;
 
 type Res = def::Res<ast::NodeId>;
@@ -184,7 +186,7 @@ impl<'a: 'ast, 'ast> LateResolutionVisitor<'a, '_, 'ast> {
                         PathResult::Module(ModuleOrUniformRoot::Module(module)) => module.res(),
                         _ => None,
                     }
-                    .map_or(String::new(), |res| format!("{} ", res.descr()));
+                    .map_or_else(String::new, |res| format!("{} ", res.descr()));
                 (mod_prefix, format!("`{}`", Segment::names_to_string(mod_path)))
             };
             (
@@ -454,12 +456,14 @@ impl<'a: 'ast, 'ast> LateResolutionVisitor<'a, '_, 'ast> {
             }
         }
 
+        let is_macro = base_span.from_expansion() && base_span.desugaring_kind().is_none();
         if !self.type_ascription_suggestion(&mut err, base_span) {
             let mut fallback = false;
             if let (
                 PathSource::Trait(AliasPossibility::Maybe),
                 Some(Res::Def(DefKind::Struct | DefKind::Enum | DefKind::Union, _)),
-            ) = (source, res)
+                false,
+            ) = (source, res, is_macro)
             {
                 if let Some(bounds @ [_, .., _]) = self.diagnostic_metadata.current_trait_object {
                     fallback = true;
@@ -562,6 +566,15 @@ impl<'a: 'ast, 'ast> LateResolutionVisitor<'a, '_, 'ast> {
                             }
                         }
                     }
+                }
+            } else if err_code == &rustc_errors::error_code!(E0412) {
+                if let Some(correct) = Self::likely_rust_type(path) {
+                    err.span_suggestion(
+                        span,
+                        "perhaps you intended to use this type",
+                        correct.to_string(),
+                        Applicability::MaybeIncorrect,
+                    );
                 }
             }
         }
@@ -806,6 +819,19 @@ impl<'a: 'ast, 'ast> LateResolutionVisitor<'a, '_, 'ast> {
             _ => false,
         };
 
+        let find_span = |source: &PathSource<'_>, err: &mut DiagnosticBuilder<'_>| {
+            match source {
+                PathSource::Expr(Some(Expr { span, kind: ExprKind::Call(_, _), .. }))
+                | PathSource::TupleStruct(span, _) => {
+                    // We want the main underline to cover the suggested code as well for
+                    // cleaner output.
+                    err.set_span(*span);
+                    *span
+                }
+                _ => span,
+            }
+        };
+
         let mut bad_struct_syntax_suggestion = |def_id: DefId| {
             let (followed_by_brace, closing_brace) = self.followed_by_brace(span);
 
@@ -849,18 +875,7 @@ impl<'a: 'ast, 'ast> LateResolutionVisitor<'a, '_, 'ast> {
                     }
                 }
                 PathSource::Expr(_) | PathSource::TupleStruct(..) | PathSource::Pat => {
-                    let span = match &source {
-                        PathSource::Expr(Some(Expr {
-                            span, kind: ExprKind::Call(_, _), ..
-                        }))
-                        | PathSource::TupleStruct(span, _) => {
-                            // We want the main underline to cover the suggested code as well for
-                            // cleaner output.
-                            err.set_span(*span);
-                            *span
-                        }
-                        _ => span,
-                    };
+                    let span = find_span(&source, err);
                     if let Some(span) = self.def_span(def_id) {
                         err.span_label(span, &format!("`{}` defined here", path_str));
                     }
@@ -917,7 +932,14 @@ impl<'a: 'ast, 'ast> LateResolutionVisitor<'a, '_, 'ast> {
                     let msg = "you might have meant to use `#![feature(trait_alias)]` instead of a \
                                `type` alias";
                     if let Some(span) = self.def_span(def_id) {
-                        err.span_help(span, msg);
+                        if let Ok(snip) = self.r.session.source_map().span_to_snippet(span) {
+                            // The span contains a type alias so we should be able to
+                            // replace `type` with `trait`.
+                            let snip = snip.replacen("type", "trait", 1);
+                            err.span_suggestion(span, msg, snip, Applicability::MaybeIncorrect);
+                        } else {
+                            err.span_help(span, msg);
+                        }
                     } else {
                         err.help(msg);
                     }
@@ -995,9 +1017,7 @@ impl<'a: 'ast, 'ast> LateResolutionVisitor<'a, '_, 'ast> {
                 if let Some(spans) =
                     field_spans.filter(|spans| spans.len() > 0 && fields.len() == spans.len())
                 {
-                    let non_visible_spans: Vec<Span> = fields
-                        .iter()
-                        .zip(spans.iter())
+                    let non_visible_spans: Vec<Span> = iter::zip(&fields, &spans)
                         .filter(|(vis, _)| {
                             !self.r.is_accessible_from(**vis, self.parent_scope.module)
                         })
@@ -1029,14 +1049,31 @@ impl<'a: 'ast, 'ast> LateResolutionVisitor<'a, '_, 'ast> {
             ) if ns == ValueNS => {
                 bad_struct_syntax_suggestion(def_id);
             }
+            (Res::Def(DefKind::Ctor(_, CtorKind::Const), def_id), _) if ns == ValueNS => {
+                match source {
+                    PathSource::Expr(_) | PathSource::TupleStruct(..) | PathSource::Pat => {
+                        let span = find_span(&source, err);
+                        if let Some(span) = self.def_span(def_id) {
+                            err.span_label(span, &format!("`{}` defined here", path_str));
+                        }
+                        err.span_suggestion(
+                            span,
+                            &format!("use this syntax instead"),
+                            format!("{path_str}"),
+                            Applicability::MaybeIncorrect,
+                        );
+                    }
+                    _ => return false,
+                }
+            }
             (Res::Def(DefKind::Ctor(_, CtorKind::Fn), def_id), _) if ns == ValueNS => {
                 if let Some(span) = self.def_span(def_id) {
                     err.span_label(span, &format!("`{}` defined here", path_str));
                 }
-                let fields =
-                    self.r.field_names.get(&def_id).map_or("/* fields */".to_string(), |fields| {
-                        vec!["_"; fields.len()].join(", ")
-                    });
+                let fields = self.r.field_names.get(&def_id).map_or_else(
+                    || "/* fields */".to_string(),
+                    |fields| vec!["_"; fields.len()].join(", "),
+                );
                 err.span_suggestion(
                     span,
                     "use the tuple variant pattern syntax instead",
@@ -1241,6 +1278,23 @@ impl<'a: 'ast, 'ast> LateResolutionVisitor<'a, '_, 'ast> {
             }
             _ => None,
         }
+    }
+
+    // Returns the name of the Rust type approximately corresponding to
+    // a type name in another programming language.
+    fn likely_rust_type(path: &[Segment]) -> Option<Symbol> {
+        let name = path[path.len() - 1].ident.as_str();
+        // Common Java types
+        Some(match &*name {
+            "byte" => sym::u8, // In Java, bytes are signed, but in practice one almost always wants unsigned bytes.
+            "short" => sym::i16,
+            "boolean" => sym::bool,
+            "int" => sym::i32,
+            "long" => sym::i64,
+            "float" => sym::f32,
+            "double" => sym::f64,
+            _ => return None,
+        })
     }
 
     /// Only used in a specific case of type ascription suggestions

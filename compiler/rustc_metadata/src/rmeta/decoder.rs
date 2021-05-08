@@ -7,7 +7,6 @@ use crate::rmeta::*;
 use rustc_ast as ast;
 use rustc_attr as attr;
 use rustc_data_structures::captures::Captures;
-use rustc_data_structures::fingerprint::{Fingerprint, FingerprintDecoder};
 use rustc_data_structures::fx::FxHashMap;
 use rustc_data_structures::svh::Svh;
 use rustc_data_structures::sync::{Lock, LockGuard, Lrc, OnceCell};
@@ -348,12 +347,6 @@ impl<'a, 'tcx> Decodable<DecodeContext<'a, 'tcx>> for CrateNum {
 impl<'a, 'tcx> Decodable<DecodeContext<'a, 'tcx>> for DefIndex {
     fn decode(d: &mut DecodeContext<'a, 'tcx>) -> Result<DefIndex, String> {
         Ok(DefIndex::from_u32(d.read_u32()?))
-    }
-}
-
-impl<'a, 'tcx> FingerprintDecoder for DecodeContext<'a, 'tcx> {
-    fn decode_fingerprint(&mut self) -> Result<Fingerprint, String> {
-        Fingerprint::decode_opaque(&mut self.opaque)
     }
 }
 
@@ -764,6 +757,7 @@ impl<'a, 'tcx> CrateMetadataRef<'a> {
                     data.paren_sugar,
                     data.has_auto_impl,
                     data.is_marker,
+                    data.skip_array_during_method_dispatch,
                     data.specialization_kind,
                     self.def_path_hash(item_id),
                 )
@@ -771,6 +765,7 @@ impl<'a, 'tcx> CrateMetadataRef<'a> {
             EntryKind::TraitAlias => ty::TraitDef::new(
                 self.local_def_id(item_id),
                 hir::Unsafety::Normal,
+                false,
                 false,
                 false,
                 false,
@@ -958,6 +953,14 @@ impl<'a, 'tcx> CrateMetadataRef<'a> {
 
     fn get_expn_that_defined(&self, id: DefIndex, sess: &Session) -> ExpnId {
         self.root.tables.expn_that_defined.get(self, id).unwrap().decode((self, sess))
+    }
+
+    fn get_const_param_default(
+        &self,
+        tcx: TyCtxt<'tcx>,
+        id: DefIndex,
+    ) -> rustc_middle::ty::Const<'tcx> {
+        self.root.tables.const_defaults.get(self, id).unwrap().decode((self, tcx))
     }
 
     /// Iterates over all the stability attributes in the given crate.
@@ -1614,7 +1617,7 @@ impl<'a, 'tcx> CrateMetadataRef<'a> {
             .map(Path::new)
             .filter(|_| {
                 // Only spend time on further checks if we have what to translate *to*.
-                sess.real_rust_source_base_dir.is_some()
+                sess.opts.real_rust_source_base_dir.is_some()
             })
             .filter(|virtual_dir| {
                 // Don't translate away `/rustc/$hash` if we're still remapping to it,
@@ -1626,11 +1629,11 @@ impl<'a, 'tcx> CrateMetadataRef<'a> {
             debug!(
                 "try_to_translate_virtual_to_real(name={:?}): \
                  virtual_rust_source_base_dir={:?}, real_rust_source_base_dir={:?}",
-                name, virtual_rust_source_base_dir, sess.real_rust_source_base_dir,
+                name, virtual_rust_source_base_dir, sess.opts.real_rust_source_base_dir,
             );
 
             if let Some(virtual_dir) = virtual_rust_source_base_dir {
-                if let Some(real_dir) = &sess.real_rust_source_base_dir {
+                if let Some(real_dir) = &sess.opts.real_rust_source_base_dir {
                     if let rustc_span::FileName::Real(old_name) = name {
                         if let rustc_span::RealFileName::Named(one_path) = old_name {
                             if let Ok(rest) = one_path.strip_prefix(virtual_dir) {
@@ -1880,10 +1883,6 @@ impl CrateMetadata {
 
     crate fn hash(&self) -> Svh {
         self.root.hash
-    }
-
-    fn num_def_ids(&self) -> usize {
-        self.root.tables.def_keys.size()
     }
 
     fn local_def_id(&self, index: DefIndex) -> DefId {

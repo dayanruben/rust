@@ -207,7 +207,13 @@ impl<'tcx> Queries<'tcx> {
                                 })
                                 .open(self.session())
                         });
-                    DepGraph::new(prev_graph, prev_work_products)
+
+                    rustc_incremental::build_dep_graph(
+                        self.session(),
+                        prev_graph,
+                        prev_work_products,
+                    )
+                    .unwrap_or_else(DepGraph::new_disabled)
                 }
             })
         })
@@ -301,7 +307,7 @@ impl<'tcx> Queries<'tcx> {
             _ => return,
         };
 
-        let attrs = &*tcx.get_attrs(def_id.to_def_id());
+        let attrs = &*tcx.get_attrs(def_id);
         let attrs = attrs.iter().filter(|attr| tcx.sess.check_name(attr, sym::rustc_error));
         for attr in attrs {
             match attr.meta_item_list() {
@@ -435,6 +441,9 @@ impl Compiler {
             if self.session().opts.debugging_opts.query_stats {
                 gcx.enter(rustc_query_impl::print_stats);
             }
+
+            self.session()
+                .time("serialize_dep_graph", || gcx.enter(rustc_incremental::save_dep_graph));
         }
 
         _timer = Some(self.session().timer("free_global_ctxt"));

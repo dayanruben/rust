@@ -77,7 +77,7 @@ macro_rules! throw_validation_failure {
 ///
 macro_rules! try_validation {
     ($e:expr, $where:expr,
-     $( $( $p:pat )|+ => { $( $what_fmt:expr ),+ } $( expected { $( $expected_fmt:expr ),+ } )? ),+ $(,)?
+    $( $( $p:pat )|+ => { $( $what_fmt:expr ),+ } $( expected { $( $expected_fmt:expr ),+ } )? ),+ $(,)?
     ) => {{
         match $e {
             Ok(x) => x,
@@ -244,17 +244,20 @@ impl<'rt, 'mir, 'tcx: 'mir, M: Machine<'mir, 'tcx>> ValidityVisitor<'rt, 'mir, '
             // generators and closures.
             ty::Closure(def_id, _) | ty::Generator(def_id, _, _) => {
                 let mut name = None;
-                if let Some(def_id) = def_id.as_local() {
-                    let tables = self.ecx.tcx.typeck(def_id);
-                    if let Some(upvars) = tables.closure_captures.get(&def_id.to_def_id()) {
+                // FIXME this should be more descriptive i.e. CapturePlace instead of CapturedVar
+                // https://github.com/rust-lang/project-rfc-2229/issues/46
+                if let Some(local_def_id) = def_id.as_local() {
+                    let tables = self.ecx.tcx.typeck(local_def_id);
+                    if let Some(captured_place) =
+                        tables.closure_min_captures_flattened(*def_id).nth(field)
+                    {
                         // Sometimes the index is beyond the number of upvars (seen
                         // for a generator).
-                        if let Some((&var_hir_id, _)) = upvars.get_index(field) {
-                            let node = self.ecx.tcx.hir().get(var_hir_id);
-                            if let hir::Node::Binding(pat) = node {
-                                if let hir::PatKind::Binding(_, _, ident, _) = pat.kind {
-                                    name = Some(ident.name);
-                                }
+                        let var_hir_id = captured_place.get_root_variable();
+                        let node = self.ecx.tcx.hir().get(var_hir_id);
+                        if let hir::Node::Binding(pat) = node {
+                            if let hir::PatKind::Binding(_, _, ident, _) = pat.kind {
+                                name = Some(ident.name);
                             }
                         }
                     }
@@ -327,7 +330,7 @@ impl<'rt, 'mir, 'tcx: 'mir, M: Machine<'mir, 'tcx>> ValidityVisitor<'rt, 'mir, '
                         vtable,
                         3 * self.ecx.tcx.data_layout.pointer_size, // drop, size, align
                         Some(self.ecx.tcx.data_layout.pointer_align.abi),
-                        CheckInAllocMsg::InboundsTest,
+                        CheckInAllocMsg::InboundsTest, // will anyway be replaced by validity message
                     ),
                     self.path,
                     err_ub!(DanglingIntPointer(..)) |
@@ -413,7 +416,7 @@ impl<'rt, 'mir, 'tcx: 'mir, M: Machine<'mir, 'tcx>> ValidityVisitor<'rt, 'mir, '
                 place.ptr,
                 size,
                 Some(align),
-                CheckInAllocMsg::InboundsTest,
+                CheckInAllocMsg::InboundsTest, // will anyway be replaced by validity message
             ),
             self.path,
             err_ub!(AlignmentCheckFailed { required, has }) =>
@@ -424,7 +427,7 @@ impl<'rt, 'mir, 'tcx: 'mir, M: Machine<'mir, 'tcx>> ValidityVisitor<'rt, 'mir, '
                     has.bytes()
                 },
             err_ub!(DanglingIntPointer(0, _)) =>
-                { "a NULL {}", kind },
+                { "a null {}", kind },
             err_ub!(DanglingIntPointer(i, _)) =>
                 { "a dangling {} (address 0x{:x} is unallocated)", kind, i },
             err_ub!(PointerOutOfBounds { .. }) =>
@@ -659,10 +662,10 @@ impl<'rt, 'mir, 'tcx: 'mir, M: Machine<'mir, 'tcx>> ValidityVisitor<'rt, 'mir, '
         let bits = match value.to_bits_or_ptr(op.layout.size, self.ecx) {
             Err(ptr) => {
                 if lo == 1 && hi == max_hi {
-                    // Only NULL is the niche.  So make sure the ptr is NOT NULL.
+                    // Only null is the niche.  So make sure the ptr is NOT null.
                     if self.ecx.memory.ptr_may_be_null(ptr) {
                         throw_validation_failure!(self.path,
-                            { "a potentially NULL pointer" }
+                            { "a potentially null pointer" }
                             expected {
                                 "something that cannot possibly fail to be {}",
                                 wrapping_range_format(valid_range, max_hi)

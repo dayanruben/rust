@@ -108,6 +108,19 @@ impl Step for Linkcheck {
     /// documentation to ensure we don't have a bunch of dead ones.
     fn run(self, builder: &Builder<'_>) {
         let host = self.host;
+        let hosts = &builder.hosts;
+        let targets = &builder.targets;
+
+        // if we have different hosts and targets, some things may be built for
+        // the host (e.g. rustc) and others for the target (e.g. std). The
+        // documentation built for each will contain broken links to
+        // docs built for the other platform (e.g. rustc linking to cargo)
+        if (hosts != targets) && !hosts.is_empty() && !targets.is_empty() {
+            panic!(
+                "Linkcheck currently does not support builds with different hosts and targets.
+You can skip linkcheck with --exclude src/tools/linkchecker"
+            );
+        }
 
         builder.info(&format!("Linkcheck ({})", host));
 
@@ -122,7 +135,8 @@ impl Step for Linkcheck {
 
     fn should_run(run: ShouldRun<'_>) -> ShouldRun<'_> {
         let builder = run.builder;
-        run.path("src/tools/linkchecker").default_condition(builder.config.docs)
+        let run = run.path("src/tools/linkchecker");
+        run.default_condition(builder.config.docs)
     }
 
     fn make_run(run: RunConfig<'_>) {
@@ -169,6 +183,7 @@ impl Step for Cargotest {
             builder,
             cmd.arg(&cargo)
                 .arg(&out_dir)
+                .args(builder.config.cmd.test_args())
                 .env("RUSTC", builder.rustc(compiler))
                 .env("RUSTDOC", builder.rustdoc(compiler)),
         );
@@ -338,6 +353,57 @@ impl Step for Rustfmt {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub struct RustDemangler {
+    stage: u32,
+    host: TargetSelection,
+}
+
+impl Step for RustDemangler {
+    type Output = ();
+    const ONLY_HOSTS: bool = true;
+
+    fn should_run(run: ShouldRun<'_>) -> ShouldRun<'_> {
+        run.path("src/tools/rust-demangler")
+    }
+
+    fn make_run(run: RunConfig<'_>) {
+        run.builder.ensure(RustDemangler { stage: run.builder.top_stage, host: run.target });
+    }
+
+    /// Runs `cargo test` for rust-demangler.
+    fn run(self, builder: &Builder<'_>) {
+        let stage = self.stage;
+        let host = self.host;
+        let compiler = builder.compiler(stage, host);
+
+        let rust_demangler = builder
+            .ensure(tool::RustDemangler { compiler, target: self.host, extra_features: Vec::new() })
+            .expect("in-tree tool");
+        let mut cargo = tool::prepare_tool_cargo(
+            builder,
+            compiler,
+            Mode::ToolRustc,
+            host,
+            "test",
+            "src/tools/rust-demangler",
+            SourceType::InTree,
+            &[],
+        );
+
+        let dir = testdir(builder, compiler.host);
+        t!(fs::create_dir_all(&dir));
+
+        cargo.env("RUST_DEMANGLER_DRIVER_PATH", rust_demangler);
+
+        cargo.arg("--").args(builder.config.cmd.test_args());
+
+        cargo.add_rustc_lib_path(builder, compiler);
+
+        builder.run(&mut cargo.into());
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct Miri {
     stage: u32,
     host: TargetSelection,
@@ -452,7 +518,14 @@ impl Step for Miri {
 
             cargo.add_rustc_lib_path(builder, compiler);
 
-            if !try_run(builder, &mut cargo.into()) {
+            let mut cargo = Command::from(cargo);
+            if !try_run(builder, &mut cargo) {
+                return;
+            }
+
+            // # Run `cargo test` with `-Zmir-opt-level=4`.
+            cargo.env("MIRIFLAGS", "-O -Zmir-opt-level=4");
+            if !try_run(builder, &mut cargo) {
                 return;
             }
 
@@ -560,6 +633,26 @@ impl Step for Clippy {
 
         cargo.add_rustc_lib_path(builder, compiler);
 
+        if builder.try_run(&mut cargo.into()) {
+            // The tests succeeded; nothing to do.
+            return;
+        }
+
+        if !builder.config.cmd.bless() {
+            std::process::exit(1);
+        }
+
+        let mut cargo = builder.cargo(compiler, Mode::ToolRustc, SourceType::InTree, host, "run");
+        cargo.arg("-p").arg("clippy_dev");
+        // clippy_dev gets confused if it can't find `clippy/Cargo.toml`
+        cargo.current_dir(&builder.src.join("src").join("tools").join("clippy"));
+        if builder.config.rust_optimize {
+            cargo.env("PROFILE", "release");
+        } else {
+            cargo.env("PROFILE", "debug");
+        }
+        cargo.arg("--");
+        cargo.arg("bless");
         builder.run(&mut cargo.into());
     }
 }
@@ -738,23 +831,14 @@ impl Step for RustdocGUI {
             command.arg("src/test/rustdoc-gui/lib.rs").arg("-o").arg(&out_dir);
             builder.run(&mut command);
 
-            for file in fs::read_dir("src/test/rustdoc-gui").unwrap() {
-                let file = file.unwrap();
-                let file_path = file.path();
-                let file_name = file.file_name();
-
-                if !file_name.to_str().unwrap().ends_with(".goml") {
-                    continue;
-                }
-                let mut command = Command::new(&nodejs);
-                command
-                    .arg("src/tools/rustdoc-gui/tester.js")
-                    .arg("--doc-folder")
-                    .arg(out_dir.join("test_docs"))
-                    .arg("--test-file")
-                    .arg(file_path);
-                builder.run(&mut command);
-            }
+            let mut command = Command::new(&nodejs);
+            command
+                .arg("src/tools/rustdoc-gui/tester.js")
+                .arg("--doc-folder")
+                .arg(out_dir.join("test_docs"))
+                .arg("--tests-folder")
+                .arg("src/test/rustdoc-gui");
+            builder.run(&mut command);
         } else {
             builder.info("No nodejs found, skipping \"src/test/rustdoc-gui\" tests");
         }
@@ -782,6 +866,7 @@ impl Step for Tidy {
         cmd.arg(&builder.src);
         cmd.arg(&builder.initial_cargo);
         cmd.arg(&builder.out);
+        cmd.arg(builder.jobs().to_string());
         if builder.is_verbose() {
             cmd.arg("--verbose");
         }
@@ -791,6 +876,19 @@ impl Step for Tidy {
 
         if builder.config.channel == "dev" || builder.config.channel == "nightly" {
             builder.info("fmt check");
+            if builder.config.initial_rustfmt.is_none() {
+                let inferred_rustfmt_dir = builder.config.initial_rustc.parent().unwrap();
+                eprintln!(
+                    "\
+error: no `rustfmt` binary found in {PATH}
+info: `rust.channel` is currently set to \"{CHAN}\"
+help: if you are testing a beta branch, set `rust.channel` to \"beta\" in the `config.toml` file
+help: to skip test's attempt to check tidiness, pass `--exclude src/tools/tidy` to `x.py test`",
+                    PATH = inferred_rustfmt_dir.display(),
+                    CHAN = builder.config.channel,
+                );
+                std::process::exit(1);
+            }
             crate::format::format(&builder.build, !builder.config.cmd.bless());
         }
     }
@@ -1004,6 +1102,19 @@ struct Compiletest {
     compare_mode: Option<&'static str>,
 }
 
+impl Compiletest {
+    fn add_lld_flags(builder: &Builder<'_>, target: TargetSelection, flags: &mut Vec<String>) {
+        if builder.config.use_lld {
+            if builder.is_fuse_ld_lld(target) {
+                flags.push("-Clink-arg=-fuse-ld=lld".to_string());
+            }
+
+            let threads = if target.contains("windows") { "/threads:1" } else { "--threads=1" };
+            flags.push(format!("-Clink-arg=-Wl,{}", threads));
+        }
+    }
+}
+
 impl Step for Compiletest {
     type Output = ();
 
@@ -1092,7 +1203,10 @@ note: if you're sure you want to do this, please open an issue as to why. In the
         }
 
         if mode == "run-make" && suite.ends_with("fulldeps") {
-            cmd.arg("--rust-demangler-path").arg(builder.tool_exe(Tool::RustDemangler));
+            let rust_demangler = builder
+                .ensure(tool::RustDemangler { compiler, target, extra_features: Vec::new() })
+                .expect("in-tree tool");
+            cmd.arg("--rust-demangler-path").arg(rust_demangler);
         }
 
         cmd.arg("--src-base").arg(builder.src.join("src/test").join(suite));
@@ -1118,6 +1232,11 @@ note: if you're sure you want to do this, please open an issue as to why. In the
             cmd.arg(pass);
         }
 
+        if let Some(ref run) = builder.config.cmd.run() {
+            cmd.arg("--run");
+            cmd.arg(run);
+        }
+
         if let Some(ref nodejs) = builder.config.nodejs {
             cmd.arg("--nodejs").arg(nodejs);
         }
@@ -1141,16 +1260,12 @@ note: if you're sure you want to do this, please open an issue as to why. In the
 
         let mut hostflags = flags.clone();
         hostflags.push(format!("-Lnative={}", builder.test_helpers_out(compiler.host).display()));
-        if builder.is_fuse_ld_lld(compiler.host) {
-            hostflags.push("-Clink-args=-fuse-ld=lld".to_string());
-        }
+        Self::add_lld_flags(builder, compiler.host, &mut hostflags);
         cmd.arg("--host-rustcflags").arg(hostflags.join(" "));
 
         let mut targetflags = flags;
         targetflags.push(format!("-Lnative={}", builder.test_helpers_out(target).display()));
-        if builder.is_fuse_ld_lld(target) {
-            targetflags.push("-Clink-args=-fuse-ld=lld".to_string());
-        }
+        Self::add_lld_flags(builder, target, &mut targetflags);
         cmd.arg("--target-rustcflags").arg(targetflags.join(" "));
 
         cmd.arg("--docck-python").arg(builder.python());
@@ -1598,6 +1713,9 @@ fn markdown_test(builder: &Builder<'_>, compiler: Compiler, markdown: &Path) -> 
     builder.info(&format!("doc tests for: {}", markdown.display()));
     let mut cmd = builder.rustdoc_cmd(compiler);
     builder.add_rust_test_threads(&mut cmd);
+    // allow for unstable options such as new editions
+    cmd.arg("-Z");
+    cmd.arg("unstable-options");
     cmd.arg("--test");
     cmd.arg(markdown);
     cmd.env("RUSTC_BOOTSTRAP", "1");

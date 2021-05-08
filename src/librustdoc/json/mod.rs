@@ -14,17 +14,17 @@ use std::rc::Rc;
 use rustc_data_structures::fx::FxHashMap;
 use rustc_middle::ty::TyCtxt;
 use rustc_session::Session;
-use rustc_span::edition::Edition;
 
 use rustdoc_json_types as types;
 
 use crate::clean;
+use crate::clean::{ExternalCrate, FakeDefId};
 use crate::config::RenderOptions;
 use crate::error::Error;
 use crate::formats::cache::Cache;
 use crate::formats::FormatRenderer;
 use crate::html::render::cache::ExternalLocation;
-use crate::json::conversions::from_def_id;
+use crate::json::conversions::{from_def_id, IntoWithTcx};
 
 #[derive(Clone)]
 crate struct JsonRenderer<'tcx> {
@@ -42,7 +42,7 @@ impl JsonRenderer<'tcx> {
         self.tcx.sess
     }
 
-    fn get_trait_implementors(&mut self, id: rustc_span::def_id::DefId) -> Vec<types::Id> {
+    fn get_trait_implementors(&mut self, id: FakeDefId) -> Vec<types::Id> {
         Rc::clone(&self.cache)
             .implementors
             .get(&id)
@@ -59,10 +59,10 @@ impl JsonRenderer<'tcx> {
             .unwrap_or_default()
     }
 
-    fn get_impls(&mut self, id: rustc_span::def_id::DefId) -> Vec<types::Id> {
+    fn get_impls(&mut self, id: FakeDefId) -> Vec<types::Id> {
         Rc::clone(&self.cache)
             .impls
-            .get(&id)
+            .get(&id.expect_real())
             .map(|impls| {
                 impls
                     .iter()
@@ -90,9 +90,9 @@ impl JsonRenderer<'tcx> {
                     let trait_item = &trait_item.trait_;
                     trait_item.items.clone().into_iter().for_each(|i| self.item(i).unwrap());
                     Some((
-                        from_def_id(id),
+                        from_def_id(id.into()),
                         types::Item {
-                            id: from_def_id(id),
+                            id: from_def_id(id.into()),
                             crate_id: id.krate.as_u32(),
                             name: self
                                 .cache
@@ -108,8 +108,8 @@ impl JsonRenderer<'tcx> {
                                 .last()
                                 .map(Clone::clone),
                             visibility: types::Visibility::Public,
-                            inner: types::ItemEnum::Trait(trait_item.clone().into()),
-                            source: None,
+                            inner: types::ItemEnum::Trait(trait_item.clone().into_tcx(self.tcx)),
+                            span: None,
                             docs: Default::default(),
                             links: Default::default(),
                             attrs: Default::default(),
@@ -129,10 +129,11 @@ impl<'tcx> FormatRenderer<'tcx> for JsonRenderer<'tcx> {
         "json"
     }
 
+    const RUN_ON_MODULE: bool = false;
+
     fn init(
         krate: clean::Crate,
         options: RenderOptions,
-        _edition: Edition,
         cache: Cache,
         tcx: TyCtxt<'tcx>,
     ) -> Result<(Self, clean::Crate), Error> {
@@ -169,8 +170,10 @@ impl<'tcx> FormatRenderer<'tcx> for JsonRenderer<'tcx> {
                 e.impls = self.get_impls(id)
             }
             let removed = self.index.borrow_mut().insert(from_def_id(id), new_item.clone());
+
             // FIXME(adotinthevoid): Currently, the index is duplicated. This is a sanity check
-            // to make sure the items are unique.
+            // to make sure the items are unique. The main place this happens is when an item, is
+            // reexported in more than one place. See `rustdoc-json/reexport/in_root_and_mod`
             if let Some(old_item) = removed {
                 assert_eq!(old_item, new_item);
             }
@@ -179,32 +182,11 @@ impl<'tcx> FormatRenderer<'tcx> for JsonRenderer<'tcx> {
         Ok(())
     }
 
-    fn mod_item_in(&mut self, item: &clean::Item, _module_name: &str) -> Result<(), Error> {
-        use clean::types::ItemKind::*;
-        if let ModuleItem(m) = &*item.kind {
-            for item in &m.items {
-                match &*item.kind {
-                    // These don't have names so they don't get added to the output by default
-                    ImportItem(_) => self.item(item.clone()).unwrap(),
-                    ExternCrateItem { .. } => self.item(item.clone()).unwrap(),
-                    ImplItem(i) => i.items.iter().for_each(|i| self.item(i.clone()).unwrap()),
-                    _ => {}
-                }
-            }
-        }
-        self.item(item.clone()).unwrap();
-        Ok(())
+    fn mod_item_in(&mut self, _item: &clean::Item) -> Result<(), Error> {
+        unreachable!("RUN_ON_MODULE = false should never call mod_item_in")
     }
 
-    fn mod_item_out(&mut self, _item_name: &str) -> Result<(), Error> {
-        Ok(())
-    }
-
-    fn after_krate(
-        &mut self,
-        _krate: &clean::Crate,
-        _diag: &rustc_errors::Handler,
-    ) -> Result<(), Error> {
+    fn after_krate(&mut self) -> Result<(), Error> {
         debug!("Done with crate");
         let mut index = (*self.index).clone().into_inner();
         index.extend(self.get_trait_items());
@@ -224,8 +206,12 @@ impl<'tcx> FormatRenderer<'tcx> for JsonRenderer<'tcx> {
                 .chain(self.cache.external_paths.clone().into_iter())
                 .map(|(k, (path, kind))| {
                     (
-                        from_def_id(k),
-                        types::ItemSummary { crate_id: k.krate.as_u32(), path, kind: kind.into() },
+                        from_def_id(k.into()),
+                        types::ItemSummary {
+                            crate_id: k.krate.as_u32(),
+                            path,
+                            kind: kind.into_tcx(self.tcx),
+                        },
                     )
                 })
                 .collect(),
@@ -233,12 +219,13 @@ impl<'tcx> FormatRenderer<'tcx> for JsonRenderer<'tcx> {
                 .cache
                 .extern_locations
                 .iter()
-                .map(|(k, v)| {
+                .map(|(crate_num, external_location)| {
+                    let e = ExternalCrate { crate_num: *crate_num };
                     (
-                        k.as_u32(),
+                        crate_num.as_u32(),
                         types::ExternalCrate {
-                            name: v.0.to_string(),
-                            html_root_url: match &v.2 {
+                            name: e.name(self.tcx).to_string(),
+                            html_root_url: match external_location {
                                 ExternalLocation::Remote(s) => Some(s.clone()),
                                 _ => None,
                             },
@@ -246,7 +233,7 @@ impl<'tcx> FormatRenderer<'tcx> for JsonRenderer<'tcx> {
                     )
                 })
                 .collect(),
-            format_version: 4,
+            format_version: 5,
         };
         let mut p = self.out_path.clone();
         p.push(output.index.get(&output.root).unwrap().name.clone().unwrap());

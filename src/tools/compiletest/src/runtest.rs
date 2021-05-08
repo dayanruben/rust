@@ -259,6 +259,7 @@ pub fn run(config: Config, testpaths: &TestPaths, revision: Option<&str>) {
 pub fn compute_stamp_hash(config: &Config) -> String {
     let mut hash = DefaultHasher::new();
     config.stage_id.hash(&mut hash);
+    config.run.hash(&mut hash);
 
     match config.debugger {
         Some(Debugger::Cdb) => {
@@ -317,6 +318,7 @@ enum TestOutput {
 enum WillExecute {
     Yes,
     No,
+    Disabled,
 }
 
 /// Should `--emit metadata` be used?
@@ -357,14 +359,17 @@ impl<'test> TestCx<'test> {
     }
 
     fn should_run(&self, pm: Option<PassMode>) -> WillExecute {
-        match self.config.mode {
-            Ui if pm == Some(PassMode::Run) || self.props.fail_mode == Some(FailMode::Run) => {
-                WillExecute::Yes
-            }
-            MirOpt if pm == Some(PassMode::Run) => WillExecute::Yes,
-            Ui | MirOpt => WillExecute::No,
+        let test_should_run = match self.config.mode {
+            Ui if pm == Some(PassMode::Run) || self.props.fail_mode == Some(FailMode::Run) => true,
+            MirOpt if pm == Some(PassMode::Run) => true,
+            Ui | MirOpt => false,
             mode => panic!("unimplemented for mode {:?}", mode),
-        }
+        };
+        if test_should_run { self.run_if_enabled() } else { WillExecute::No }
+    }
+
+    fn run_if_enabled(&self) -> WillExecute {
+        if self.config.run_enabled() { WillExecute::Yes } else { WillExecute::Disabled }
     }
 
     fn should_run_successfully(&self, pm: Option<PassMode>) -> bool {
@@ -439,10 +444,15 @@ impl<'test> TestCx<'test> {
 
     fn run_rfail_test(&self) {
         let pm = self.pass_mode();
-        let proc_res = self.compile_test(WillExecute::Yes, self.should_emit_metadata(pm));
+        let should_run = self.run_if_enabled();
+        let proc_res = self.compile_test(should_run, self.should_emit_metadata(pm));
 
         if !proc_res.status.success() {
             self.fatal_proc_rec("compilation failed!", &proc_res);
+        }
+
+        if let WillExecute::Disabled = should_run {
+            return;
         }
 
         let proc_res = self.exec_compiled_test();
@@ -483,10 +493,15 @@ impl<'test> TestCx<'test> {
 
     fn run_rpass_test(&self) {
         let emit_metadata = self.should_emit_metadata(self.pass_mode());
-        let proc_res = self.compile_test(WillExecute::Yes, emit_metadata);
+        let should_run = self.run_if_enabled();
+        let proc_res = self.compile_test(should_run, emit_metadata);
 
         if !proc_res.status.success() {
             self.fatal_proc_rec("compilation failed!", &proc_res);
+        }
+
+        if let WillExecute::Disabled = should_run {
+            return;
         }
 
         // FIXME(#41968): Move this check to tidy?
@@ -510,10 +525,15 @@ impl<'test> TestCx<'test> {
             return self.run_rpass_test();
         }
 
-        let mut proc_res = self.compile_test(WillExecute::Yes, EmitMetadata::No);
+        let should_run = self.run_if_enabled();
+        let mut proc_res = self.compile_test(should_run, EmitMetadata::No);
 
         if !proc_res.status.success() {
             self.fatal_proc_rec("compilation failed!", &proc_res);
+        }
+
+        if let WillExecute::Disabled = should_run {
+            return;
         }
 
         let mut new_config = self.config.clone();
@@ -732,9 +752,13 @@ impl<'test> TestCx<'test> {
 
     fn run_debuginfo_cdb_test_no_opt(&self) {
         // compile test file (it should have 'compile-flags:-g' in the header)
-        let compile_result = self.compile_test(WillExecute::Yes, EmitMetadata::No);
+        let should_run = self.run_if_enabled();
+        let compile_result = self.compile_test(should_run, EmitMetadata::No);
         if !compile_result.status.success() {
             self.fatal_proc_rec("compilation failed!", &compile_result);
+        }
+        if let WillExecute::Disabled = should_run {
+            return;
         }
 
         let exe_file = self.make_exe_name();
@@ -826,9 +850,13 @@ impl<'test> TestCx<'test> {
         let mut cmds = commands.join("\n");
 
         // compile test file (it should have 'compile-flags:-g' in the header)
-        let compiler_run_result = self.compile_test(WillExecute::Yes, EmitMetadata::No);
+        let should_run = self.run_if_enabled();
+        let compiler_run_result = self.compile_test(should_run, EmitMetadata::No);
         if !compiler_run_result.status.success() {
             self.fatal_proc_rec("compilation failed!", &compiler_run_result);
+        }
+        if let WillExecute::Disabled = should_run {
+            return;
         }
 
         let exe_file = self.make_exe_name();
@@ -1044,9 +1072,13 @@ impl<'test> TestCx<'test> {
 
     fn run_debuginfo_lldb_test_no_opt(&self) {
         // compile test file (it should have 'compile-flags:-g' in the header)
-        let compile_result = self.compile_test(WillExecute::Yes, EmitMetadata::No);
+        let should_run = self.run_if_enabled();
+        let compile_result = self.compile_test(should_run, EmitMetadata::No);
         if !compile_result.status.success() {
             self.fatal_proc_rec("compilation failed!", &compile_result);
+        }
+        if let WillExecute::Disabled = should_run {
+            return;
         }
 
         let exe_file = self.make_exe_name();
@@ -1531,7 +1563,9 @@ impl<'test> TestCx<'test> {
         // Only use `make_exe_name` when the test ends up being executed.
         let output_file = match will_execute {
             WillExecute::Yes => TargetLocation::ThisFile(self.make_exe_name()),
-            WillExecute::No => TargetLocation::ThisDirectory(self.output_base_dir()),
+            WillExecute::No | WillExecute::Disabled => {
+                TargetLocation::ThisDirectory(self.output_base_dir())
+            }
         };
 
         let allow_unused = match self.config.mode {
@@ -1600,7 +1634,7 @@ impl<'test> TestCx<'test> {
             .args(&self.props.compile_flags);
 
         if self.config.mode == RustdocJson {
-            rustdoc.arg("--output-format").arg("json");
+            rustdoc.arg("--output-format").arg("json").arg("-Zunstable-options");
         }
 
         if let Some(ref linker) = self.config.linker {
@@ -1909,8 +1943,7 @@ impl<'test> TestCx<'test> {
         } else {
             Command::new(&self.config.rustdoc_path.clone().expect("no rustdoc built yet"))
         };
-        // FIXME Why is -L here?
-        rustc.arg(input_file); //.arg("-L").arg(&self.config.build_base);
+        rustc.arg(input_file);
 
         // Use a single thread for efficiency and a deterministic error message order
         rustc.arg("-Zthreads=1");
@@ -1952,6 +1985,7 @@ impl<'test> TestCx<'test> {
                 if !self.props.compile_flags.iter().any(|s| s.starts_with("--error-format")) {
                     rustc.args(&["--error-format", "json"]);
                 }
+                rustc.arg("-Ccodegen-units=1");
                 rustc.arg("-Zui-testing");
                 rustc.arg("-Zdeduplicate-diagnostics=no");
                 rustc.arg("-Zemit-future-incompat-report");
@@ -2069,6 +2103,8 @@ impl<'test> TestCx<'test> {
             f = f.with_extra_extension("js");
         } else if self.config.target.contains("wasm32") {
             f = f.with_extra_extension("wasm");
+        } else if self.config.target.contains("spirv") {
+            f = f.with_extra_extension("spv");
         } else if !env::consts::EXE_SUFFIX.is_empty() {
             f = f.with_extra_extension(env::consts::EXE_SUFFIX);
         }
@@ -2365,6 +2401,9 @@ impl<'test> TestCx<'test> {
     }
 
     fn compare_to_default_rustdoc(&mut self, out_dir: &Path) {
+        if !self.config.has_tidy {
+            return;
+        }
         println!("info: generating a diff against nightly rustdoc");
 
         let suffix =
@@ -2426,10 +2465,8 @@ impl<'test> TestCx<'test> {
                 }
             }
         };
-        if self.config.has_tidy {
-            tidy_dir(out_dir);
-            tidy_dir(&compare_dir);
-        }
+        tidy_dir(out_dir);
+        tidy_dir(&compare_dir);
 
         let pager = {
             let output = Command::new("git").args(&["config", "--get", "core.pager"]).output().ok();
@@ -3137,8 +3174,14 @@ impl<'test> TestCx<'test> {
         output_kind: TestOutput,
         explicit_format: bool,
     ) -> usize {
+        let stderr_bits = format!("{}.stderr", get_pointer_width(&self.config.target));
         let (stderr_kind, stdout_kind) = match output_kind {
-            TestOutput::Compile => (UI_STDERR, UI_STDOUT),
+            TestOutput::Compile => (
+                {
+                    if self.props.stderr_per_bitwidth { &stderr_bits } else { UI_STDERR }
+                },
+                UI_STDOUT,
+            ),
             TestOutput::Run => (UI_RUN_STDERR, UI_RUN_STDOUT),
         };
 
@@ -3178,15 +3221,12 @@ impl<'test> TestCx<'test> {
         match output_kind {
             TestOutput::Compile => {
                 if !self.props.dont_check_compiler_stdout {
-                    errors += self.compare_output("stdout", &normalized_stdout, &expected_stdout);
+                    errors +=
+                        self.compare_output(stdout_kind, &normalized_stdout, &expected_stdout);
                 }
                 if !self.props.dont_check_compiler_stderr {
-                    let kind = if self.props.stderr_per_bitwidth {
-                        format!("{}bit.stderr", get_pointer_width(&self.config.target))
-                    } else {
-                        String::from("stderr")
-                    };
-                    errors += self.compare_output(&kind, &normalized_stderr, &expected_stderr);
+                    errors +=
+                        self.compare_output(stderr_kind, &normalized_stderr, &expected_stderr);
                 }
             }
             TestOutput::Run => {
@@ -3644,6 +3684,8 @@ impl<'test> TestCx<'test> {
 
         // Remove test annotations like `//~ ERROR text` from the output,
         // since they duplicate actual errors and make the output hard to read.
+        // This mirrors the regex in src/tools/tidy/src/style.rs, please update
+        // both if either are changed.
         normalized =
             Regex::new("\\s*//(\\[.*\\])?~.*").unwrap().replace_all(&normalized, "").into_owned();
 
@@ -3759,6 +3801,13 @@ impl<'test> TestCx<'test> {
 
         let mut files = vec![output_file];
         if self.config.bless {
+            // Delete non-revision .stderr/.stdout file if revisions are used.
+            // Without this, we'd just generate the new files and leave the old files around.
+            if self.revision.is_some() {
+                let old =
+                    expected_output_path(self.testpaths, None, &self.config.compare_mode, kind);
+                self.delete_file(&old);
+            }
             files.push(expected_output_path(
                 self.testpaths,
                 self.revision,

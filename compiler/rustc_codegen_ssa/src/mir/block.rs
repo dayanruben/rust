@@ -635,12 +635,8 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                         if i == 2 && intrinsic.as_str().starts_with("simd_shuffle") {
                             if let mir::Operand::Constant(constant) = arg {
                                 let c = self.eval_mir_constant(constant);
-                                let (llval, ty) = self.simd_shuffle_indices(
-                                    &bx,
-                                    constant.span,
-                                    constant.literal.ty,
-                                    c,
-                                );
+                                let (llval, ty) =
+                                    self.simd_shuffle_indices(&bx, constant.span, constant.ty(), c);
                                 return OperandRef {
                                     val: Immediate(llval),
                                     layout: bx.layout_of(ty),
@@ -826,45 +822,41 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                     InlineAsmOperandRef::InOut { reg, late, in_value, out_place }
                 }
                 mir::InlineAsmOperand::Const { ref value } => {
-                    if let mir::Operand::Constant(constant) = value {
-                        let const_value = self
-                            .eval_mir_constant(constant)
-                            .unwrap_or_else(|_| span_bug!(span, "asm const cannot be resolved"));
-                        let ty = constant.literal.ty;
-                        let size = bx.layout_of(ty).size;
-                        let scalar = match const_value {
-                            ConstValue::Scalar(s) => s,
-                            _ => span_bug!(
-                                span,
-                                "expected Scalar for promoted asm const, but got {:#?}",
-                                const_value
-                            ),
-                        };
-                        let value = scalar.assert_bits(size);
-                        let string = match ty.kind() {
-                            ty::Uint(_) => value.to_string(),
-                            ty::Int(int_ty) => {
-                                match int_ty.normalize(bx.tcx().sess.target.pointer_width) {
-                                    ty::IntTy::I8 => (value as i8).to_string(),
-                                    ty::IntTy::I16 => (value as i16).to_string(),
-                                    ty::IntTy::I32 => (value as i32).to_string(),
-                                    ty::IntTy::I64 => (value as i64).to_string(),
-                                    ty::IntTy::I128 => (value as i128).to_string(),
-                                    ty::IntTy::Isize => unreachable!(),
-                                }
+                    let const_value = self
+                        .eval_mir_constant(value)
+                        .unwrap_or_else(|_| span_bug!(span, "asm const cannot be resolved"));
+                    let ty = value.ty();
+                    let size = bx.layout_of(ty).size;
+                    let scalar = match const_value {
+                        ConstValue::Scalar(s) => s,
+                        _ => span_bug!(
+                            span,
+                            "expected Scalar for promoted asm const, but got {:#?}",
+                            const_value
+                        ),
+                    };
+                    let value = scalar.assert_bits(size);
+                    let string = match ty.kind() {
+                        ty::Uint(_) => value.to_string(),
+                        ty::Int(int_ty) => {
+                            match int_ty.normalize(bx.tcx().sess.target.pointer_width) {
+                                ty::IntTy::I8 => (value as i8).to_string(),
+                                ty::IntTy::I16 => (value as i16).to_string(),
+                                ty::IntTy::I32 => (value as i32).to_string(),
+                                ty::IntTy::I64 => (value as i64).to_string(),
+                                ty::IntTy::I128 => (value as i128).to_string(),
+                                ty::IntTy::Isize => unreachable!(),
                             }
-                            ty::Float(ty::FloatTy::F32) => f32::from_bits(value as u32).to_string(),
-                            ty::Float(ty::FloatTy::F64) => f64::from_bits(value as u64).to_string(),
-                            _ => span_bug!(span, "asm const has bad type {}", ty),
-                        };
-                        InlineAsmOperandRef::Const { string }
-                    } else {
-                        span_bug!(span, "asm const is not a constant");
-                    }
+                        }
+                        ty::Float(ty::FloatTy::F32) => f32::from_bits(value as u32).to_string(),
+                        ty::Float(ty::FloatTy::F64) => f64::from_bits(value as u64).to_string(),
+                        _ => span_bug!(span, "asm const has bad type {}", ty),
+                    };
+                    InlineAsmOperandRef::Const { string }
                 }
                 mir::InlineAsmOperand::SymFn { ref value } => {
                     let literal = self.monomorphize(value.literal);
-                    if let ty::FnDef(def_id, substs) = *literal.ty.kind() {
+                    if let ty::FnDef(def_id, substs) = *literal.ty().kind() {
                         let instance = ty::Instance::resolve_for_fn_ptr(
                             bx.tcx(),
                             ty::ParamEnv::reveal_all(),

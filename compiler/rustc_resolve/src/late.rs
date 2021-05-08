@@ -132,10 +132,10 @@ crate enum RibKind<'a> {
     /// We passed through a `macro_rules!` statement
     MacroDefinition(DefId),
 
-    /// All bindings in this rib are type parameters that can't be used
-    /// from the default of a type parameter because they're not declared
-    /// before said type parameter. Also see the `visit_generics` override.
-    ForwardTyParamBanRibKind,
+    /// All bindings in this rib are generic parameters that can't be used
+    /// from the default of a generic parameter because they're not declared
+    /// before said generic parameter. Also see the `visit_generics` override.
+    ForwardGenericParamBanRibKind,
 
     /// We are inside of the type of a const parameter. Can't refer to any
     /// parameters.
@@ -154,7 +154,7 @@ impl RibKind<'_> {
             | ModuleRibKind(_)
             | MacroDefinition(_)
             | ConstParamTyRibKind => false,
-            AssocItemRibKind | ItemRibKind(_) | ForwardTyParamBanRibKind => true,
+            AssocItemRibKind | ItemRibKind(_) | ForwardGenericParamBanRibKind => true,
         }
     }
 }
@@ -555,17 +555,23 @@ impl<'a: 'ast, 'ast> Visitor<'ast> for LateResolutionVisitor<'a, '_, 'ast> {
         // provide previous type parameters as they're built. We
         // put all the parameters on the ban list and then remove
         // them one by one as they are processed and become available.
-        let mut default_ban_rib = Rib::new(ForwardTyParamBanRibKind);
-        let mut found_default = false;
-        default_ban_rib.bindings.extend(generics.params.iter().filter_map(
-            |param| match param.kind {
-                GenericParamKind::Const { .. } | GenericParamKind::Lifetime { .. } => None,
-                GenericParamKind::Type { ref default, .. } => {
-                    found_default |= default.is_some();
-                    found_default.then_some((Ident::with_dummy_span(param.ident.name), Res::Err))
+        let mut forward_ty_ban_rib = Rib::new(ForwardGenericParamBanRibKind);
+        let mut forward_const_ban_rib = Rib::new(ForwardGenericParamBanRibKind);
+        for param in generics.params.iter() {
+            match param.kind {
+                GenericParamKind::Type { .. } => {
+                    forward_ty_ban_rib
+                        .bindings
+                        .insert(Ident::with_dummy_span(param.ident.name), Res::Err);
                 }
-            },
-        ));
+                GenericParamKind::Const { .. } => {
+                    forward_const_ban_rib
+                        .bindings
+                        .insert(Ident::with_dummy_span(param.ident.name), Res::Err);
+                }
+                GenericParamKind::Lifetime => {}
+            }
+        }
 
         // rust-lang/rust#61631: The type `Self` is essentially
         // another type parameter. For ADTs, we consider it
@@ -578,7 +584,7 @@ impl<'a: 'ast, 'ast> Visitor<'ast> for LateResolutionVisitor<'a, '_, 'ast> {
         // such as in the case of `trait Add<Rhs = Self>`.)
         if self.diagnostic_metadata.current_self_item.is_some() {
             // (`Some` if + only if we are in ADT's generics.)
-            default_ban_rib.bindings.insert(Ident::with_dummy_span(kw::SelfUpper), Res::Err);
+            forward_ty_ban_rib.bindings.insert(Ident::with_dummy_span(kw::SelfUpper), Res::Err);
         }
 
         for param in &generics.params {
@@ -590,32 +596,38 @@ impl<'a: 'ast, 'ast> Visitor<'ast> for LateResolutionVisitor<'a, '_, 'ast> {
                     }
 
                     if let Some(ref ty) = default {
-                        self.ribs[TypeNS].push(default_ban_rib);
-                        self.with_rib(ValueNS, ForwardTyParamBanRibKind, |this| {
-                            // HACK: We use an empty `ForwardTyParamBanRibKind` here which
-                            // is only used to forbid the use of const parameters inside of
-                            // type defaults.
-                            //
-                            // While the rib name doesn't really fit here, it does allow us to use the same
-                            // code for both const and type parameters.
-                            this.visit_ty(ty);
-                        });
-                        default_ban_rib = self.ribs[TypeNS].pop().unwrap();
+                        self.ribs[TypeNS].push(forward_ty_ban_rib);
+                        self.ribs[ValueNS].push(forward_const_ban_rib);
+                        self.visit_ty(ty);
+                        forward_const_ban_rib = self.ribs[ValueNS].pop().unwrap();
+                        forward_ty_ban_rib = self.ribs[TypeNS].pop().unwrap();
                     }
 
                     // Allow all following defaults to refer to this type parameter.
-                    default_ban_rib.bindings.remove(&Ident::with_dummy_span(param.ident.name));
+                    forward_ty_ban_rib.bindings.remove(&Ident::with_dummy_span(param.ident.name));
                 }
-                GenericParamKind::Const { ref ty, kw_span: _, default: _ } => {
-                    // FIXME(const_generics_defaults): handle `default` value here
-                    for bound in &param.bounds {
-                        self.visit_param_bound(bound);
-                    }
+                GenericParamKind::Const { ref ty, kw_span: _, ref default } => {
+                    // Const parameters can't have param bounds.
+                    assert!(param.bounds.is_empty());
+
                     self.ribs[TypeNS].push(Rib::new(ConstParamTyRibKind));
                     self.ribs[ValueNS].push(Rib::new(ConstParamTyRibKind));
                     self.visit_ty(ty);
                     self.ribs[TypeNS].pop().unwrap();
                     self.ribs[ValueNS].pop().unwrap();
+
+                    if let Some(ref expr) = default {
+                        self.ribs[TypeNS].push(forward_ty_ban_rib);
+                        self.ribs[ValueNS].push(forward_const_ban_rib);
+                        self.visit_anon_const(expr);
+                        forward_const_ban_rib = self.ribs[ValueNS].pop().unwrap();
+                        forward_ty_ban_rib = self.ribs[TypeNS].pop().unwrap();
+                    }
+
+                    // Allow all following defaults to refer to this const parameter.
+                    forward_const_ban_rib
+                        .bindings
+                        .remove(&Ident::with_dummy_span(param.ident.name));
                 }
             }
         }
@@ -865,7 +877,7 @@ impl<'a: 'ast, 'b, 'ast> LateResolutionVisitor<'a, 'b, 'ast> {
                 | ItemRibKind(..)
                 | ConstantItemRibKind(..)
                 | ModuleRibKind(..)
-                | ForwardTyParamBanRibKind
+                | ForwardGenericParamBanRibKind
                 | ConstParamTyRibKind => {
                     return false;
                 }
@@ -1030,7 +1042,6 @@ impl<'a: 'ast, 'b, 'ast> LateResolutionVisitor<'a, 'b, 'ast> {
             }
 
             ItemKind::Static(ref ty, _, ref expr) | ItemKind::Const(_, ref ty, ref expr) => {
-                debug!("resolve_item ItemKind::Const");
                 self.with_item_rib(HasGenericParams::No, |this| {
                     this.visit_ty(ty);
                     if let Some(expr) = expr {
@@ -1596,6 +1607,7 @@ impl<'a: 'ast, 'b, 'ast> LateResolutionVisitor<'a, 'b, 'ast> {
                         .try_resolve_as_non_binding(pat_src, pat, bmode, ident, has_sub)
                         .unwrap_or_else(|| self.fresh_binding(ident, pat.id, pat_src, bindings));
                     self.r.record_partial_res(pat.id, PartialRes::new(res));
+                    self.r.record_pat_span(pat.id, pat.span);
                 }
                 PatKind::TupleStruct(ref path, ref sub_patterns) => {
                     self.smart_resolve_path(
@@ -2251,8 +2263,8 @@ impl<'a: 'ast, 'b, 'ast> LateResolutionVisitor<'a, 'b, 'ast> {
                 visit::walk_expr(self, expr);
             }
 
-            ExprKind::Struct(ref path, ..) => {
-                self.smart_resolve_path(expr.id, None, path, PathSource::Struct);
+            ExprKind::Struct(ref se) => {
+                self.smart_resolve_path(expr.id, None, &se.path, PathSource::Struct);
                 visit::walk_expr(self, expr);
             }
 
@@ -2326,7 +2338,7 @@ impl<'a: 'ast, 'b, 'ast> LateResolutionVisitor<'a, 'b, 'ast> {
 
             ExprKind::Call(ref callee, ref arguments) => {
                 self.resolve_expr(callee, Some(expr));
-                let const_args = self.r.legacy_const_generic_args(callee).unwrap_or(Vec::new());
+                let const_args = self.r.legacy_const_generic_args(callee).unwrap_or_default();
                 for (idx, argument) in arguments.iter().enumerate() {
                     // Constant arguments need to be treated as AnonConst since
                     // that is how they will be later lowered to HIR.

@@ -8,8 +8,8 @@ use rustc_middle::hir::map::Map;
 use rustc_middle::ty::query::Providers;
 use rustc_middle::ty::TyCtxt;
 
-use rustc_ast::{Attribute, LitKind, NestedMetaItem};
-use rustc_errors::{pluralize, struct_span_err};
+use rustc_ast::{Attribute, Lit, LitKind, NestedMetaItem};
+use rustc_errors::{pluralize, struct_span_err, Applicability};
 use rustc_hir as hir;
 use rustc_hir::def_id::LocalDefId;
 use rustc_hir::intravisit::{self, NestedVisitorMap, Visitor};
@@ -69,45 +69,48 @@ impl CheckAttrVisitor<'tcx> {
         let mut is_valid = true;
         let attrs = self.tcx.hir().attrs(hir_id);
         for attr in attrs {
-            is_valid &= if self.tcx.sess.check_name(attr, sym::inline) {
-                self.check_inline(hir_id, attr, span, target)
-            } else if self.tcx.sess.check_name(attr, sym::non_exhaustive) {
-                self.check_non_exhaustive(hir_id, attr, span, target)
-            } else if self.tcx.sess.check_name(attr, sym::marker) {
-                self.check_marker(hir_id, attr, span, target)
-            } else if self.tcx.sess.check_name(attr, sym::target_feature) {
-                self.check_target_feature(hir_id, attr, span, target)
-            } else if self.tcx.sess.check_name(attr, sym::track_caller) {
-                self.check_track_caller(hir_id, &attr.span, attrs, span, target)
-            } else if self.tcx.sess.check_name(attr, sym::doc) {
-                self.check_doc_attrs(attr, hir_id, target)
-            } else if self.tcx.sess.check_name(attr, sym::no_link) {
-                self.check_no_link(hir_id, &attr, span, target)
-            } else if self.tcx.sess.check_name(attr, sym::export_name) {
-                self.check_export_name(hir_id, &attr, span, target)
-            } else if self.tcx.sess.check_name(attr, sym::rustc_args_required_const) {
-                self.check_rustc_args_required_const(&attr, span, target, item)
-            } else if self.tcx.sess.check_name(attr, sym::allow_internal_unstable) {
-                self.check_allow_internal_unstable(hir_id, &attr, span, target, &attrs)
-            } else if self.tcx.sess.check_name(attr, sym::rustc_allow_const_fn_unstable) {
-                self.check_rustc_allow_const_fn_unstable(hir_id, &attr, span, target)
-            } else if self.tcx.sess.check_name(attr, sym::naked) {
-                self.check_naked(hir_id, attr, span, target)
-            } else if self.tcx.sess.check_name(attr, sym::rustc_legacy_const_generics) {
-                self.check_rustc_legacy_const_generics(&attr, span, target, item)
-            } else {
-                // lint-only checks
-                if self.tcx.sess.check_name(attr, sym::cold) {
-                    self.check_cold(hir_id, attr, span, target);
-                } else if self.tcx.sess.check_name(attr, sym::link_name) {
-                    self.check_link_name(hir_id, attr, span, target);
-                } else if self.tcx.sess.check_name(attr, sym::link_section) {
-                    self.check_link_section(hir_id, attr, span, target);
-                } else if self.tcx.sess.check_name(attr, sym::no_mangle) {
-                    self.check_no_mangle(hir_id, attr, span, target);
+            is_valid &= match attr.name_or_empty() {
+                sym::inline => self.check_inline(hir_id, attr, span, target),
+                sym::non_exhaustive => self.check_non_exhaustive(hir_id, attr, span, target),
+                sym::marker => self.check_marker(hir_id, attr, span, target),
+                sym::target_feature => self.check_target_feature(hir_id, attr, span, target),
+                sym::track_caller => {
+                    self.check_track_caller(hir_id, &attr.span, attrs, span, target)
                 }
-                true
+                sym::doc => self.check_doc_attrs(attr, hir_id, target),
+                sym::no_link => self.check_no_link(hir_id, &attr, span, target),
+                sym::export_name => self.check_export_name(hir_id, &attr, span, target),
+                sym::rustc_args_required_const => {
+                    self.check_rustc_args_required_const(&attr, span, target, item)
+                }
+                sym::rustc_layout_scalar_valid_range_start
+                | sym::rustc_layout_scalar_valid_range_end => {
+                    self.check_rustc_layout_scalar_valid_range(&attr, span, target)
+                }
+                sym::allow_internal_unstable => {
+                    self.check_allow_internal_unstable(hir_id, &attr, span, target, &attrs)
+                }
+                sym::rustc_allow_const_fn_unstable => {
+                    self.check_rustc_allow_const_fn_unstable(hir_id, &attr, span, target)
+                }
+                sym::naked => self.check_naked(hir_id, attr, span, target),
+                sym::rustc_legacy_const_generics => {
+                    self.check_rustc_legacy_const_generics(&attr, span, target, item)
+                }
+                sym::rustc_clean
+                | sym::rustc_dirty
+                | sym::rustc_if_this_changed
+                | sym::rustc_then_this_would_need => self.check_rustc_dirty_clean(&attr),
+                _ => true,
             };
+            // lint-only checks
+            match attr.name_or_empty() {
+                sym::cold => self.check_cold(hir_id, attr, span, target),
+                sym::link_name => self.check_link_name(hir_id, attr, span, target),
+                sym::link_section => self.check_link_section(hir_id, attr, span, target),
+                sym::no_mangle => self.check_no_mangle(hir_id, attr, span, target),
+                _ => {}
+            }
         }
 
         if !is_valid {
@@ -390,33 +393,50 @@ impl CheckAttrVisitor<'tcx> {
             .emit();
     }
 
-    fn check_doc_alias(&self, meta: &NestedMetaItem, hir_id: HirId, target: Target) -> bool {
-        let doc_alias = meta.value_str().map(|s| s.to_string()).unwrap_or_else(String::new);
+    fn check_doc_alias_value(
+        &self,
+        meta: &NestedMetaItem,
+        doc_alias: &str,
+        hir_id: HirId,
+        target: Target,
+        is_list: bool,
+    ) -> bool {
+        let tcx = self.tcx;
+        let err_fn = move |span: Span, msg: &str| {
+            tcx.sess.span_err(
+                span,
+                &format!(
+                    "`#[doc(alias{})]` {}",
+                    if is_list { "(\"...\")" } else { " = \"...\"" },
+                    msg,
+                ),
+            );
+            false
+        };
         if doc_alias.is_empty() {
-            self.doc_attr_str_error(meta, "alias");
-            return false;
+            return err_fn(
+                meta.name_value_literal_span().unwrap_or_else(|| meta.span()),
+                "attribute cannot have empty value",
+            );
         }
         if let Some(c) =
             doc_alias.chars().find(|&c| c == '"' || c == '\'' || (c.is_whitespace() && c != ' '))
         {
-            self.tcx
-                .sess
-                .struct_span_err(
-                    meta.name_value_literal_span().unwrap_or_else(|| meta.span()),
-                    &format!("{:?} character isn't allowed in `#[doc(alias = \"...\")]`", c),
-                )
-                .emit();
+            self.tcx.sess.span_err(
+                meta.name_value_literal_span().unwrap_or_else(|| meta.span()),
+                &format!(
+                    "{:?} character isn't allowed in `#[doc(alias{})]`",
+                    c,
+                    if is_list { "(\"...\")" } else { " = \"...\"" },
+                ),
+            );
             return false;
         }
         if doc_alias.starts_with(' ') || doc_alias.ends_with(' ') {
-            self.tcx
-                .sess
-                .struct_span_err(
-                    meta.name_value_literal_span().unwrap_or_else(|| meta.span()),
-                    "`#[doc(alias = \"...\")]` cannot start or end with ' '",
-                )
-                .emit();
-            return false;
+            return err_fn(
+                meta.name_value_literal_span().unwrap_or_else(|| meta.span()),
+                "cannot start or end with ' '",
+            );
         }
         if let Some(err) = match target {
             Target::Impl => Some("implementation block"),
@@ -442,27 +462,63 @@ impl CheckAttrVisitor<'tcx> {
             }
             _ => None,
         } {
-            self.tcx
-                .sess
-                .struct_span_err(
-                    meta.span(),
-                    &format!("`#[doc(alias = \"...\")]` isn't allowed on {}", err),
-                )
-                .emit();
-            return false;
+            return err_fn(meta.span(), &format!("isn't allowed on {}", err));
         }
         let item_name = self.tcx.hir().name(hir_id);
         if &*item_name.as_str() == doc_alias {
+            return err_fn(meta.span(), "is the same as the item's name");
+        }
+        true
+    }
+
+    fn check_doc_alias(&self, meta: &NestedMetaItem, hir_id: HirId, target: Target) -> bool {
+        if let Some(values) = meta.meta_item_list() {
+            let mut errors = 0;
+            for v in values {
+                match v.literal() {
+                    Some(l) => match l.kind {
+                        LitKind::Str(s, _) => {
+                            if !self.check_doc_alias_value(v, &s.as_str(), hir_id, target, true) {
+                                errors += 1;
+                            }
+                        }
+                        _ => {
+                            self.tcx
+                                .sess
+                                .struct_span_err(
+                                    v.span(),
+                                    "`#[doc(alias(\"a\"))]` expects string literals",
+                                )
+                                .emit();
+                            errors += 1;
+                        }
+                    },
+                    None => {
+                        self.tcx
+                            .sess
+                            .struct_span_err(
+                                v.span(),
+                                "`#[doc(alias(\"a\"))]` expects string literals",
+                            )
+                            .emit();
+                        errors += 1;
+                    }
+                }
+            }
+            errors == 0
+        } else if let Some(doc_alias) = meta.value_str().map(|s| s.to_string()) {
+            self.check_doc_alias_value(meta, &doc_alias, hir_id, target, false)
+        } else {
             self.tcx
                 .sess
                 .struct_span_err(
                     meta.span(),
-                    &format!("`#[doc(alias = \"...\")]` is the same as the item's name"),
+                    "doc alias attribute expects a string `#[doc(alias = \"a\")]` or a list of \
+                     strings `#[doc(alias(\"a\", \"b\"))]`",
                 )
                 .emit();
-            return false;
+            false
         }
-        true
     }
 
     fn check_doc_keyword(&self, meta: &NestedMetaItem, hir_id: HirId) -> bool {
@@ -520,7 +576,7 @@ impl CheckAttrVisitor<'tcx> {
                 .struct_span_err(
                     meta.span(),
                     &format!(
-                        "`#![doc({} = \"...\")]` isn't allowed as a crate level attribute",
+                        "`#![doc({} = \"...\")]` isn't allowed as a crate-level attribute",
                         attr_name,
                     ),
                 )
@@ -531,79 +587,109 @@ impl CheckAttrVisitor<'tcx> {
     }
 
     fn check_doc_attrs(&self, attr: &Attribute, hir_id: HirId, target: Target) -> bool {
-        if let Some(mi) = attr.meta() {
-            if let Some(list) = mi.meta_item_list() {
-                for meta in list {
-                    if meta.has_name(sym::alias) {
-                        if !self.check_attr_crate_level(meta, hir_id, "alias")
-                            || !self.check_doc_alias(meta, hir_id, target)
+        let mut is_valid = true;
+
+        if let Some(list) = attr.meta().and_then(|mi| mi.meta_item_list().map(|l| l.to_vec())) {
+            for meta in list {
+                if let Some(i_meta) = meta.meta_item() {
+                    match i_meta.name_or_empty() {
+                        sym::alias
+                            if !self.check_attr_crate_level(&meta, hir_id, "alias")
+                                || !self.check_doc_alias(&meta, hir_id, target) =>
                         {
-                            return false;
+                            is_valid = false
                         }
-                    } else if meta.has_name(sym::keyword) {
-                        if !self.check_attr_crate_level(meta, hir_id, "keyword")
-                            || !self.check_doc_keyword(meta, hir_id)
+
+                        sym::keyword
+                            if !self.check_attr_crate_level(&meta, hir_id, "keyword")
+                                || !self.check_doc_keyword(&meta, hir_id) =>
                         {
-                            return false;
+                            is_valid = false
                         }
-                    } else if meta.has_name(sym::test) {
-                        if CRATE_HIR_ID != hir_id {
+
+                        sym::test if CRATE_HIR_ID != hir_id => {
                             self.tcx.struct_span_lint_hir(
                                 INVALID_DOC_ATTRIBUTES,
                                 hir_id,
                                 meta.span(),
                                 |lint| {
                                     lint.build(
-                                        "`#![doc(test(...)]` is only allowed as a crate level attribute"
+                                        "`#![doc(test(...)]` is only allowed \
+                                         as a crate-level attribute",
                                     )
                                     .emit();
                                 },
                             );
-                            return false;
+                            is_valid = false;
                         }
-                    } else if let Some(i_meta) = meta.meta_item() {
-                        if ![
-                            sym::cfg,
-                            sym::hidden,
-                            sym::html_favicon_url,
-                            sym::html_logo_url,
-                            sym::html_no_source,
-                            sym::html_playground_url,
-                            sym::html_root_url,
-                            sym::include,
-                            sym::inline,
-                            sym::issue_tracker_base_url,
-                            sym::masked,
-                            sym::no_default_passes, // deprecated
-                            sym::no_inline,
-                            sym::passes,  // deprecated
-                            sym::plugins, // removed, but rustdoc warns about it itself
-                            sym::primitive,
-                            sym::spotlight,
-                            sym::test,
-                        ]
-                        .iter()
-                        .any(|m| i_meta.has_name(*m))
-                        {
+
+                        // no_default_passes: deprecated
+                        // passes: deprecated
+                        // plugins: removed, but rustdoc warns about it itself
+                        sym::alias
+                        | sym::cfg
+                        | sym::hidden
+                        | sym::html_favicon_url
+                        | sym::html_logo_url
+                        | sym::html_no_source
+                        | sym::html_playground_url
+                        | sym::html_root_url
+                        | sym::include
+                        | sym::inline
+                        | sym::issue_tracker_base_url
+                        | sym::keyword
+                        | sym::masked
+                        | sym::no_default_passes
+                        | sym::no_inline
+                        | sym::notable_trait
+                        | sym::passes
+                        | sym::plugins
+                        | sym::primitive
+                        | sym::test => {}
+
+                        _ => {
                             self.tcx.struct_span_lint_hir(
                                 INVALID_DOC_ATTRIBUTES,
                                 hir_id,
                                 i_meta.span,
                                 |lint| {
-                                    lint.build(&format!(
+                                    let mut diag = lint.build(&format!(
                                         "unknown `doc` attribute `{}`",
-                                        i_meta.name_or_empty()
-                                    ))
-                                    .emit();
+                                        rustc_ast_pretty::pprust::path_to_string(&i_meta.path),
+                                    ));
+                                    if i_meta.has_name(sym::spotlight) {
+                                        diag.note(
+                                            "`doc(spotlight)` was renamed to `doc(notable_trait)`",
+                                        );
+                                        diag.span_suggestion_short(
+                                            i_meta.span,
+                                            "use `notable_trait` instead",
+                                            String::from("notable_trait"),
+                                            Applicability::MachineApplicable,
+                                        );
+                                        diag.note("`doc(spotlight)` is now a no-op");
+                                    }
+                                    diag.emit();
                                 },
                             );
-                            return false;
+                            is_valid = false;
                         }
                     }
+                } else {
+                    self.tcx.struct_span_lint_hir(
+                        INVALID_DOC_ATTRIBUTES,
+                        hir_id,
+                        meta.span(),
+                        |lint| {
+                            lint.build(&format!("invalid `doc` attribute")).emit();
+                        },
+                    );
+                    is_valid = false;
                 }
             }
         }
-        true
+
+        is_valid
     }
 
     /// Checks if `#[cold]` is applied to a non-function. Returns `true` if valid.
@@ -807,6 +893,37 @@ impl CheckAttrVisitor<'tcx> {
         }
     }
 
+    fn check_rustc_layout_scalar_valid_range(
+        &self,
+        attr: &Attribute,
+        span: &Span,
+        target: Target,
+    ) -> bool {
+        if target != Target::Struct {
+            self.tcx
+                .sess
+                .struct_span_err(attr.span, "attribute should be applied to a struct")
+                .span_label(*span, "not a struct")
+                .emit();
+            return false;
+        }
+
+        let list = match attr.meta_item_list() {
+            None => return false,
+            Some(it) => it,
+        };
+
+        if matches!(&list[..], &[NestedMetaItem::Literal(Lit { kind: LitKind::Int(..), .. })]) {
+            true
+        } else {
+            self.tcx
+                .sess
+                .struct_span_err(attr.span, "expected exactly one integer literal argument")
+                .emit();
+            false
+        }
+    }
+
     /// Checks if `#[rustc_legacy_const_generics]` is applied to a function and has a valid argument.
     fn check_rustc_legacy_const_generics(
         &self,
@@ -906,6 +1023,20 @@ impl CheckAttrVisitor<'tcx> {
         }
     }
 
+    /// Checks that the dep-graph debugging attributes are only present when the query-dep-graph
+    /// option is passed to the compiler.
+    fn check_rustc_dirty_clean(&self, attr: &Attribute) -> bool {
+        if self.tcx.sess.opts.debugging_opts.query_dep_graph {
+            true
+        } else {
+            self.tcx
+                .sess
+                .struct_span_err(attr.span, "attribute requires -Z query-dep-graph to be enabled")
+                .emit();
+            false
+        }
+    }
+
     /// Checks if `#[link_section]` is applied to a function or static.
     fn check_link_section(&self, hir_id: HirId, attr: &Attribute, span: &Span, target: Target) {
         match target {
@@ -978,7 +1109,7 @@ impl CheckAttrVisitor<'tcx> {
         // ```
         let hints: Vec<_> = attrs
             .iter()
-            .filter(|attr| self.tcx.sess.check_name(attr, sym::repr))
+            .filter(|attr| attr.has_name(sym::repr))
             .filter_map(|attr| attr.meta_item_list())
             .flatten()
             .collect();
@@ -989,15 +1120,39 @@ impl CheckAttrVisitor<'tcx> {
         let mut is_transparent = false;
 
         for hint in &hints {
+            if !hint.is_meta_item() {
+                struct_span_err!(
+                    self.tcx.sess,
+                    hint.span(),
+                    E0565,
+                    "meta item in `repr` must be an identifier"
+                )
+                .emit();
+                continue;
+            }
+
             let (article, allowed_targets) = match hint.name_or_empty() {
-                _ if !matches!(target, Target::Struct | Target::Enum | Target::Union) => {
-                    ("a", "struct, enum, or union")
-                }
-                name @ sym::C | name @ sym::align => {
-                    is_c |= name == sym::C;
+                sym::C => {
+                    is_c = true;
                     match target {
                         Target::Struct | Target::Union | Target::Enum => continue,
                         _ => ("a", "struct, enum, or union"),
+                    }
+                }
+                sym::align => {
+                    if let (Target::Fn, true) = (target, !self.tcx.features().fn_align) {
+                        feature_err(
+                            &self.tcx.sess.parse_sess,
+                            sym::fn_align,
+                            hint.span(),
+                            "`repr(align)` attributes on functions are unstable",
+                        )
+                        .emit();
+                    }
+
+                    match target {
+                        Target::Struct | Target::Union | Target::Enum | Target::Fn => continue,
+                        _ => ("a", "struct, enum, function, or union"),
                     }
                 }
                 sym::packed => {
@@ -1056,7 +1211,17 @@ impl CheckAttrVisitor<'tcx> {
                         continue;
                     }
                 }
-                _ => continue,
+                _ => {
+                    struct_span_err!(
+                        self.tcx.sess,
+                        hint.span(),
+                        E0552,
+                        "unrecognized representation hint"
+                    )
+                    .emit();
+
+                    continue;
+                }
             };
 
             struct_span_err!(
@@ -1115,7 +1280,7 @@ impl CheckAttrVisitor<'tcx> {
 
     fn check_used(&self, attrs: &'hir [Attribute], target: Target) {
         for attr in attrs {
-            if self.tcx.sess.check_name(attr, sym::used) && target != Target::Static {
+            if attr.has_name(sym::used) && target != Target::Static {
                 self.tcx
                     .sess
                     .span_err(attr.span, "attribute must be applied to a `static` variable");
@@ -1229,9 +1394,9 @@ impl Visitor<'tcx> for CheckAttrVisitor<'tcx> {
         intravisit::walk_trait_item(self, trait_item)
     }
 
-    fn visit_struct_field(&mut self, struct_field: &'tcx hir::StructField<'tcx>) {
+    fn visit_field_def(&mut self, struct_field: &'tcx hir::FieldDef<'tcx>) {
         self.check_attributes(struct_field.hir_id, &struct_field.span, Target::Field, None);
-        intravisit::walk_struct_field(self, struct_field);
+        intravisit::walk_field_def(self, struct_field);
     }
 
     fn visit_arm(&mut self, arm: &'tcx hir::Arm<'tcx>) {
@@ -1317,7 +1482,7 @@ fn check_invalid_crate_level_attr(tcx: TyCtxt<'_>, attrs: &[Attribute]) {
         sym::path,
         sym::automatically_derived,
         sym::start,
-        sym::main,
+        sym::rustc_main,
     ];
 
     for attr in attrs {

@@ -83,7 +83,7 @@ pub(super) fn opt_const_param_of(tcx: TyCtxt<'_>, def_id: LocalDefId) -> Option<
                     return generics
                         .params
                         .iter()
-                        .filter(|param| matches!(param.kind, ty::GenericParamDefKind::Const))
+                        .filter(|param| matches!(param.kind, ty::GenericParamDefKind::Const { .. }))
                         .nth(arg_index)
                         .map(|param| param.def_id);
                 }
@@ -121,7 +121,7 @@ pub(super) fn opt_const_param_of(tcx: TyCtxt<'_>, def_id: LocalDefId) -> Option<
                 tcx.generics_of(type_dependent_def)
                     .params
                     .iter()
-                    .filter(|param| matches!(param.kind, ty::GenericParamDefKind::Const))
+                    .filter(|param| matches!(param.kind, ty::GenericParamDefKind::Const { .. }))
                     .nth(idx)
                     .map(|param| param.def_id)
             }
@@ -191,7 +191,25 @@ pub(super) fn opt_const_param_of(tcx: TyCtxt<'_>, def_id: LocalDefId) -> Option<
                     Res::Def(DefKind::Ctor(..), def_id) => {
                         tcx.generics_of(tcx.parent(def_id).unwrap())
                     }
-                    Res::Def(_, def_id) => tcx.generics_of(def_id),
+                    // Other `DefKind`s don't have generics and would ICE when calling
+                    // `generics_of`.
+                    Res::Def(
+                        DefKind::Struct
+                        | DefKind::Union
+                        | DefKind::Enum
+                        | DefKind::Variant
+                        | DefKind::Trait
+                        | DefKind::OpaqueTy
+                        | DefKind::TyAlias
+                        | DefKind::ForeignTy
+                        | DefKind::TraitAlias
+                        | DefKind::AssocTy
+                        | DefKind::Fn
+                        | DefKind::AssocFn
+                        | DefKind::AssocConst
+                        | DefKind::Impl,
+                        def_id,
+                    ) => tcx.generics_of(def_id),
                     Res::Err => {
                         tcx.sess.delay_span_bug(tcx.def_span(def_id), "anon const with Res::Err");
                         return None;
@@ -211,7 +229,7 @@ pub(super) fn opt_const_param_of(tcx: TyCtxt<'_>, def_id: LocalDefId) -> Option<
                 generics
                     .params
                     .iter()
-                    .filter(|param| matches!(param.kind, ty::GenericParamDefKind::Const))
+                    .filter(|param| matches!(param.kind, ty::GenericParamDefKind::Const { .. }))
                     .nth(arg_index)
                     .map(|param| param.def_id)
             }
@@ -417,11 +435,13 @@ pub(super) fn type_of(tcx: TyCtxt<'_>, def_id: DefId) -> Ty<'_> {
             let parent_node = tcx.hir().get(tcx.hir().get_parent_node(hir_id));
             match parent_node {
                 Node::Ty(&Ty { kind: TyKind::Array(_, ref constant), .. })
-                | Node::Ty(&Ty { kind: TyKind::Typeof(ref constant), .. })
                 | Node::Expr(&Expr { kind: ExprKind::Repeat(_, ref constant), .. })
                     if constant.hir_id == hir_id =>
                 {
                     tcx.types.usize
+                }
+                Node::Ty(&Ty { kind: TyKind::Typeof(ref e), .. }) if e.hir_id == hir_id => {
+                    tcx.typeck(def_id).node_type(e.hir_id)
                 }
 
                 Node::Expr(&Expr { kind: ExprKind::ConstBlock(ref anon_const), .. })
@@ -430,11 +450,26 @@ pub(super) fn type_of(tcx: TyCtxt<'_>, def_id: DefId) -> Ty<'_> {
                     tcx.typeck(def_id).node_type(anon_const.hir_id)
                 }
 
+                Node::Expr(&Expr { kind: ExprKind::InlineAsm(ia), .. })
+                    if ia.operands.iter().any(|(op, _op_sp)| match op {
+                        hir::InlineAsmOperand::Const { anon_const } => anon_const.hir_id == hir_id,
+                        _ => false,
+                    }) =>
+                {
+                    tcx.typeck(def_id).node_type(hir_id)
+                }
+
                 Node::Variant(Variant { disr_expr: Some(ref e), .. }) if e.hir_id == hir_id => tcx
                     .adt_def(tcx.hir().get_parent_did(hir_id).to_def_id())
                     .repr
                     .discr_type()
                     .to_ty(tcx),
+
+                Node::GenericParam(&GenericParam {
+                    hir_id: param_hir_id,
+                    kind: GenericParamKind::Const { default: Some(ct), .. },
+                    ..
+                }) if ct.hir_id == hir_id => tcx.type_of(tcx.hir().local_def_id(param_hir_id)),
 
                 x => tcx.ty_error_with_message(
                     DUMMY_SP,

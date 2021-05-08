@@ -4,13 +4,13 @@
 #![feature(array_windows)]
 #![feature(box_patterns)]
 #![feature(box_syntax)]
-#![feature(const_fn)]
 #![feature(const_panic)]
 #![feature(control_flow_enum)]
 #![feature(crate_visibility_modifier)]
 #![feature(bool_to_option)]
+#![feature(iter_zip)]
 #![feature(once_cell)]
-#![feature(or_patterns)]
+#![cfg_attr(bootstrap, feature(or_patterns))]
 #![recursion_limit = "256"]
 
 #[macro_use]
@@ -20,7 +20,7 @@ extern crate rustc_middle;
 
 mod build;
 mod lints;
-mod thir;
+pub mod thir;
 
 use rustc_middle::ty::query::Providers;
 

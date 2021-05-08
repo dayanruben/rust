@@ -19,19 +19,11 @@ use super::{Field, SourceInfo};
 
 #[derive(Copy, Clone, PartialEq, TyEncodable, TyDecodable, HashStable, Debug)]
 pub enum UnsafetyViolationKind {
-    /// Only permitted in regular `fn`s, prohibited in `const fn`s.
+    /// Unsafe operation outside `unsafe`.
     General,
-    /// Permitted both in `const fn`s and regular `fn`s.
-    GeneralAndConstFn,
-    /// Borrow of packed field.
-    /// Has to be handled as a lint for backwards compatibility.
-    BorrowPacked,
     /// Unsafe operation in an `unsafe fn` but outside an `unsafe` block.
     /// Has to be handled as a lint for backwards compatibility.
     UnsafeFn,
-    /// Borrow of packed field in an `unsafe fn` but outside an `unsafe` block.
-    /// Has to be handled as a lint for backwards compatibility.
-    UnsafeFnBorrowPacked,
 }
 
 #[derive(Copy, Clone, PartialEq, TyEncodable, TyDecodable, HashStable, Debug)]
@@ -89,7 +81,7 @@ impl UnsafetyViolationDetails {
             ),
             DerefOfRawPointer => (
                 "dereference of raw pointer",
-                "raw pointers may be NULL, dangling or unaligned; they can violate aliasing rules \
+                "raw pointers may be null, dangling or unaligned; they can violate aliasing rules \
                  and cause data races: all of these are undefined behavior",
             ),
             AssignToDroppingUnionField => (

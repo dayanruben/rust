@@ -280,7 +280,7 @@ impl Step for CodegenBackend {
 }
 
 macro_rules! tool_check_step {
-    ($name:ident, $path:expr, $source_type:expr) => {
+    ($name:ident, $path:literal, $($alias:literal, )* $source_type:path $(, $default:literal )?) => {
         #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
         pub struct $name {
             pub target: TargetSelection,
@@ -289,10 +289,10 @@ macro_rules! tool_check_step {
         impl Step for $name {
             type Output = ();
             const ONLY_HOSTS: bool = true;
-            const DEFAULT: bool = true;
+            const DEFAULT: bool = true $( && $default )?;
 
             fn should_run(run: ShouldRun<'_>) -> ShouldRun<'_> {
-                run.path($path)
+                run.paths(&[ $path, $($alias),* ])
             }
 
             fn make_run(run: RunConfig<'_>) {
@@ -321,11 +321,9 @@ macro_rules! tool_check_step {
                 }
 
                 // Enable internal lints for clippy and rustdoc
-                // NOTE: this intentionally doesn't enable lints for any other tools,
-                // see https://github.com/rust-lang/rust/pull/80573#issuecomment-754010776
-                if $path == "src/tools/rustdoc" || $path == "src/tools/clippy" {
-                    cargo.rustflag("-Zunstable-options");
-                }
+                // NOTE: this doesn't enable lints for any other tools unless they explicitly add `#![warn(rustc::internal)]`
+                // See https://github.com/rust-lang/rust/pull/80573#issuecomment-754010776
+                cargo.rustflag("-Zunstable-options");
 
                 builder.info(&format!(
                     "Checking stage{} {} artifacts ({} -> {})",
@@ -363,14 +361,14 @@ macro_rules! tool_check_step {
     };
 }
 
-tool_check_step!(Rustdoc, "src/tools/rustdoc", SourceType::InTree);
+tool_check_step!(Rustdoc, "src/tools/rustdoc", "src/librustdoc", SourceType::InTree);
 // Clippy is a hybrid. It is an external tool, but uses a git subtree instead
 // of a submodule. Since the SourceType only drives the deny-warnings
 // behavior, treat it as in-tree so that any new warnings in clippy will be
 // rejected.
 tool_check_step!(Clippy, "src/tools/clippy", SourceType::InTree);
 
-tool_check_step!(Bootstrap, "src/bootstrap", SourceType::InTree);
+tool_check_step!(Bootstrap, "src/bootstrap", SourceType::InTree, false);
 
 /// Cargo's output path for the standard library in a given stage, compiled
 /// by a particular compiler for the specified target.

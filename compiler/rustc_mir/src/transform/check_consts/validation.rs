@@ -1,6 +1,6 @@
 //! The `Visitor` responsible for actually checking a `mir::Body` for invalid operations.
 
-use rustc_errors::{struct_span_err, Applicability, Diagnostic, ErrorReported};
+use rustc_errors::{Applicability, Diagnostic, ErrorReported};
 use rustc_hir::def_id::DefId;
 use rustc_hir::{self as hir, HirId, LangItem};
 use rustc_index::bit_set::BitSet;
@@ -234,13 +234,11 @@ impl Validator<'mir, 'tcx> {
             if self.is_const_stable_const_fn() {
                 let hir_id = tcx.hir().local_def_id_to_hir_id(def_id);
                 if crate::const_eval::is_parent_const_impl_raw(tcx, hir_id) {
-                    struct_span_err!(
-                        self.ccx.tcx.sess,
-                        self.span,
-                        E0723,
-                        "trait methods cannot be stable const fn"
-                    )
-                    .emit();
+                    self.ccx
+                        .tcx
+                        .sess
+                        .struct_span_err(self.span, "trait methods cannot be stable const fn")
+                        .emit();
                 }
             }
 
@@ -428,7 +426,7 @@ impl Validator<'mir, 'tcx> {
                     ty::PredicateKind::Subtype(_) => {
                         bug!("subtype predicate on function: {:#?}", predicate)
                     }
-                    ty::PredicateKind::Trait(pred, constness) => {
+                    ty::PredicateKind::Trait(pred, _constness) => {
                         if Some(pred.def_id()) == tcx.lang_items().sized_trait() {
                             continue;
                         }
@@ -442,16 +440,7 @@ impl Validator<'mir, 'tcx> {
                                 // arguments when determining importance.
                                 let kind = LocalKind::Arg;
 
-                                if constness == hir::Constness::Const {
-                                    self.check_op_spanned(ops::ty::TraitBound(kind), span);
-                                } else if !tcx.features().const_fn
-                                    || self.ccx.is_const_stable_const_fn()
-                                {
-                                    // HACK: We shouldn't need the conditional above, but trait
-                                    // bounds on containing impl blocks are wrongly being marked as
-                                    // "not-const".
-                                    self.check_op_spanned(ops::ty::TraitBound(kind), span);
-                                }
+                                self.check_op_spanned(ops::ty::TraitBound(kind), span);
                             }
                             // other kinds of bounds are either tautologies
                             // or cause errors in other passes
@@ -850,9 +839,12 @@ impl Visitor<'tcx> for Validator<'mir, 'tcx> {
                     let obligation = Obligation::new(
                         ObligationCause::dummy(),
                         param_env,
-                        Binder::bind(TraitPredicate {
-                            trait_ref: TraitRef::from_method(tcx, trait_id, substs),
-                        }),
+                        Binder::bind(
+                            TraitPredicate {
+                                trait_ref: TraitRef::from_method(tcx, trait_id, substs),
+                            },
+                            tcx,
+                        ),
                     );
 
                     let implsrc = tcx.infer_ctxt().enter(|infcx| {
