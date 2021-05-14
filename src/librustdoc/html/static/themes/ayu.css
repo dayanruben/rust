@@ -53,7 +53,7 @@ span code {
 .docblock code, .docblock-short code {
 	background-color: #191f26;
 }
-pre {
+pre, .rustdoc.source .example-wrap {
 	color: #e6e1cf;
 	background-color: #191f26;
 }
@@ -224,7 +224,6 @@ a {
 	color: #39AFD7;
 }
 
-.collapse-toggle,
 details.rustdoc-toggle > summary.hideme > span,
 details.rustdoc-toggle > summary::before,
 details.undocumented > summary::before {
@@ -503,19 +502,19 @@ kbd {
 	box-shadow-color: #c6cbd1;
 }
 
-#theme-picker, #settings-menu, .help-button, #copy-path {
+#theme-picker, #settings-menu, #help-button, #copy-path {
 	border-color: #5c6773;
 	background-color: #0f1419;
 	color: #fff;
 }
 
-#theme-picker > img, #settings-menu > img {
+#theme-picker > img, #settings-menu > img, #copy-path > img {
 	filter: invert(100);
 }
 
 #theme-picker:hover, #theme-picker:focus,
 #settings-menu:hover, #settings-menu:focus,
-.help-button:hover, .help-button:focus,
+#help-button:hover, #help-button:focus,
 #copy-path:hover, #copy-path:focus {
 	border-color: #e0e0e0;
 }

@@ -461,7 +461,7 @@ impl<'tcx> Body<'tcx> {
     }
 
     #[inline]
-    pub fn predecessors(&self) -> impl std::ops::Deref<Target = Predecessors> + '_ {
+    pub fn predecessors(&self) -> &Predecessors {
         self.predecessor_cache.compute(&self.basic_blocks)
     }
 
@@ -2374,7 +2374,10 @@ impl<'tcx> Debug for Rvalue<'tcx> {
                                 )
                             } else {
                                 let span = tcx.hir().span(hir_id);
-                                format!("[closure@{}]", tcx.sess.source_map().span_to_string(span))
+                                format!(
+                                    "[closure@{}]",
+                                    tcx.sess.source_map().span_to_diagnostic_string(span)
+                                )
                             };
                             let mut struct_fmt = fmt.debug_struct(&name);
 
@@ -2815,13 +2818,13 @@ impl<'a, 'b> graph::GraphSuccessors<'b> for Body<'a> {
 
 impl graph::GraphPredecessors<'graph> for Body<'tcx> {
     type Item = BasicBlock;
-    type Iter = smallvec::IntoIter<[BasicBlock; 4]>;
+    type Iter = std::iter::Copied<std::slice::Iter<'graph, BasicBlock>>;
 }
 
 impl graph::WithPredecessors for Body<'tcx> {
     #[inline]
     fn predecessors(&self, node: Self::Node) -> <Self as graph::GraphPredecessors<'_>>::Iter {
-        self.predecessors()[node].clone().into_iter()
+        self.predecessors()[node].iter().copied()
     }
 }
 

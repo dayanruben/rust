@@ -357,20 +357,9 @@ pub fn maybe_create_entry_wrapper<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
         if !cx.codegen_unit().contains_item(&MonoItem::Fn(instance)) {
             return None;
         }
-    } else {
-        // FIXME: Add support for non-local main fn codegen
-        let span = cx.tcx().main_def.unwrap().span;
-        let n = 28937;
-        cx.sess()
-            .struct_span_err(span, "entry symbol `main` from foreign crate is not yet supported.")
-            .note(&format!(
-                "see issue #{} <https://github.com/rust-lang/rust/issues/{}> \
-                 for more information",
-                n, n,
-            ))
-            .emit();
-        cx.sess().abort_if_errors();
-        bug!();
+    } else if !cx.codegen_unit().is_primary() {
+        // We want to create the wrapper only when the codegen unit is the primary one
+        return None;
     }
 
     let main_llfn = cx.get_fn_addr(instance);
@@ -478,12 +467,13 @@ fn get_argc_argv<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
 pub fn codegen_crate<B: ExtraBackendMethods>(
     backend: B,
     tcx: TyCtxt<'tcx>,
+    target_cpu: String,
     metadata: EncodedMetadata,
     need_metadata_module: bool,
 ) -> OngoingCodegen<B> {
     // Skip crate items and just output metadata in -Z no-codegen mode.
     if tcx.sess.opts.debugging_opts.no_codegen || !tcx.sess.opts.output_types.should_codegen() {
-        let ongoing_codegen = start_async_codegen(backend, tcx, metadata, 1);
+        let ongoing_codegen = start_async_codegen(backend, tcx, target_cpu, metadata, 1);
 
         ongoing_codegen.codegen_finished(tcx);
 
@@ -509,7 +499,8 @@ pub fn codegen_crate<B: ExtraBackendMethods>(
         }
     }
 
-    let ongoing_codegen = start_async_codegen(backend.clone(), tcx, metadata, codegen_units.len());
+    let ongoing_codegen =
+        start_async_codegen(backend.clone(), tcx, target_cpu, metadata, codegen_units.len());
     let ongoing_codegen = AbortCodegenOnDrop::<B>(Some(ongoing_codegen));
 
     // Codegen an allocator shim, if necessary.

@@ -611,6 +611,19 @@ rustc_queries! {
         }
     }
 
+    /// Unsafety-check this `LocalDefId` with THIR unsafeck. This should be
+    /// used with `-Zthir-unsafeck`.
+    query thir_check_unsafety(key: LocalDefId) {
+        desc { |tcx| "unsafety-checking `{}`", tcx.def_path_str(key.to_def_id()) }
+        cache_on_disk_if { true }
+    }
+    query thir_check_unsafety_for_const_arg(key: (LocalDefId, DefId)) {
+        desc {
+            |tcx| "unsafety-checking the const argument `{}`",
+            tcx.def_path_str(key.0.to_def_id())
+        }
+    }
+
     /// HACK: when evaluated, this reports a "unsafe derive on repr(packed)" error.
     ///
     /// Unsafety checking is executed for each method separately, but we only want
@@ -1299,6 +1312,10 @@ rustc_queries! {
     query late_bound_vars_map(_: LocalDefId)
         -> Option<&'tcx FxHashMap<ItemLocalId, Vec<ty::BoundVariableKind>>> {
         desc { "looking up late bound vars" }
+    }
+
+    query lifetime_scope_map(_: LocalDefId) -> Option<FxHashMap<ItemLocalId, LifetimeScopeForPath>> {
+        desc { "finds the lifetime scope for an HirId of a PathSegment" }
     }
 
     query visibility(def_id: DefId) -> ty::Visibility {

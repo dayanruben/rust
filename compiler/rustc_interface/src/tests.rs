@@ -709,7 +709,7 @@ fn test_debugging_options_tracking_hash() {
     tracked!(mir_emit_retag, true);
     tracked!(mir_opt_level, Some(4));
     tracked!(mutable_noalias, Some(true));
-    tracked!(new_llvm_pass_manager, true);
+    tracked!(new_llvm_pass_manager, Some(true));
     tracked!(no_codegen, true);
     tracked!(no_generate_arange_section, true);
     tracked!(no_link, true);
@@ -724,6 +724,7 @@ fn test_debugging_options_tracking_hash() {
     tracked!(profile_emit, Some(PathBuf::from("abc")));
     tracked!(relax_elf_relocations, Some(true));
     tracked!(relro_level, Some(RelroLevel::Full));
+    tracked!(simulate_remapped_rust_src_base, Some(PathBuf::from("/rustc/abc")));
     tracked!(report_delayed_bugs, true);
     tracked!(sanitizer, SanitizerSet::ADDRESS);
     tracked!(sanitizer_memory_track_origins, 2);
@@ -735,6 +736,7 @@ fn test_debugging_options_tracking_hash() {
     tracked!(symbol_mangling_version, Some(SymbolManglingVersion::V0));
     tracked!(teach, true);
     tracked!(thinlto, Some(true));
+    tracked!(thir_unsafeck, true);
     tracked!(tune_cpu, Some(String::from("abc")));
     tracked!(tls_model, Some(TlsModel::GeneralDynamic));
     tracked!(trap_unreachable, Some(false));

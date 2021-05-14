@@ -26,7 +26,7 @@ h4:not(.method):not(.type):not(.tymethod) {
 .docblock code, .docblock-short code {
 	background-color: #2A2A2A;
 }
-pre {
+pre, .rustdoc.source .example-wrap {
 	background-color: #2A2A2A;
 }
 
@@ -186,7 +186,6 @@ a.test-arrow {
 	color: #dedede;
 }
 
-.collapse-toggle,
 details.rustdoc-toggle > summary.hideme > span,
 details.rustdoc-toggle > summary::before,
 details.undocumented > summary::before {
@@ -393,7 +392,7 @@ kbd {
 	box-shadow-color: #c6cbd1;
 }
 
-#theme-picker, #settings-menu, .help-button, #copy-path {
+#theme-picker, #settings-menu, #help-button, #copy-path {
 	border-color: #e0e0e0;
 	background: #f0f0f0;
 	color: #000;
@@ -401,7 +400,7 @@ kbd {
 
 #theme-picker:hover, #theme-picker:focus,
 #settings-menu:hover, #settings-menu:focus,
-.help-button:hover, .help-button:focus,
+#help-button:hover, #help-button:focus,
 #copy-path:hover, #copy-path:focus {
 	border-color: #ffb900;
 }

@@ -50,7 +50,6 @@ pub fn link_binary<'a, B: ArchiveBuilder<'a>>(
     codegen_results: &CodegenResults,
     outputs: &OutputFilenames,
     crate_name: &str,
-    target_cpu: &str,
 ) {
     let _timer = sess.timer("link_binary");
     let output_metadata = sess.opts.output_types.contains_key(&OutputType::Metadata);
@@ -100,7 +99,6 @@ pub fn link_binary<'a, B: ArchiveBuilder<'a>>(
                         &out_filename,
                         codegen_results,
                         path.as_ref(),
-                        target_cpu,
                     );
                 }
             }
@@ -532,7 +530,6 @@ fn link_natively<'a, B: ArchiveBuilder<'a>>(
     out_filename: &Path,
     codegen_results: &CodegenResults,
     tmpdir: &Path,
-    target_cpu: &str,
 ) {
     info!("preparing {:?} to {:?}", crate_type, out_filename);
     let (linker_path, flavor) = linker_and_flavor(sess);
@@ -544,7 +541,6 @@ fn link_natively<'a, B: ArchiveBuilder<'a>>(
         tmpdir,
         out_filename,
         codegen_results,
-        target_cpu,
     );
 
     linker::disable_localization(&mut cmd);
@@ -1576,7 +1572,7 @@ fn add_rpath_args(
         let target_triple = sess.opts.target_triple.triple();
         let mut get_install_prefix_lib_path = || {
             let install_prefix = option_env!("CFG_PREFIX").expect("CFG_PREFIX");
-            let tlib = filesearch::relative_target_lib_path(&sess.sysroot, target_triple);
+            let tlib = rustc_target::target_rustlib_path(&sess.sysroot, target_triple).join("lib");
             let mut path = PathBuf::from(install_prefix);
             path.push(&tlib);
 
@@ -1609,14 +1605,13 @@ fn linker_with_args<'a, B: ArchiveBuilder<'a>>(
     tmpdir: &Path,
     out_filename: &Path,
     codegen_results: &CodegenResults,
-    target_cpu: &str,
 ) -> Command {
     let crt_objects_fallback = crt_objects_fallback(sess, crate_type);
     let base_cmd = get_linker(sess, path, flavor, crt_objects_fallback);
     // FIXME: Move `/LIBPATH` addition for uwp targets from the linker construction
     // to the linker args construction.
     assert!(base_cmd.get_args().is_empty() || sess.target.vendor == "uwp");
-    let cmd = &mut *codegen_results.linker_info.to_linker(base_cmd, &sess, flavor, target_cpu);
+    let cmd = &mut *codegen_results.linker_info.to_linker(base_cmd, &sess, flavor);
     let link_output_kind = link_output_kind(sess, crate_type);
 
     // NO-OPT-OUT, OBJECT-FILES-MAYBE, CUSTOMIZATION-POINT

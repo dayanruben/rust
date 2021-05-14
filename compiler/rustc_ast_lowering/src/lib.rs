@@ -62,7 +62,7 @@ use rustc_span::edition::Edition;
 use rustc_span::hygiene::ExpnId;
 use rustc_span::source_map::{respan, DesugaringKind};
 use rustc_span::symbol::{kw, sym, Ident, Symbol};
-use rustc_span::Span;
+use rustc_span::{Span, DUMMY_SP};
 use rustc_target::spec::abi::Abi;
 
 use smallvec::{smallvec, SmallVec};
@@ -77,6 +77,7 @@ macro_rules! arena_vec {
     });
 }
 
+mod asm;
 mod expr;
 mod item;
 mod pat;
@@ -2084,6 +2085,7 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
             args: &[],
             bindings: arena_vec![self; self.output_ty_binding(span, output_ty)],
             parenthesized: false,
+            span_ext: DUMMY_SP,
         });
 
         hir::GenericBound::LangItemTrait(
@@ -2788,6 +2790,7 @@ struct GenericArgsCtor<'hir> {
     args: SmallVec<[hir::GenericArg<'hir>; 4]>,
     bindings: &'hir [hir::TypeBinding<'hir>],
     parenthesized: bool,
+    span: Span,
 }
 
 impl<'hir> GenericArgsCtor<'hir> {
@@ -2800,6 +2803,7 @@ impl<'hir> GenericArgsCtor<'hir> {
             args: arena.alloc_from_iter(self.args),
             bindings: self.bindings,
             parenthesized: self.parenthesized,
+            span_ext: self.span,
         }
     }
 }

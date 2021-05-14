@@ -8,7 +8,7 @@ use rustc_ast::expand::allocator::AllocatorKind;
 use rustc_data_structures::stable_map::FxHashMap;
 use rustc_data_structures::svh::Svh;
 use rustc_hir as hir;
-use rustc_hir::def::DefKind;
+use rustc_hir::def::{CtorKind, DefKind};
 use rustc_hir::def_id::{CrateNum, DefId, DefIdMap, CRATE_DEF_INDEX, LOCAL_CRATE};
 use rustc_hir::definitions::{DefKey, DefPath, DefPathHash};
 use rustc_middle::hir::exports::Export;
@@ -17,7 +17,7 @@ use rustc_middle::middle::cstore::{CrateSource, CrateStore, EncodedMetadata};
 use rustc_middle::middle::exported_symbols::ExportedSymbol;
 use rustc_middle::middle::stability::DeprecationEntry;
 use rustc_middle::ty::query::Providers;
-use rustc_middle::ty::{self, TyCtxt};
+use rustc_middle::ty::{self, TyCtxt, Visibility};
 use rustc_session::utils::NativeLibKind;
 use rustc_session::{CrateDisambiguator, Session};
 use rustc_span::source_map::{Span, Spanned};
@@ -392,6 +392,20 @@ impl CStore {
         self.get_crate_data(def.krate).get_struct_field_names(def.index, sess)
     }
 
+    pub fn struct_field_visibilities_untracked(&self, def: DefId) -> Vec<Visibility> {
+        self.get_crate_data(def.krate).get_struct_field_visibilities(def.index)
+    }
+
+    pub fn ctor_def_id_and_kind_untracked(&self, def: DefId) -> Option<(DefId, CtorKind)> {
+        self.get_crate_data(def.krate).get_ctor_def_id(def.index).map(|ctor_def_id| {
+            (ctor_def_id, self.get_crate_data(def.krate).get_ctor_kind(def.index))
+        })
+    }
+
+    pub fn visibility_untracked(&self, def: DefId) -> Visibility {
+        self.get_crate_data(def.krate).get_visibility(def.index)
+    }
+
     pub fn item_children_untracked(
         &self,
         def_id: DefId,
@@ -411,7 +425,7 @@ impl CStore {
 
         let data = self.get_crate_data(id.krate);
         if data.root.is_proc_macro_crate() {
-            return LoadedMacro::ProcMacro(data.load_proc_macro(id.index, sess));
+            return LoadedMacro::ProcMacro(data.load_proc_macro(id, sess));
         }
 
         let span = data.get_span(id.index, sess);
@@ -460,6 +474,15 @@ impl CStore {
 
     pub fn item_attrs(&self, def_id: DefId, sess: &Session) -> Vec<ast::Attribute> {
         self.get_crate_data(def_id.krate).get_item_attrs(def_id.index, sess).collect()
+    }
+
+    pub fn get_proc_macro_quoted_span_untracked(
+        &self,
+        cnum: CrateNum,
+        id: usize,
+        sess: &Session,
+    ) -> Span {
+        self.get_crate_data(cnum).get_proc_macro_quoted_span(id, sess)
     }
 }
 
