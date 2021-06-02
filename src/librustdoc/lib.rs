@@ -8,7 +8,6 @@
 #![feature(box_syntax)]
 #![feature(in_band_lifetimes)]
 #![feature(nll)]
-#![cfg_attr(bootstrap, feature(or_patterns))]
 #![feature(test)]
 #![feature(crate_visibility_modifier)]
 #![feature(never_type)]
@@ -581,9 +580,6 @@ fn opts() -> Vec<RustcOptGroup> {
                 "generate-redirect-map",
                 "Generate JSON file at the top level instead of generating HTML redirection files",
             )
-        }),
-        unstable("print", |o| {
-            o.optmulti("", "print", "Rustdoc information to print on stdout", "[unversioned-files]")
         }),
         unstable("emit", |o| {
             o.optmulti(

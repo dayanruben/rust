@@ -1,6 +1,5 @@
 #![doc(html_root_url = "https://doc.rust-lang.org/nightly/nightly-rustc/")]
 #![feature(nll)]
-#![cfg_attr(bootstrap, feature(or_patterns))]
 #![recursion_limit = "256"]
 
 mod dump_visitor;
@@ -95,7 +94,7 @@ impl<'tcx> SaveContext<'tcx> {
         let sess = &self.tcx.sess;
         // Save-analysis is emitted per whole session, not per each crate type
         let crate_type = sess.crate_types()[0];
-        let outputs = &*self.tcx.output_filenames(LOCAL_CRATE);
+        let outputs = &*self.tcx.output_filenames(());
 
         if outputs.outputs.contains_key(&OutputType::Metadata) {
             filename_for_metadata(sess, crate_name, outputs)
@@ -128,7 +127,10 @@ impl<'tcx> SaveContext<'tcx> {
                 num: n.as_u32(),
                 id: GlobalCrateId {
                     name: self.tcx.crate_name(n).to_string(),
-                    disambiguator: self.tcx.crate_disambiguator(n).to_fingerprint().as_value(),
+                    disambiguator: (
+                        self.tcx.def_path_hash(n.as_def_id()).stable_crate_id().to_u64(),
+                        0,
+                    ),
                 },
             });
         }
@@ -1000,7 +1002,7 @@ pub fn process_crate<'l, 'tcx, H: SaveHandler>(
             // Privacy checking requires and is done after type checking; use a
             // fallback in case the access levels couldn't have been correctly computed.
             let access_levels = match tcx.sess.compile_status() {
-                Ok(..) => tcx.privacy_access_levels(LOCAL_CRATE),
+                Ok(..) => tcx.privacy_access_levels(()),
                 Err(..) => tcx.arena.alloc(AccessLevels::default()),
             };
 

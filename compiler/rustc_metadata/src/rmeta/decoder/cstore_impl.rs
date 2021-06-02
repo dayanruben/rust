@@ -19,7 +19,7 @@ use rustc_middle::middle::stability::DeprecationEntry;
 use rustc_middle::ty::query::Providers;
 use rustc_middle::ty::{self, TyCtxt, Visibility};
 use rustc_session::utils::NativeLibKind;
-use rustc_session::{CrateDisambiguator, Session};
+use rustc_session::{Session, StableCrateId};
 use rustc_span::source_map::{Span, Spanned};
 use rustc_span::symbol::Symbol;
 
@@ -185,20 +185,6 @@ provide! { <'tcx> tcx, def_id, other, cdata,
     }
     native_libraries => { Lrc::new(cdata.get_native_libraries(tcx.sess)) }
     foreign_modules => { cdata.get_foreign_modules(tcx) }
-    plugin_registrar_fn => {
-        cdata.root.plugin_registrar_fn.map(|index| {
-            DefId { krate: def_id.krate, index }
-        })
-    }
-    proc_macro_decls_static => {
-        cdata.root.proc_macro_data.as_ref().map(|data| {
-            DefId {
-                krate: def_id.krate,
-                index: data.proc_macro_decls_static,
-            }
-        })
-    }
-    crate_disambiguator => { cdata.root.disambiguator }
     crate_hash => { cdata.root.hash }
     crate_host_hash => { cdata.host_hash }
     original_crate_name => { cdata.root.name }
@@ -296,11 +282,10 @@ pub fn provide(providers: &mut Providers) {
         // external item that is visible from at least one local module) to a
         // sufficiently visible parent (considering modules that re-export the
         // external item to be parents).
-        visible_parent_map: |tcx, cnum| {
+        visible_parent_map: |tcx, ()| {
             use std::collections::hash_map::Entry;
             use std::collections::vec_deque::VecDeque;
 
-            assert_eq!(cnum, LOCAL_CRATE);
             let mut visible_parent_map: DefIdMap<DefId> = Default::default();
 
             // Issue 46112: We want the map to prefer the shortest
@@ -348,7 +333,7 @@ pub fn provide(providers: &mut Providers) {
                                 Entry::Occupied(mut entry) => {
                                     // If `child` is defined in crate `cnum`, ensure
                                     // that it is mapped to a parent in `cnum`.
-                                    if child.krate == cnum && entry.get().krate != cnum {
+                                    if child.is_local() && entry.get().is_local() {
                                         entry.insert(parent);
                                     }
                                 }
@@ -370,17 +355,14 @@ pub fn provide(providers: &mut Providers) {
             visible_parent_map
         },
 
-        dependency_formats: |tcx, cnum| {
-            assert_eq!(cnum, LOCAL_CRATE);
-            Lrc::new(crate::dependency_format::calculate(tcx))
-        },
+        dependency_formats: |tcx, ()| Lrc::new(crate::dependency_format::calculate(tcx)),
         has_global_allocator: |tcx, cnum| {
             assert_eq!(cnum, LOCAL_CRATE);
             CStore::from_tcx(tcx).has_global_allocator()
         },
-        postorder_cnums: |tcx, cnum| {
-            assert_eq!(cnum, LOCAL_CRATE);
-            tcx.arena.alloc_slice(&CStore::from_tcx(tcx).crate_dependencies_in_postorder(cnum))
+        postorder_cnums: |tcx, ()| {
+            tcx.arena
+                .alloc_slice(&CStore::from_tcx(tcx).crate_dependencies_in_postorder(LOCAL_CRATE))
         },
 
         ..*providers
@@ -499,8 +481,8 @@ impl CrateStore for CStore {
         self.get_crate_data(cnum).private_dep
     }
 
-    fn crate_disambiguator_untracked(&self, cnum: CrateNum) -> CrateDisambiguator {
-        self.get_crate_data(cnum).root.disambiguator
+    fn stable_crate_id_untracked(&self, cnum: CrateNum) -> StableCrateId {
+        self.get_crate_data(cnum).root.stable_crate_id
     }
 
     fn crate_hash_untracked(&self, cnum: CrateNum) -> Svh {

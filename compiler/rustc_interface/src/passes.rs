@@ -12,7 +12,7 @@ use rustc_data_structures::temp_dir::MaybeTempDir;
 use rustc_data_structures::{box_region_allow_access, declare_box_region_type, parallel};
 use rustc_errors::{ErrorReported, PResult};
 use rustc_expand::base::ExtCtxt;
-use rustc_hir::def_id::{CrateNum, LOCAL_CRATE};
+use rustc_hir::def_id::{StableCrateId, LOCAL_CRATE};
 use rustc_hir::Crate;
 use rustc_lint::LintStore;
 use rustc_metadata::creader::CStore;
@@ -170,9 +170,13 @@ pub fn register_plugins<'a>(
     let crate_types = util::collect_crate_types(sess, &krate.attrs);
     sess.init_crate_types(crate_types);
 
-    let disambiguator = util::compute_crate_disambiguator(sess);
-    sess.crate_disambiguator.set(disambiguator).expect("not yet initialized");
-    rustc_incremental::prepare_session_directory(sess, &crate_name, disambiguator);
+    let stable_crate_id = StableCrateId::new(
+        crate_name,
+        sess.crate_types().contains(&CrateType::Executable),
+        sess.opts.cg.metadata.clone(),
+    );
+    sess.stable_crate_id.set(stable_crate_id).expect("not yet initialized");
+    rustc_incremental::prepare_session_directory(sess, &crate_name, stable_crate_id)?;
 
     if sess.opts.incremental.is_some() {
         sess.time("incr_comp_garbage_collect_session_directories", || {
@@ -805,9 +809,7 @@ pub fn create_global_ctxt<'tcx>(
 
 /// Runs the resolution, type-checking, region checking and other
 /// miscellaneous analysis passes on the crate.
-fn analysis(tcx: TyCtxt<'_>, cnum: CrateNum) -> Result<()> {
-    assert_eq!(cnum, LOCAL_CRATE);
-
+fn analysis(tcx: TyCtxt<'_>, (): ()) -> Result<()> {
     rustc_passes::hir_id_validator::check_crate(tcx);
 
     let sess = tcx.sess;
@@ -816,14 +818,13 @@ fn analysis(tcx: TyCtxt<'_>, cnum: CrateNum) -> Result<()> {
     sess.time("misc_checking_1", || {
         parallel!(
             {
-                entry_point = sess
-                    .time("looking_for_entry_point", || rustc_passes::entry::find_entry_point(tcx));
+                entry_point = sess.time("looking_for_entry_point", || tcx.entry_fn(()));
 
-                sess.time("looking_for_plugin_registrar", || {
-                    plugin::build::find_plugin_registrar(tcx)
+                sess.time("looking_for_plugin_registrar", || tcx.ensure().plugin_registrar_fn(()));
+
+                sess.time("looking_for_derive_registrar", || {
+                    tcx.ensure().proc_macro_decls_static(())
                 });
-
-                sess.time("looking_for_derive_registrar", || proc_macro_decls::find(tcx));
 
                 let cstore = tcx
                     .cstore_as_any()
@@ -876,9 +877,8 @@ fn analysis(tcx: TyCtxt<'_>, cnum: CrateNum) -> Result<()> {
 
     sess.time("MIR_effect_checking", || {
         for def_id in tcx.body_owners() {
-            if tcx.sess.opts.debugging_opts.thir_unsafeck {
-                tcx.ensure().thir_check_unsafety(def_id);
-            } else {
+            tcx.ensure().thir_check_unsafety(def_id);
+            if !tcx.sess.opts.debugging_opts.thir_unsafeck {
                 mir::transform::check_unsafety::check_unsafety(tcx, def_id);
             }
 
@@ -903,11 +903,11 @@ fn analysis(tcx: TyCtxt<'_>, cnum: CrateNum) -> Result<()> {
     sess.time("misc_checking_3", || {
         parallel!(
             {
-                tcx.ensure().privacy_access_levels(LOCAL_CRATE);
+                tcx.ensure().privacy_access_levels(());
 
                 parallel!(
                     {
-                        tcx.ensure().check_private_in_public(LOCAL_CRATE);
+                        tcx.ensure().check_private_in_public(());
                     },
                     {
                         sess.time("death_checking", || rustc_passes::dead::check_crate(tcx));

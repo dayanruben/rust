@@ -300,7 +300,7 @@ impl<'a, 'tcx> TyDecoder<'tcx> for DecodeContext<'a, 'tcx> {
     {
         let tcx = self.tcx();
 
-        let key = ty::CReaderCacheKey { cnum: self.cdata().cnum, pos: shorthand };
+        let key = ty::CReaderCacheKey { cnum: Some(self.cdata().cnum), pos: shorthand };
 
         if let Some(&ty) = tcx.ty_rcache.borrow().get(&key) {
             return Ok(ty);
@@ -618,10 +618,6 @@ impl CrateRoot<'_> {
 
     crate fn name(&self) -> Symbol {
         self.name
-    }
-
-    crate fn disambiguator(&self) -> CrateDisambiguator {
-        self.disambiguator
     }
 
     crate fn hash(&self) -> Svh {
@@ -1927,8 +1923,8 @@ impl CrateMetadata {
         self.root.name
     }
 
-    crate fn disambiguator(&self) -> CrateDisambiguator {
-        self.root.disambiguator
+    crate fn stable_crate_id(&self) -> StableCrateId {
+        self.root.stable_crate_id
     }
 
     crate fn hash(&self) -> Svh {

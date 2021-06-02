@@ -140,12 +140,15 @@ pub fn print_crate<'a>(
 // and also addresses some specific regressions described in #63896 and #73345.
 fn tt_prepend_space(tt: &TokenTree, prev: &TokenTree) -> bool {
     if let TokenTree::Token(token) = prev {
+        if matches!(token.kind, token::Dot) {
+            return false;
+        }
         if let token::DocComment(comment_kind, ..) = token.kind {
             return comment_kind != CommentKind::Line;
         }
     }
     match tt {
-        TokenTree::Token(token) => token.kind != token::Comma,
+        TokenTree::Token(token) => !matches!(token.kind, token::Comma | token::Not | token::Dot),
         TokenTree::Delimited(_, DelimToken::Paren, _) => {
             !matches!(prev, TokenTree::Token(Token { kind: token::Ident(..), .. }))
         }
@@ -951,6 +954,14 @@ impl<'a> State<'a> {
                 }
                 self.pclose();
             }
+            ast::TyKind::AnonymousStruct(ref fields, ..) => {
+                self.head("struct");
+                self.print_record_struct_body(&fields, ty.span);
+            }
+            ast::TyKind::AnonymousUnion(ref fields, ..) => {
+                self.head("union");
+                self.print_record_struct_body(&fields, ty.span);
+            }
             ast::TyKind::Paren(ref typ) => {
                 self.popen();
                 self.print_type(typ);
@@ -1386,6 +1397,24 @@ impl<'a> State<'a> {
         }
     }
 
+    crate fn print_record_struct_body(&mut self, fields: &[ast::FieldDef], span: rustc_span::Span) {
+        self.bopen();
+        self.hardbreak_if_not_bol();
+
+        for field in fields {
+            self.hardbreak_if_not_bol();
+            self.maybe_print_comment(field.span.lo());
+            self.print_outer_attributes(&field.attrs);
+            self.print_visibility(&field.vis);
+            self.print_ident(field.ident.unwrap());
+            self.word_nbsp(":");
+            self.print_type(&field.ty);
+            self.s.word(",");
+        }
+
+        self.bclose(span)
+    }
+
     crate fn print_struct(
         &mut self,
         struct_def: &ast::VariantData,
@@ -1415,24 +1444,10 @@ impl<'a> State<'a> {
                 self.end();
                 self.end(); // Close the outer-box.
             }
-            ast::VariantData::Struct(..) => {
+            ast::VariantData::Struct(ref fields, ..) => {
                 self.print_where_clause(&generics.where_clause);
                 self.nbsp();
-                self.bopen();
-                self.hardbreak_if_not_bol();
-
-                for field in struct_def.fields() {
-                    self.hardbreak_if_not_bol();
-                    self.maybe_print_comment(field.span.lo());
-                    self.print_outer_attributes(&field.attrs);
-                    self.print_visibility(&field.vis);
-                    self.print_ident(field.ident.unwrap());
-                    self.word_nbsp(":");
-                    self.print_type(&field.ty);
-                    self.s.word(",");
-                }
-
-                self.bclose(span)
+                self.print_record_struct_body(fields, span);
             }
         }
     }

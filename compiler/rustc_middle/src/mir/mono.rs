@@ -88,7 +88,7 @@ impl<'tcx> MonoItem<'tcx> {
 
         match *self {
             MonoItem::Fn(ref instance) => {
-                let entry_def_id = tcx.entry_fn(LOCAL_CRATE).map(|(id, _)| id);
+                let entry_def_id = tcx.entry_fn(()).map(|(id, _)| id);
                 // If this function isn't inlined or otherwise has an extern
                 // indicator, then we'll be creating a globally shared version.
                 if tcx.codegen_fn_attrs(instance.def_id()).contains_extern_indicator()
@@ -185,6 +185,15 @@ impl<'tcx> MonoItem<'tcx> {
     // Only used by rustc_codegen_cranelift
     pub fn codegen_dep_node(&self, tcx: TyCtxt<'tcx>) -> DepNode {
         crate::dep_graph::make_compile_mono_item(tcx, self)
+    }
+
+    /// Returns the item's `CrateNum`
+    pub fn krate(&self) -> CrateNum {
+        match self {
+            MonoItem::Fn(ref instance) => instance.def_id().krate,
+            MonoItem::Static(def_id) => def_id.krate,
+            MonoItem::GlobalAsm(..) => LOCAL_CRATE,
+        }
     }
 }
 
@@ -479,15 +488,18 @@ impl CodegenUnitNameBuilder<'tcx> {
             // local crate's ID. Otherwise there can be collisions between CGUs
             // instantiating stuff for upstream crates.
             let local_crate_id = if cnum != LOCAL_CRATE {
-                let local_crate_disambiguator = format!("{}", tcx.crate_disambiguator(LOCAL_CRATE));
-                format!("-in-{}.{}", tcx.crate_name(LOCAL_CRATE), &local_crate_disambiguator[0..8])
+                let local_stable_crate_id = tcx.sess.local_stable_crate_id();
+                format!(
+                    "-in-{}.{:08x}",
+                    tcx.crate_name(LOCAL_CRATE),
+                    local_stable_crate_id.to_u64()
+                )
             } else {
                 String::new()
             };
 
-            let crate_disambiguator = tcx.crate_disambiguator(cnum).to_string();
-            // Using a shortened disambiguator of about 40 bits
-            format!("{}.{}{}", tcx.crate_name(cnum), &crate_disambiguator[0..8], local_crate_id)
+            let stable_crate_id = tcx.sess.local_stable_crate_id();
+            format!("{}.{:08x}{}", tcx.crate_name(cnum), stable_crate_id.to_u64(), local_crate_id)
         });
 
         write!(cgu_name, "{}", crate_prefix).unwrap();

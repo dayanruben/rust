@@ -1,6 +1,6 @@
 use self::collector::NodeCollector;
 
-use crate::hir::{AttributeMap, HirOwnerData, IndexedHir};
+use crate::hir::{AttributeMap, IndexedHir};
 use crate::middle::cstore::CrateStore;
 use crate::ty::TyCtxt;
 use rustc_ast as ast;
@@ -15,6 +15,7 @@ use rustc_hir::intravisit::Visitor;
 use rustc_hir::itemlikevisit::ItemLikeVisitor;
 use rustc_hir::*;
 use rustc_index::vec::Idx;
+use rustc_span::def_id::StableCrateId;
 use rustc_span::hygiene::MacroKind;
 use rustc_span::source_map::Spanned;
 use rustc_span::symbol::{kw, Ident, Symbol};
@@ -150,7 +151,7 @@ impl<'hir> Iterator for ParentOwnerIterator<'_, 'hir> {
 
 impl<'hir> Map<'hir> {
     pub fn krate(&self) -> &'hir Crate<'hir> {
-        self.tcx.hir_crate(LOCAL_CRATE)
+        self.tcx.hir_crate(())
     }
 
     #[inline]
@@ -489,7 +490,7 @@ impl<'hir> Map<'hir> {
     }
 
     pub fn trait_impls(&self, trait_did: DefId) -> &'hir [LocalDefId] {
-        self.tcx.all_local_trait_impls(LOCAL_CRATE).get(&trait_did).map_or(&[], |xs| &xs[..])
+        self.tcx.all_local_trait_impls(()).get(&trait_did).map_or(&[], |xs| &xs[..])
     }
 
     /// Gets the attributes on the crate. This is preferable to
@@ -928,9 +929,7 @@ impl<'hir> intravisit::Map<'hir> for Map<'hir> {
     }
 }
 
-pub(super) fn index_hir<'tcx>(tcx: TyCtxt<'tcx>, cnum: CrateNum) -> &'tcx IndexedHir<'tcx> {
-    assert_eq!(cnum, LOCAL_CRATE);
-
+pub(super) fn index_hir<'tcx>(tcx: TyCtxt<'tcx>, (): ()) -> &'tcx IndexedHir<'tcx> {
     let _prof_timer = tcx.sess.prof.generic_activity("build_hir_map");
 
     let hcx = tcx.create_stable_hashing_context();
@@ -943,16 +942,18 @@ pub(super) fn index_hir<'tcx>(tcx: TyCtxt<'tcx>, cnum: CrateNum) -> &'tcx Indexe
 }
 
 pub(super) fn crate_hash(tcx: TyCtxt<'_>, crate_num: CrateNum) -> Svh {
+    assert_eq!(crate_num, LOCAL_CRATE);
+
     let mut hcx = tcx.create_stable_hashing_context();
 
     let mut hir_body_nodes: Vec<_> = tcx
-        .index_hir(crate_num)
+        .index_hir(())
         .map
         .iter_enumerated()
         .filter_map(|(def_id, hod)| {
             let def_path_hash = tcx.definitions.def_path_hash(def_id);
             let mut hasher = StableHasher::new();
-            hod.with_bodies.as_ref()?.hash_stable(&mut hcx, &mut hasher);
+            hod.as_ref()?.hash_stable(&mut hcx, &mut hasher);
             AttributeMap { map: &tcx.untracked_crate.attrs, prefix: def_id }
                 .hash_stable(&mut hcx, &mut hasher);
             Some((def_path_hash, hasher.finish()))
@@ -990,25 +991,24 @@ pub(super) fn crate_hash(tcx: TyCtxt<'_>, crate_num: CrateNum) -> Svh {
     upstream_crates.hash_stable(&mut hcx, &mut stable_hasher);
     source_file_names.hash_stable(&mut hcx, &mut stable_hasher);
     tcx.sess.opts.dep_tracking_hash(true).hash_stable(&mut hcx, &mut stable_hasher);
-    tcx.sess.local_crate_disambiguator().to_fingerprint().hash_stable(&mut hcx, &mut stable_hasher);
+    tcx.sess.local_stable_crate_id().hash_stable(&mut hcx, &mut stable_hasher);
     tcx.untracked_crate.non_exported_macro_attrs.hash_stable(&mut hcx, &mut stable_hasher);
 
     let crate_hash: Fingerprint = stable_hasher.finish();
     Svh::new(crate_hash.to_smaller_hash())
 }
 
-fn upstream_crates(cstore: &dyn CrateStore) -> Vec<(Symbol, Fingerprint, Svh)> {
+fn upstream_crates(cstore: &dyn CrateStore) -> Vec<(StableCrateId, Svh)> {
     let mut upstream_crates: Vec<_> = cstore
         .crates_untracked()
         .iter()
         .map(|&cnum| {
-            let name = cstore.crate_name_untracked(cnum);
-            let disambiguator = cstore.crate_disambiguator_untracked(cnum).to_fingerprint();
+            let stable_crate_id = cstore.stable_crate_id_untracked(cnum);
             let hash = cstore.crate_hash_untracked(cnum);
-            (name, disambiguator, hash)
+            (stable_crate_id, hash)
         })
         .collect();
-    upstream_crates.sort_unstable_by_key(|&(name, dis, _)| (name.as_str(), dis));
+    upstream_crates.sort_unstable_by_key(|&(stable_crate_id, _)| stable_crate_id);
     upstream_crates
 }
 

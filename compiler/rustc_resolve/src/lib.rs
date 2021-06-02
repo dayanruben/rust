@@ -16,7 +16,6 @@
 #![feature(format_args_capture)]
 #![feature(iter_zip)]
 #![feature(nll)]
-#![cfg_attr(bootstrap, feature(or_patterns))]
 #![recursion_limit = "256"]
 #![allow(rustdoc::private_intra_doc_links)]
 
@@ -234,7 +233,14 @@ enum ResolutionError<'a> {
         /* current */ &'static str,
     ),
     /// Error E0530: `X` bindings cannot shadow `Y`s.
-    BindingShadowsSomethingUnacceptable(&'static str, Symbol, &'a NameBinding<'a>),
+    BindingShadowsSomethingUnacceptable {
+        shadowing_binding_descr: &'static str,
+        name: Symbol,
+        participle: &'static str,
+        article: &'static str,
+        shadowed_binding_descr: &'static str,
+        shadowed_binding_span: Span,
+    },
     /// Error E0128: generic parameters with a default cannot use forward-declared identifiers.
     ForwardDeclaredTyParam, // FIXME(const_generics_defaults)
     /// ERROR E0770: the type of const parameters must not depend on other generic parameters.
@@ -1216,7 +1222,7 @@ impl<'a> Resolver<'a> {
         let mut module_map = FxHashMap::default();
         module_map.insert(root_local_def_id, graph_root);
 
-        let definitions = Definitions::new(crate_name, session.local_crate_disambiguator());
+        let definitions = Definitions::new(session.local_stable_crate_id());
         let root = definitions.get_root_def();
 
         let mut visibilities = FxHashMap::default();

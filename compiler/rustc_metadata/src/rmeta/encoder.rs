@@ -671,14 +671,12 @@ impl<'a, 'tcx> EncodeContext<'a, 'tcx> {
             extra_filename: tcx.sess.opts.cg.extra_filename.clone(),
             triple: tcx.sess.opts.target_triple.clone(),
             hash: tcx.crate_hash(LOCAL_CRATE),
-            disambiguator: tcx.sess.local_crate_disambiguator(),
             stable_crate_id: tcx.def_path_hash(LOCAL_CRATE.as_def_id()).stable_crate_id(),
             panic_strategy: tcx.sess.panic_strategy(),
             edition: tcx.sess.edition(),
             has_global_allocator: tcx.has_global_allocator(LOCAL_CRATE),
             has_panic_handler: tcx.has_panic_handler(LOCAL_CRATE),
             has_default_lib_allocator,
-            plugin_registrar_fn: tcx.plugin_registrar_fn(LOCAL_CRATE).map(|id| id.index),
             proc_macro_data,
             compiler_builtins: tcx.sess.contains_name(&attrs, sym::compiler_builtins),
             needs_allocator: tcx.sess.contains_name(&attrs, sym::needs_allocator),
@@ -970,13 +968,12 @@ impl EncodeContext<'a, 'tcx> {
                 record!(self.tables.super_predicates[def_id] <- self.tcx.super_predicates_of(def_id));
             }
         }
-        let inherent_impls = tcx.crate_inherent_impls(LOCAL_CRATE);
+        let inherent_impls = tcx.crate_inherent_impls(());
         for (def_id, implementations) in inherent_impls.inherent_impls.iter() {
-            assert!(def_id.is_local());
             if implementations.is_empty() {
                 continue;
             }
-            record!(self.tables.inherent_impls[def_id] <- implementations.iter().map(|&def_id| {
+            record!(self.tables.inherent_impls[def_id.to_def_id()] <- implementations.iter().map(|&def_id| {
                 assert!(def_id.is_local());
                 def_id.index
             }));
@@ -1263,7 +1260,7 @@ impl EncodeContext<'a, 'tcx> {
 
         let mut keys_and_jobs = self
             .tcx
-            .mir_keys(LOCAL_CRATE)
+            .mir_keys(())
             .iter()
             .filter_map(|&def_id| {
                 let (encode_const, encode_opt) = should_encode_mir(self.tcx, def_id);
@@ -1601,7 +1598,7 @@ impl EncodeContext<'a, 'tcx> {
             let tcx = self.tcx;
             let hir = tcx.hir();
 
-            let proc_macro_decls_static = tcx.proc_macro_decls_static(LOCAL_CRATE).unwrap().index;
+            let proc_macro_decls_static = tcx.proc_macro_decls_static(()).unwrap().local_def_index;
             let stability = tcx.lookup_stability(DefId::local(CRATE_DEF_INDEX)).copied();
             let macros = self.lazy(hir.krate().proc_macros.iter().map(|p| p.owner.local_def_index));
             let spans = self.tcx.sess.parse_sess.proc_macro_quoted_spans();
@@ -1798,7 +1795,7 @@ impl EncodeContext<'a, 'tcx> {
 
     fn encode_dylib_dependency_formats(&mut self) -> Lazy<[Option<LinkagePreference>]> {
         empty_proc_macro!(self);
-        let formats = self.tcx.dependency_formats(LOCAL_CRATE);
+        let formats = self.tcx.dependency_formats(());
         for (ty, arr) in formats.iter() {
             if *ty != CrateType::Dylib {
                 continue;
@@ -2028,7 +2025,7 @@ fn prefetch_mir(tcx: TyCtxt<'_>) {
         return;
     }
 
-    par_iter(tcx.mir_keys(LOCAL_CRATE)).for_each(|&def_id| {
+    par_iter(tcx.mir_keys(())).for_each(|&def_id| {
         let (encode_const, encode_opt) = should_encode_mir(tcx, def_id);
 
         if encode_const {

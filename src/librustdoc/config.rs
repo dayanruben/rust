@@ -6,8 +6,10 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use rustc_data_structures::fx::FxHashMap;
-use rustc_session::config::{self, parse_crate_types_from_list, parse_externs, CrateType};
-use rustc_session::config::{get_cmd_lint_options, host_triple, nightly_options};
+use rustc_session::config::{
+    self, parse_crate_types_from_list, parse_externs, parse_target_triple, CrateType,
+};
+use rustc_session::config::{get_cmd_lint_options, nightly_options};
 use rustc_session::config::{CodegenOptions, DebuggingOptions, ErrorOutputType, Externs};
 use rustc_session::getopts;
 use rustc_session::lint::Level;
@@ -347,13 +349,6 @@ impl Options {
             return Err(0);
         }
 
-        if matches.opt_strs("print").iter().any(|opt| opt == "unversioned-files") {
-            for file in crate::html::render::FILES_UNVERSIONED.keys() {
-                println!("{}", file);
-            }
-            return Err(0);
-        }
-
         let color = config::parse_color(&matches);
         let config::JsonConfig { json_rendered, json_unused_externs, .. } =
             config::parse_json(&matches);
@@ -562,14 +557,7 @@ impl Options {
             }
         }
 
-        let target =
-            matches.opt_str("target").map_or(TargetTriple::from_triple(host_triple()), |target| {
-                if target.ends_with(".json") {
-                    TargetTriple::TargetPath(PathBuf::from(target))
-                } else {
-                    TargetTriple::TargetTriple(target)
-                }
-            });
+        let target = parse_target_triple(matches, error_format);
 
         let show_coverage = matches.opt_present("show-coverage");
 

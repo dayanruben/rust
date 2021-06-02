@@ -509,44 +509,23 @@ impl<'a, 'tcx> WrongNumberOfGenericArgs<'a, 'tcx> {
             }
 
             AngleBrackets::Available => {
-                // angle brackets exist, so we insert missing arguments after the existing args
-
-                assert!(!self.gen_args.args.is_empty());
-
-                if self.num_provided_lifetime_args() > 0 {
-                    let last_lt_arg_span = self.gen_args.args
-                        [self.num_provided_lifetime_args() - 1]
-                        .span()
-                        .shrink_to_hi();
-                    let source_map = self.tcx.sess.source_map();
-
-                    if let Ok(last_gen_arg) = source_map.span_to_snippet(last_lt_arg_span) {
-                        let sugg = format!("{}, {}", last_gen_arg, suggested_args);
-
-                        err.span_suggestion_verbose(
-                            last_lt_arg_span,
-                            &msg,
-                            sugg,
-                            Applicability::HasPlaceholders,
-                        );
-                    }
+                let (sugg_span, is_first) = if self.num_provided_lifetime_args() == 0 {
+                    (self.gen_args.span().unwrap().shrink_to_lo(), true)
                 } else {
-                    // Non-lifetime arguments included in `gen_args` -> insert missing lifetimes before
-                    // existing arguments
-                    let first_arg_span = self.gen_args.args[0].span().shrink_to_lo();
-                    let source_map = self.tcx.sess.source_map();
+                    let last_lt = &self.gen_args.args[self.num_provided_lifetime_args() - 1];
+                    (last_lt.span().shrink_to_hi(), false)
+                };
+                let has_non_lt_args = self.num_provided_type_or_const_args() != 0;
+                let has_bindings = !self.gen_args.bindings.is_empty();
 
-                    if let Ok(first_gen_arg) = source_map.span_to_snippet(first_arg_span) {
-                        let sugg = format!("{}, {}", suggested_args, first_gen_arg);
+                let sugg_prefix = if is_first { "" } else { ", " };
+                let sugg_suffix =
+                    if is_first && (has_non_lt_args || has_bindings) { ", " } else { "" };
 
-                        err.span_suggestion_verbose(
-                            first_arg_span,
-                            &msg,
-                            sugg,
-                            Applicability::HasPlaceholders,
-                        );
-                    }
-                }
+                let sugg = format!("{}{}{}", sugg_prefix, suggested_args, sugg_suffix);
+                debug!("sugg: {:?}", sugg);
+
+                err.span_suggestion_verbose(sugg_span, &msg, sugg, Applicability::HasPlaceholders);
             }
             AngleBrackets::Implied => {
                 // We never encounter missing lifetimes in situations in which lifetimes are elided
@@ -626,30 +605,35 @@ impl<'a, 'tcx> WrongNumberOfGenericArgs<'a, 'tcx> {
         let remove_entire_generics = num_redundant_args >= self.gen_args.args.len();
 
         let remove_lifetime_args = |err: &mut DiagnosticBuilder<'_>| {
-            let idx_first_redundant_lt_args = self.num_expected_lifetime_args();
-            let span_lo_redundant_lt_args =
-                self.gen_args.args[idx_first_redundant_lt_args].span().shrink_to_lo();
-            let span_hi_redundant_lt_args = self.gen_args.args
-                [idx_first_redundant_lt_args + num_redundant_lt_args - 1]
-                .span()
-                .shrink_to_hi();
-            let eat_comma =
-                idx_first_redundant_lt_args + num_redundant_lt_args - 1 != self.gen_args.args.len();
+            let mut lt_arg_spans = Vec::new();
+            let mut found_redundant = false;
+            for arg in self.gen_args.args {
+                if let hir::GenericArg::Lifetime(_) = arg {
+                    lt_arg_spans.push(arg.span());
+                    if lt_arg_spans.len() > self.num_expected_lifetime_args() {
+                        found_redundant = true;
+                    }
+                } else if found_redundant {
+                    // Argument which is redundant and separated like this `'c`
+                    // is not included to avoid including `Bar` in span.
+                    // ```
+                    // type Foo<'a, T> = &'a T;
+                    // let _: Foo<'a, 'b, Bar, 'c>;
+                    // ```
+                    break;
+                }
+            }
 
-            let span_redundant_lt_args = if eat_comma {
-                let span_hi = self.gen_args.args
-                    [idx_first_redundant_lt_args + num_redundant_lt_args - 1]
-                    .span()
-                    .shrink_to_hi();
-                span_lo_redundant_lt_args.to(span_hi)
-            } else {
-                span_lo_redundant_lt_args.to(span_hi_redundant_lt_args)
-            };
+            let span_lo_redundant_lt_args = lt_arg_spans[self.num_expected_lifetime_args()];
+            let span_hi_redundant_lt_args = lt_arg_spans[lt_arg_spans.len() - 1];
+
+            let span_redundant_lt_args = span_lo_redundant_lt_args.to(span_hi_redundant_lt_args);
             debug!("span_redundant_lt_args: {:?}", span_redundant_lt_args);
 
+            let num_redundant_lt_args = lt_arg_spans.len() - self.num_expected_lifetime_args();
             let msg_lifetimes = format!(
                 "remove {} {} argument{}",
-                if num_redundant_args == 1 { "this" } else { "these" },
+                if num_redundant_lt_args == 1 { "this" } else { "these" },
                 "lifetime",
                 pluralize!(num_redundant_lt_args),
             );
@@ -663,26 +647,34 @@ impl<'a, 'tcx> WrongNumberOfGenericArgs<'a, 'tcx> {
         };
 
         let remove_type_or_const_args = |err: &mut DiagnosticBuilder<'_>| {
-            let idx_first_redundant_type_or_const_args = self.get_lifetime_args_offset()
-                + num_redundant_lt_args
-                + self.num_expected_type_or_const_args();
+            let mut gen_arg_spans = Vec::new();
+            let mut found_redundant = false;
+            for arg in self.gen_args.args {
+                match arg {
+                    hir::GenericArg::Type(_) | hir::GenericArg::Const(_) => {
+                        gen_arg_spans.push(arg.span());
+                        if gen_arg_spans.len() > self.num_expected_type_or_const_args() {
+                            found_redundant = true;
+                        }
+                    }
+                    _ if found_redundant => break,
+                    _ => {}
+                }
+            }
 
             let span_lo_redundant_type_or_const_args =
-                self.gen_args.args[idx_first_redundant_type_or_const_args].span().shrink_to_lo();
-
-            let span_hi_redundant_type_or_const_args = self.gen_args.args
-                [idx_first_redundant_type_or_const_args + num_redundant_type_or_const_args - 1]
-                .span()
-                .shrink_to_hi();
+                gen_arg_spans[self.num_expected_type_or_const_args()];
+            let span_hi_redundant_type_or_const_args = gen_arg_spans[gen_arg_spans.len() - 1];
 
             let span_redundant_type_or_const_args =
                 span_lo_redundant_type_or_const_args.to(span_hi_redundant_type_or_const_args);
-
             debug!("span_redundant_type_or_const_args: {:?}", span_redundant_type_or_const_args);
 
+            let num_redundant_gen_args =
+                gen_arg_spans.len() - self.num_expected_type_or_const_args();
             let msg_types_or_consts = format!(
                 "remove {} {} argument{}",
-                if num_redundant_args == 1 { "this" } else { "these" },
+                if num_redundant_gen_args == 1 { "this" } else { "these" },
                 "generic",
                 pluralize!(num_redundant_type_or_const_args),
             );

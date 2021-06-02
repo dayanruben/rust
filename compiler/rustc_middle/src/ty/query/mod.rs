@@ -18,6 +18,7 @@ use crate::mir::interpret::GlobalId;
 use crate::mir::interpret::{ConstAlloc, LitToConstError, LitToConstInput};
 use crate::mir::interpret::{ConstValue, EvalToAllocationRawResult, EvalToConstValueResult};
 use crate::mir::mono::CodegenUnit;
+use crate::thir;
 use crate::traits::query::{
     CanonicalPredicateGoal, CanonicalProjectionGoal, CanonicalTyGoal,
     CanonicalTypeOpAscribeUserTypeGoal, CanonicalTypeOpEqGoal, CanonicalTypeOpNormalizeGoal,
@@ -47,7 +48,6 @@ use rustc_index::{bit_set::FiniteBitSet, vec::IndexVec};
 use rustc_serialize::opaque;
 use rustc_session::config::{EntryFnType, OptLevel, OutputFilenames, SymbolManglingVersion};
 use rustc_session::utils::NativeLibKind;
-use rustc_session::CrateDisambiguator;
 use rustc_target::spec::PanicStrategy;
 
 use rustc_ast as ast;
