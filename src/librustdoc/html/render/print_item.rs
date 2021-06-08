@@ -75,10 +75,10 @@ pub(super) fn print_item(cx: &Context<'_>, item: &clean::Item, buf: &mut Buffer,
             );
         }
     }
-    write!(buf, "<a class=\"{}\" href=\"\">{}</a>", item.type_(), item.name.as_ref().unwrap());
+    write!(buf, "<a class=\"{}\" href=\"#\">{}</a>", item.type_(), item.name.as_ref().unwrap());
     write!(
         buf,
-        "<button id=\"copy-path\" onclick=\"copy_path(this)\">\
+        "<button id=\"copy-path\" onclick=\"copy_path(this)\" title=\"copy path\">\
             <img src=\"{static_root_path}clipboard{suffix}.svg\" \
                 width=\"19\" height=\"18\" \
                 alt=\"Copy item import\" \
@@ -263,7 +263,7 @@ fn item_module(w: &mut Buffer, cx: &Context<'_>, item: &clean::Item, items: &[cl
                 w.write_str("</table>");
             }
             curty = myty;
-            let (short, name) = item_ty_to_strs(&myty.unwrap());
+            let (short, name) = item_ty_to_strs(myty.unwrap());
             write!(
                 w,
                 "<h2 id=\"{id}\" class=\"section-header\">\
@@ -585,12 +585,12 @@ fn item_trait(w: &mut Buffer, cx: &Context<'_>, it: &clean::Item, t: &clean::Tra
         if toggled {
             write!(w, "<details class=\"rustdoc-toggle\" open><summary>");
         }
-        write!(w, "<h3 id=\"{id}\" class=\"method\"><code>", id = id);
+        write!(w, "<div id=\"{}\" class=\"method has-srclink\"><code>", id);
         render_assoc_item(w, m, AssocItemLink::Anchor(Some(&id)), ItemType::Impl, cx);
         w.write_str("</code>");
         render_stability_since(w, m, t, cx.tcx());
         write_srclink(cx, m, w);
-        w.write_str("</h3>");
+        w.write_str("</div>");
         if toggled {
             write!(w, "</summary>");
             w.push_buffer(content);

@@ -34,7 +34,6 @@ use crate::ty::subst::{GenericArg, SubstsRef};
 use crate::ty::util::AlwaysRequiresDrop;
 use crate::ty::{self, AdtSizedConstraint, CrateInherentImpls, ParamEnvAnd, Ty, TyCtxt};
 use rustc_data_structures::fx::{FxHashMap, FxHashSet, FxIndexMap};
-use rustc_data_structures::stable_hasher::StableVec;
 use rustc_data_structures::steal::Steal;
 use rustc_data_structures::svh::Svh;
 use rustc_data_structures::sync::Lrc;
@@ -48,6 +47,7 @@ use rustc_index::{bit_set::FiniteBitSet, vec::IndexVec};
 use rustc_serialize::opaque;
 use rustc_session::config::{EntryFnType, OptLevel, OutputFilenames, SymbolManglingVersion};
 use rustc_session::utils::NativeLibKind;
+use rustc_session::CrateDisambiguator;
 use rustc_target::spec::PanicStrategy;
 
 use rustc_ast as ast;
