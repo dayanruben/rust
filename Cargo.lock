@@ -179,7 +179,8 @@ dependencies = [
  "libc",
  "merge",
  "num_cpus",
- "opener",
+ "once_cell",
+ "opener 0.5.0",
  "pretty_assertions",
  "serde",
  "serde_json",
@@ -194,7 +195,9 @@ version = "0.2.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "31accafdb70df7871592c058eca3985b71104e15ac32f64706022c58867da931"
 dependencies = [
+ "lazy_static",
  "memchr",
+ "regex-automata",
 ]
 
 [[package]]
@@ -252,7 +255,7 @@ checksum = "81a18687293a1546b67c246452202bbbf143d239cb43494cc163da14979082da"
 
 [[package]]
 name = "cargo"
-version = "0.55.0"
+version = "0.56.0"
 dependencies = [
  "anyhow",
  "atty",
@@ -287,13 +290,12 @@ dependencies = [
  "log",
  "memchr",
  "num_cpus",
- "opener",
+ "opener 0.5.0",
  "openssl",
  "percent-encoding 2.1.0",
  "pretty_env_logger",
- "rand 0.8.3",
  "rustc-workspace-hack",
- "rustfix",
+ "rustfix 0.6.0",
  "semver 1.0.3",
  "serde",
  "serde_ignored",
@@ -374,10 +376,12 @@ dependencies = [
  "flate2",
  "git2",
  "glob",
+ "itertools 0.10.0",
  "lazy_static",
  "remove_dir_all",
  "serde_json",
  "tar",
+ "termcolor",
  "toml",
  "url 2.2.2",
 ]
@@ -574,7 +578,7 @@ dependencies = [
  "bytecount",
  "clap",
  "itertools 0.9.0",
- "opener",
+ "opener 0.4.1",
  "regex",
  "shell-escape",
  "walkdir",
@@ -652,9 +656,9 @@ dependencies = [
 
 [[package]]
 name = "compiler_builtins"
-version = "0.1.45"
+version = "0.1.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "787187ae221adfcda34b03006f1617099e4ae26b50e5a4db282496014ab75837"
+checksum = "d69484e04eab372f5f345920e3a8c7a06e7dcbb75c0944eccdc3e3160aeee3c7"
 dependencies = [
  "cc",
  "rustc-std-workspace-core",
@@ -672,7 +676,7 @@ dependencies = [
  "libc",
  "miow 0.3.6",
  "regex",
- "rustfix",
+ "rustfix 0.6.0",
  "serde",
  "serde_json",
  "tracing",
@@ -696,7 +700,7 @@ dependencies = [
  "log",
  "miow 0.3.6",
  "regex",
- "rustfix",
+ "rustfix 0.5.1",
  "serde",
  "serde_derive",
  "serde_json",
@@ -1480,6 +1484,17 @@ dependencies = [
  "fnv",
  "log",
  "regex",
+]
+
+[[package]]
+name = "globwalk"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "93e3af942408868f6934a7b85134a3230832b9977cf66125df2f9edcfce4ddcc"
+dependencies = [
+ "bitflags",
+ "ignore",
+ "walkdir",
 ]
 
 [[package]]
@@ -2403,6 +2418,16 @@ version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13117407ca9d0caf3a0e74f97b490a7e64c0ae3aa90a8b7085544d0c37b6f3ae"
 dependencies = [
+ "winapi 0.3.9",
+]
+
+[[package]]
+name = "opener"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ea3ebcd72a54701f56345f16785a6d3ac2df7e986d273eb4395c0b01db17952"
+dependencies = [
+ "bstr",
  "winapi 0.3.9",
 ]
 
@@ -3546,6 +3571,7 @@ dependencies = [
 name = "rustc-workspace-hack"
 version = "1.0.0"
 dependencies = [
+ "bstr",
  "byteorder",
  "crossbeam-utils 0.8.3",
  "libc",
@@ -3693,6 +3719,7 @@ dependencies = [
  "rustc_incremental",
  "rustc_index",
  "rustc_llvm",
+ "rustc_metadata",
  "rustc_middle",
  "rustc_serialize",
  "rustc_session",
@@ -4517,6 +4544,7 @@ dependencies = [
  "serde_json",
  "smallvec",
  "tempfile",
+ "tera",
  "tracing",
  "tracing-subscriber",
  "tracing-tree",
@@ -4546,6 +4574,18 @@ name = "rustfix"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2c50b74badcddeb8f7652fa8323ce440b95286f8e4b64ebfd871c609672704e"
+dependencies = [
+ "anyhow",
+ "log",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "rustfix"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6f0be05fc0675ef4f47119dc39cfc46636bb77d4fc4ef1bd851b9c3f7697f32a"
 dependencies = [
  "anyhow",
  "log",
@@ -4596,9 +4636,9 @@ dependencies = [
 
 [[package]]
 name = "rustversion"
-version = "1.0.4"
+version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb5d2a036dc6d2d8fd16fde3498b04306e29bd193bf306a57427019b823d5acd"
+checksum = "61b3909d758bb75c79f23d4736fac9433868679d3ad2ea7a61e3c25cfda9a088"
 
 [[package]]
 name = "ryu"
@@ -5087,6 +5127,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "tera"
+version = "1.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "81060acb882480c8793782eb96bc86f5c83d2fc7175ad46c375c6956ef7afa62"
+dependencies = [
+ "globwalk",
+ "lazy_static",
+ "pest",
+ "pest_derive",
+ "regex",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "term"
 version = "0.0.0"
 dependencies = [
@@ -5117,9 +5172,9 @@ dependencies = [
 
 [[package]]
 name = "termcolor"
-version = "1.1.0"
+version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bb6bfa289a4d7c5766392812c0a1f4c1ba45afa1ad47803c11e1f407d846d75f"
+checksum = "2dfed899f0eb03f32ee8c6a0aabdb8a7949659e3466561fc0adf54e26d88c5f4"
 dependencies = [
  "winapi-util",
 ]

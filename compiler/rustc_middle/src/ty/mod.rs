@@ -58,7 +58,7 @@ pub use self::consts::{Const, ConstInt, ConstKind, InferConst, ScalarInt, Uneval
 pub use self::context::{
     tls, CanonicalUserType, CanonicalUserTypeAnnotation, CanonicalUserTypeAnnotations,
     CtxtInterners, DelaySpanBugEmitted, FreeRegionInfo, GeneratorInteriorTypeCause, GlobalCtxt,
-    Lift, ResolvedOpaqueTy, TyCtxt, TypeckResults, UserType, UserTypeAnnotationIndex,
+    Lift, TyCtxt, TypeckResults, UserType, UserTypeAnnotationIndex,
 };
 pub use self::instance::{Instance, InstanceDef};
 pub use self::list::List;
@@ -833,6 +833,12 @@ impl<'tcx> InstantiatedPredicates<'tcx> {
     pub fn is_empty(&self) -> bool {
         self.predicates.is_empty()
     }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, HashStable, TyEncodable, TyDecodable)]
+pub struct OpaqueTypeKey<'tcx> {
+    pub def_id: DefId,
+    pub substs: SubstsRef<'tcx>,
 }
 
 rustc_index::newtype_index! {
@@ -2003,3 +2009,19 @@ impl<'tcx> fmt::Debug for SymbolName<'tcx> {
         fmt::Display::fmt(&self.name, fmt)
     }
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, HashStable)]
+pub enum VtblEntry<'tcx> {
+    MetadataDropInPlace,
+    MetadataSize,
+    MetadataAlign,
+    Vacant,
+    Method(DefId, SubstsRef<'tcx>),
+}
+
+pub const COMMON_VTABLE_ENTRIES: &[VtblEntry<'_>] =
+    &[VtblEntry::MetadataDropInPlace, VtblEntry::MetadataSize, VtblEntry::MetadataAlign];
+
+pub const COMMON_VTABLE_ENTRIES_DROPINPLACE: usize = 0;
+pub const COMMON_VTABLE_ENTRIES_SIZE: usize = 1;
+pub const COMMON_VTABLE_ENTRIES_ALIGN: usize = 2;
