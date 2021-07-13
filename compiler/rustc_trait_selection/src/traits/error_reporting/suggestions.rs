@@ -28,6 +28,7 @@ use rustc_target::spec::abi;
 use std::fmt;
 
 use super::InferCtxtPrivExt;
+use crate::infer::InferCtxtExt as _;
 use crate::traits::query::evaluate_obligation::InferCtxtExt as _;
 use rustc_middle::ty::print::with_no_trimmed_paths;
 
@@ -687,14 +688,16 @@ impl<'a, 'tcx> InferCtxtExt<'tcx> for InferCtxt<'a, 'tcx> {
             return false;
         }
 
-        // Blacklist traits for which it would be nonsensical to suggest borrowing.
+        // List of traits for which it would be nonsensical to suggest borrowing.
         // For instance, immutable references are always Copy, so suggesting to
         // borrow would always succeed, but it's probably not what the user wanted.
-        let blacklist: Vec<_> =
-            [LangItem::Copy, LangItem::Clone, LangItem::Unpin, LangItem::Sized, LangItem::Send]
+        let mut never_suggest_borrow: Vec<_> =
+            [LangItem::Copy, LangItem::Clone, LangItem::Unpin, LangItem::Sized]
                 .iter()
                 .filter_map(|lang_item| self.tcx.lang_items().require(*lang_item).ok())
                 .collect();
+
+        never_suggest_borrow.push(self.tcx.get_diagnostic_item(sym::send_trait).unwrap());
 
         let span = obligation.cause.span;
         let param_env = obligation.param_env;
@@ -797,7 +800,7 @@ impl<'a, 'tcx> InferCtxtExt<'tcx> for InferCtxt<'a, 'tcx> {
                 ty::TraitRef::new(trait_ref.def_id, imm_substs),
                 trait_ref,
                 false,
-                &blacklist[..],
+                &never_suggest_borrow[..],
             ) {
                 return true;
             } else {
@@ -805,7 +808,7 @@ impl<'a, 'tcx> InferCtxtExt<'tcx> for InferCtxt<'a, 'tcx> {
                     ty::TraitRef::new(trait_ref.def_id, mut_substs),
                     trait_ref,
                     true,
-                    &blacklist[..],
+                    &never_suggest_borrow[..],
                 );
             }
         } else {
@@ -2310,7 +2313,7 @@ impl<'a, 'tcx> InferCtxtExt<'tcx> for InferCtxt<'a, 'tcx> {
     }
 
     fn suggest_new_overflow_limit(&self, err: &mut DiagnosticBuilder<'_>) {
-        let current_limit = self.tcx.sess.recursion_limit();
+        let current_limit = self.tcx.recursion_limit();
         let suggested_limit = current_limit * 2;
         err.help(&format!(
             "consider adding a `#![recursion_limit=\"{}\"]` attribute to your crate (`{}`)",
@@ -2349,12 +2352,12 @@ impl<'a, 'tcx> InferCtxtExt<'tcx> for InferCtxt<'a, 'tcx> {
                 }
                 let self_ty = self.tcx.erase_regions(self_ty);
 
-                let impls_future = self.tcx.type_implements_trait((
+                let impls_future = self.type_implements_trait(
                     future_trait,
                     self_ty.skip_binder(),
                     ty::List::empty(),
                     obligation.param_env,
-                ));
+                );
 
                 let item_def_id = self
                     .tcx
@@ -2396,7 +2399,9 @@ impl<'a, 'tcx> InferCtxtExt<'tcx> for InferCtxt<'a, 'tcx> {
                     normalized_ty,
                 );
                 debug!("suggest_await_before_try: try_trait_obligation {:?}", try_obligation);
-                if self.predicate_may_hold(&try_obligation) && impls_future {
+                if self.predicate_may_hold(&try_obligation)
+                    && impls_future.must_apply_modulo_regions()
+                {
                     if let Ok(snippet) = self.tcx.sess.source_map().span_to_snippet(span) {
                         if snippet.ends_with('?') {
                             err.span_suggestion_verbose(

@@ -278,6 +278,7 @@
 #![feature(hashmap_internals)]
 #![feature(int_error_internals)]
 #![feature(integer_atomics)]
+#![feature(int_log)]
 #![feature(into_future)]
 #![feature(intra_doc_pointers)]
 #![feature(iter_zip)]
@@ -303,7 +304,6 @@
 #![feature(pin_static_ref)]
 #![feature(prelude_import)]
 #![feature(ptr_internals)]
-#![feature(raw)]
 #![feature(ready_macro)]
 #![feature(rustc_attrs)]
 #![feature(rustc_private)]
@@ -454,9 +454,6 @@ pub use core::option;
 pub use core::pin;
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use core::ptr;
-#[stable(feature = "rust1", since = "1.0.0")]
-#[allow(deprecated, deprecated_in_future)]
-pub use core::raw;
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use core::result;
 #[unstable(feature = "async_stream", issue = "79024")]

@@ -3,7 +3,7 @@ use rustc_data_structures::temp_dir::MaybeTempDir;
 use rustc_errors::Handler;
 use rustc_fs_util::fix_windows_verbatim_for_gcc;
 use rustc_hir::def_id::CrateNum;
-use rustc_middle::middle::cstore::{DllImport, LibSource};
+use rustc_middle::middle::cstore::{DllCallingConvention, DllImport};
 use rustc_middle::middle::dependency_format::Linkage;
 use rustc_session::config::{self, CFGuard, CrateType, DebugInfo, LdImpl, Strip};
 use rustc_session::config::{OutputFilenames, OutputType, PrintRequest};
@@ -34,8 +34,8 @@ use object::write::Object;
 use object::{Architecture, BinaryFormat, Endianness, FileFlags, SectionFlags, SectionKind};
 use tempfile::Builder as TempFileBuilder;
 
-use std::cmp::Ordering;
 use std::ffi::OsString;
+use std::iter::FromIterator;
 use std::path::{Path, PathBuf};
 use std::process::{ExitStatus, Output, Stdio};
 use std::{ascii, char, env, fmt, fs, io, mem, str};
@@ -54,7 +54,6 @@ pub fn link_binary<'a, B: ArchiveBuilder<'a>>(
     sess: &'a Session,
     codegen_results: &CodegenResults,
     outputs: &OutputFilenames,
-    crate_name: &str,
 ) {
     let _timer = sess.timer("link_binary");
     let output_metadata = sess.opts.output_types.contains_key(&OutputType::Metadata);
@@ -87,7 +86,12 @@ pub fn link_binary<'a, B: ArchiveBuilder<'a>>(
                 .tempdir()
                 .unwrap_or_else(|err| sess.fatal(&format!("couldn't create a temp dir: {}", err)));
             let path = MaybeTempDir::new(tmpdir, sess.opts.cg.save_temps);
-            let out_filename = out_filename(sess, crate_type, outputs, crate_name);
+            let out_filename = out_filename(
+                sess,
+                crate_type,
+                outputs,
+                &codegen_results.crate_info.local_crate_name.as_str(),
+            );
             match crate_type {
                 CrateType::Rlib => {
                     let _timer = sess.timer("link_rlib");
@@ -143,102 +147,11 @@ pub fn link_binary<'a, B: ArchiveBuilder<'a>>(
     });
 }
 
-// The third parameter is for env vars, used on windows to set up the
-// path for MSVC to find its DLLs, and gcc to find its bundled
-// toolchain
-fn get_linker(
-    sess: &Session,
-    linker: &Path,
-    flavor: LinkerFlavor,
-    self_contained: bool,
-) -> Command {
-    let msvc_tool = windows_registry::find_tool(&sess.opts.target_triple.triple(), "link.exe");
-
-    // If our linker looks like a batch script on Windows then to execute this
-    // we'll need to spawn `cmd` explicitly. This is primarily done to handle
-    // emscripten where the linker is `emcc.bat` and needs to be spawned as
-    // `cmd /c emcc.bat ...`.
-    //
-    // This worked historically but is needed manually since #42436 (regression
-    // was tagged as #42791) and some more info can be found on #44443 for
-    // emscripten itself.
-    let mut cmd = match linker.to_str() {
-        Some(linker) if cfg!(windows) && linker.ends_with(".bat") => Command::bat_script(linker),
-        _ => match flavor {
-            LinkerFlavor::Lld(f) => Command::lld(linker, f),
-            LinkerFlavor::Msvc if sess.opts.cg.linker.is_none() && sess.target.linker.is_none() => {
-                Command::new(msvc_tool.as_ref().map_or(linker, |t| t.path()))
-            }
-            _ => Command::new(linker),
-        },
-    };
-
-    // UWP apps have API restrictions enforced during Store submissions.
-    // To comply with the Windows App Certification Kit,
-    // MSVC needs to link with the Store versions of the runtime libraries (vcruntime, msvcrt, etc).
-    let t = &sess.target;
-    if (flavor == LinkerFlavor::Msvc || flavor == LinkerFlavor::Lld(LldFlavor::Link))
-        && t.vendor == "uwp"
-    {
-        if let Some(ref tool) = msvc_tool {
-            let original_path = tool.path();
-            if let Some(ref root_lib_path) = original_path.ancestors().nth(4) {
-                let arch = match t.arch.as_str() {
-                    "x86_64" => Some("x64"),
-                    "x86" => Some("x86"),
-                    "aarch64" => Some("arm64"),
-                    "arm" => Some("arm"),
-                    _ => None,
-                };
-                if let Some(ref a) = arch {
-                    // FIXME: Move this to `fn linker_with_args`.
-                    let mut arg = OsString::from("/LIBPATH:");
-                    arg.push(format!("{}\\lib\\{}\\store", root_lib_path.display(), a));
-                    cmd.arg(&arg);
-                } else {
-                    warn!("arch is not supported");
-                }
-            } else {
-                warn!("MSVC root path lib location not found");
-            }
-        } else {
-            warn!("link.exe not found");
-        }
-    }
-
-    // The compiler's sysroot often has some bundled tools, so add it to the
-    // PATH for the child.
-    let mut new_path = sess.host_filesearch(PathKind::All).get_tools_search_paths(self_contained);
-    let mut msvc_changed_path = false;
-    if sess.target.is_like_msvc {
-        if let Some(ref tool) = msvc_tool {
-            cmd.args(tool.args());
-            for &(ref k, ref v) in tool.env() {
-                if k == "PATH" {
-                    new_path.extend(env::split_paths(v));
-                    msvc_changed_path = true;
-                } else {
-                    cmd.env(k, v);
-                }
-            }
-        }
-    }
-
-    if !msvc_changed_path {
-        if let Some(path) = env::var_os("PATH") {
-            new_path.extend(env::split_paths(&path));
-        }
-    }
-    cmd.env("PATH", env::join_paths(new_path).unwrap());
-
-    cmd
-}
-
 pub fn each_linked_rlib(
     info: &CrateInfo,
     f: &mut dyn FnMut(CrateNum, &Path),
 ) -> Result<(), String> {
-    let crates = info.used_crates_static.iter();
+    let crates = info.used_crates.iter();
     let mut fmts = None;
     for (ty, list) in info.dependency_formats.iter() {
         match ty {
@@ -256,22 +169,23 @@ pub fn each_linked_rlib(
         Some(f) => f,
         None => return Err("could not find formats for rlibs".to_string()),
     };
-    for &(cnum, ref path) in crates {
+    for &cnum in crates {
         match fmts.get(cnum.as_usize() - 1) {
             Some(&Linkage::NotLinked | &Linkage::IncludedFromDylib) => continue,
             Some(_) => {}
             None => return Err("could not find formats for rlibs".to_string()),
         }
         let name = &info.crate_name[&cnum];
-        let path = match *path {
-            LibSource::Some(ref p) => p,
-            LibSource::MetadataOnly => {
-                return Err(format!(
-                    "could not find rlib for: `{}`, found rmeta (metadata) file",
-                    name
-                ));
-            }
-            LibSource::None => return Err(format!("could not find rlib for: `{}`", name)),
+        let used_crate_source = &info.used_crate_source[&cnum];
+        let path = if let Some((path, _)) = &used_crate_source.rlib {
+            path
+        } else if used_crate_source.rmeta.is_some() {
+            return Err(format!(
+                "could not find rlib for: `{}`, found rmeta (metadata) file",
+                name
+            ));
+        } else {
+            return Err(format!("could not find rlib for: `{}`", name));
         };
         f(cnum, &path);
     }
@@ -345,7 +259,7 @@ fn link_rlib<'a, B: ArchiveBuilder<'a>>(
     }
 
     for (raw_dylib_name, raw_dylib_imports) in
-        collate_raw_dylibs(&codegen_results.crate_info.used_libraries)
+        collate_raw_dylibs(sess, &codegen_results.crate_info.used_libraries)
     {
         ab.inject_dll_import_lib(&raw_dylib_name, &raw_dylib_imports, tmpdir);
     }
@@ -537,8 +451,11 @@ fn link_rlib<'a, B: ArchiveBuilder<'a>>(
 /// then the CodegenResults value contains one NativeLib instance for each block.  However, the
 /// linker appears to expect only a single import library for each library used, so we need to
 /// collate the symbols together by library name before generating the import libraries.
-fn collate_raw_dylibs(used_libraries: &[NativeLib]) -> Vec<(String, Vec<DllImport>)> {
-    let mut dylib_table: FxHashMap<String, FxHashSet<Symbol>> = FxHashMap::default();
+fn collate_raw_dylibs(
+    sess: &Session,
+    used_libraries: &[NativeLib],
+) -> Vec<(String, Vec<DllImport>)> {
+    let mut dylib_table: FxHashMap<String, FxHashSet<DllImport>> = FxHashMap::default();
 
     for lib in used_libraries {
         if lib.kind == NativeLibKind::RawDylib {
@@ -550,35 +467,51 @@ fn collate_raw_dylibs(used_libraries: &[NativeLib]) -> Vec<(String, Vec<DllImpor
             } else {
                 format!("{}.dll", name)
             };
-            dylib_table
-                .entry(name)
-                .or_default()
-                .extend(lib.dll_imports.iter().map(|import| import.name));
+            dylib_table.entry(name).or_default().extend(lib.dll_imports.iter().cloned());
         }
     }
 
-    // FIXME: when we add support for ordinals, fix this to propagate ordinals.  Also figure out
-    // what we should do if we have two DllImport values with the same name but different
-    // ordinals.
-    let mut result = dylib_table
+    // Rustc already signals an error if we have two imports with the same name but different
+    // calling conventions (or function signatures), so we don't have pay attention to those
+    // when ordering.
+    // FIXME: when we add support for ordinals, figure out if we need to do anything if we
+    // have two DllImport values with the same name but different ordinals.
+    let mut result: Vec<(String, Vec<DllImport>)> = dylib_table
         .into_iter()
-        .map(|(lib_name, imported_names)| {
-            let mut names = imported_names
-                .iter()
-                .map(|name| DllImport { name: *name, ordinal: None })
-                .collect::<Vec<_>>();
-            names.sort_unstable_by(|a: &DllImport, b: &DllImport| {
-                match a.name.as_str().cmp(&b.name.as_str()) {
-                    Ordering::Equal => a.ordinal.cmp(&b.ordinal),
-                    x => x,
-                }
-            });
-            (lib_name, names)
+        .map(|(lib_name, import_table)| {
+            let mut imports = Vec::from_iter(import_table.into_iter());
+            imports.sort_unstable_by_key(|x: &DllImport| x.name.as_str());
+            (lib_name, imports)
         })
         .collect::<Vec<_>>();
     result.sort_unstable_by(|a: &(String, Vec<DllImport>), b: &(String, Vec<DllImport>)| {
         a.0.cmp(&b.0)
     });
+    let result = result;
+
+    // Check for multiple imports with the same name but different calling conventions or
+    // (when relevant) argument list sizes.  Rustc only signals an error for this if the
+    // declarations are at the same scope level; if one shadows the other, we only get a lint
+    // warning.
+    for (library, imports) in &result {
+        let mut import_table: FxHashMap<Symbol, DllCallingConvention> = FxHashMap::default();
+        for import in imports {
+            if let Some(old_convention) =
+                import_table.insert(import.name, import.calling_convention)
+            {
+                if import.calling_convention != old_convention {
+                    sess.span_fatal(
+                        import.span,
+                        &format!(
+                            "multiple definitions of external function `{}` from library `{}` have different calling conventions",
+                            import.name,
+                            library,
+                    ));
+                }
+            }
+        }
+    }
+
     result
 }
 
@@ -912,14 +845,23 @@ fn link_natively<'a, B: ArchiveBuilder<'a>>(
             if !prog.status.success() {
                 let mut output = prog.stderr.clone();
                 output.extend_from_slice(&prog.stdout);
-                sess.struct_err(&format!(
+                let escaped_output = escape_stdout_stderr_string(&output);
+                let mut err = sess.struct_err(&format!(
                     "linking with `{}` failed: {}",
                     linker_path.display(),
                     prog.status
-                ))
-                .note(&format!("{:?}", &cmd))
-                .note(&escape_stdout_stderr_string(&output))
-                .emit();
+                ));
+                err.note(&format!("{:?}", &cmd)).note(&escaped_output);
+                if escaped_output.contains("undefined reference to") {
+                    err.help(
+                        "some `extern` functions couldn't be found; some native libraries may \
+                         need to be installed or have their path specified",
+                    );
+                    err.note("use the `-l` flag to specify native libraries to link");
+                    err.note("use the `cargo:rustc-link-lib` directive to specify the native \
+                              libraries to link with Cargo (see https://doc.rust-lang.org/cargo/reference/build-scripts.html#cargorustc-link-libkindname)");
+                }
+                err.emit();
 
                 // If MSVC's `link.exe` was expected but the return code
                 // is not a Microsoft LNK error then suggest a way to fix or
@@ -1750,8 +1692,19 @@ fn add_rpath_args(
     // where extern libraries might live, based on the
     // add_lib_search_paths
     if sess.opts.cg.rpath {
+        let libs = codegen_results
+            .crate_info
+            .used_crates
+            .iter()
+            .filter_map(|cnum| {
+                codegen_results.crate_info.used_crate_source[cnum]
+                    .dylib
+                    .as_ref()
+                    .map(|(path, _)| &**path)
+            })
+            .collect::<Vec<_>>();
         let mut rpath_config = RPathConfig {
-            used_crates: &codegen_results.crate_info.used_crates_dynamic,
+            libs: &*libs,
             out_filename: out_filename.to_path_buf(),
             has_rpath: sess.target.has_rpath,
             is_like_osx: sess.target.is_like_osx,
@@ -1779,11 +1732,13 @@ fn linker_with_args<'a, B: ArchiveBuilder<'a>>(
     codegen_results: &CodegenResults,
 ) -> Command {
     let crt_objects_fallback = crt_objects_fallback(sess, crate_type);
-    let base_cmd = get_linker(sess, path, flavor, crt_objects_fallback);
-    // FIXME: Move `/LIBPATH` addition for uwp targets from the linker construction
-    // to the linker args construction.
-    assert!(base_cmd.get_args().is_empty() || sess.target.vendor == "uwp");
-    let cmd = &mut *codegen_results.linker_info.to_linker(base_cmd, &sess, flavor);
+    let cmd = &mut *super::linker::get_linker(
+        sess,
+        path,
+        flavor,
+        crt_objects_fallback,
+        &codegen_results.crate_info.target_cpu,
+    );
     let link_output_kind = link_output_kind(sess, crate_type);
 
     // ------------ Early order-dependent options ------------
@@ -1793,7 +1748,11 @@ fn linker_with_args<'a, B: ArchiveBuilder<'a>>(
     // dynamic library.
     // Must be passed before any libraries to prevent the symbols to export from being thrown away,
     // at least on some platforms (e.g. windows-gnu).
-    cmd.export_symbols(tmpdir, crate_type);
+    cmd.export_symbols(
+        tmpdir,
+        crate_type,
+        &codegen_results.crate_info.exported_symbols[&crate_type],
+    );
 
     // Can be used for adding custom CRT objects or overriding order-dependent options above.
     // FIXME: In practice built-in target specs use this for arbitrary order-independent options,
@@ -1965,10 +1924,10 @@ fn add_order_independent_options(
     if flavor == LinkerFlavor::PtxLinker {
         // Provide the linker with fallback to internal `target-cpu`.
         cmd.arg("--fallback-arch");
-        cmd.arg(&codegen_results.linker_info.target_cpu);
+        cmd.arg(&codegen_results.crate_info.target_cpu);
     } else if flavor == LinkerFlavor::BpfLinker {
         cmd.arg("--cpu");
-        cmd.arg(&codegen_results.linker_info.target_cpu);
+        cmd.arg(&codegen_results.crate_info.target_cpu);
         cmd.arg("--cpu-features");
         cmd.arg(match &sess.opts.cg.target_feature {
             feat if !feat.is_empty() => feat,
@@ -2112,7 +2071,7 @@ fn add_upstream_rust_crates<'a, B: ArchiveBuilder<'a>>(
 
     // Invoke get_used_crates to ensure that we get a topological sorting of
     // crates.
-    let deps = &codegen_results.crate_info.used_crates_dynamic;
+    let deps = &codegen_results.crate_info.used_crates;
 
     // There's a few internal crates in the standard library (aka libcore and
     // libstd) which actually have a circular dependence upon one another. This
@@ -2140,7 +2099,7 @@ fn add_upstream_rust_crates<'a, B: ArchiveBuilder<'a>>(
     let mut required = FxHashSet::default();
 
     let info = &codegen_results.crate_info;
-    for &(cnum, _) in deps.iter().rev() {
+    for &cnum in deps.iter().rev() {
         if let Some(missing) = info.missing_lang_items.get(&cnum) {
             let missing_crates = missing.iter().map(|i| info.lang_item_to_crate.get(i).copied());
             required.extend(missing_crates);
@@ -2167,7 +2126,7 @@ fn add_upstream_rust_crates<'a, B: ArchiveBuilder<'a>>(
 
     let mut compiler_builtins = None;
 
-    for &(cnum, _) in deps.iter() {
+    for &cnum in deps.iter() {
         if group_start == Some(cnum) {
             cmd.group_start();
         }
@@ -2379,9 +2338,9 @@ fn add_upstream_native_libraries(
         .find(|(ty, _)| *ty == crate_type)
         .expect("failed to find crate type in dependency format list");
 
-    let crates = &codegen_results.crate_info.used_crates_static;
+    let crates = &codegen_results.crate_info.used_crates;
     let mut last = (NativeLibKind::Unspecified, None);
-    for &(cnum, _) in crates {
+    for &cnum in crates {
         for lib in codegen_results.crate_info.native_libraries[&cnum].iter() {
             let name = match lib.name {
                 Some(l) => l,

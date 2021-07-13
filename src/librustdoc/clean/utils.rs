@@ -3,10 +3,13 @@ use crate::clean::blanket_impl::BlanketImplFinder;
 use crate::clean::{
     inline, Clean, Crate, Generic, GenericArg, GenericArgs, ImportSource, Item, ItemKind, Lifetime,
     Path, PathSegment, PolyTrait, Primitive, PrimitiveType, ResolvedPath, Type, TypeBinding,
+    Visibility,
 };
 use crate::core::DocContext;
 use crate::formats::item_type::ItemType;
 
+use rustc_ast as ast;
+use rustc_ast::tokenstream::TokenTree;
 use rustc_hir as hir;
 use rustc_hir::def::{DefKind, Res};
 use rustc_hir::def_id::{DefId, LOCAL_CRATE};
@@ -14,6 +17,7 @@ use rustc_middle::mir::interpret::ConstValue;
 use rustc_middle::ty::subst::{GenericArgKind, SubstsRef};
 use rustc_middle::ty::{self, DefIdTree, TyCtxt};
 use rustc_span::symbol::{kw, sym, Symbol};
+use std::fmt::Write as _;
 use std::mem;
 
 #[cfg(test)]
@@ -30,7 +34,7 @@ crate fn krate(cx: &mut DocContext<'_>) -> Crate {
     cx.cache.owned_box_did = cx.tcx.lang_items().owned_box();
 
     let mut externs = Vec::new();
-    for &cnum in cx.tcx.crates().iter() {
+    for &cnum in cx.tcx.crates(()).iter() {
         externs.push((cnum, cnum.clean(cx)));
         // Analyze doc-reachability for extern items
         LibEmbargoVisitor::new(cx).visit_lib(cnum);
@@ -245,22 +249,6 @@ crate fn build_deref_target_impls(cx: &mut DocContext<'_>, items: &[Item], ret: 
                 inline::build_impls(cx, None, did, None, ret);
             }
         }
-    }
-}
-
-crate trait ToSource {
-    fn to_src(&self, cx: &DocContext<'_>) -> String;
-}
-
-impl ToSource for rustc_span::Span {
-    fn to_src(&self, cx: &DocContext<'_>) -> String {
-        debug!("converting span {:?} to snippet", self);
-        let sn = match cx.sess().source_map().span_to_snippet(*self) {
-            Ok(x) => x,
-            Err(_) => String::new(),
-        };
-        debug!("got snippet {}", sn);
-        sn
     }
 }
 
@@ -572,3 +560,56 @@ crate fn has_doc_flag(attrs: ty::Attributes<'_>, flag: Symbol) -> bool {
 ///
 /// Set by `bootstrap::Builder::doc_rust_lang_org_channel` in order to keep tests passing on beta/stable.
 crate const DOC_RUST_LANG_ORG_CHANNEL: &'static str = env!("DOC_RUST_LANG_ORG_CHANNEL");
+
+/// Render a sequence of macro arms in a format suitable for displaying to the user
+/// as part of an item declaration.
+pub(super) fn render_macro_arms<'a>(
+    matchers: impl Iterator<Item = &'a TokenTree>,
+    arm_delim: &str,
+) -> String {
+    let mut out = String::new();
+    for matcher in matchers {
+        writeln!(out, "    {} => {{ ... }}{}", render_macro_matcher(matcher), arm_delim).unwrap();
+    }
+    out
+}
+
+/// Render a macro matcher in a format suitable for displaying to the user
+/// as part of an item declaration.
+pub(super) fn render_macro_matcher(matcher: &TokenTree) -> String {
+    rustc_ast_pretty::pprust::tt_to_string(matcher)
+}
+
+pub(super) fn display_macro_source(
+    cx: &mut DocContext<'_>,
+    name: Symbol,
+    def: &ast::MacroDef,
+    def_id: DefId,
+    vis: impl Clean<Visibility>,
+) -> String {
+    let tts: Vec<_> = def.body.inner_tokens().into_trees().collect();
+    // Extract the spans of all matchers. They represent the "interface" of the macro.
+    let matchers = tts.chunks(4).map(|arm| &arm[0]);
+
+    if def.macro_rules {
+        format!("macro_rules! {} {{\n{}}}", name, render_macro_arms(matchers, ";"))
+    } else {
+        let vis = vis.clean(cx);
+
+        if matchers.len() <= 1 {
+            format!(
+                "{}macro {}{} {{\n    ...\n}}",
+                vis.to_src_with_space(cx.tcx, def_id),
+                name,
+                matchers.map(render_macro_matcher).collect::<String>(),
+            )
+        } else {
+            format!(
+                "{}macro {} {{\n{}}}",
+                vis.to_src_with_space(cx.tcx, def_id),
+                name,
+                render_macro_arms(matchers, ","),
+            )
+        }
+    }
+}

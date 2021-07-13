@@ -8,7 +8,7 @@
 #![feature /* 0#0 */(no_core)]
 #![no_core /* 0#0 */]
 
-macro_rules! foo /* 0#0 */ { ($ x : ident) => { y + $ x } }
+macro_rules! foo /* 0#0 */ { ($x : ident) => { y + $x } }
 
 fn bar /* 0#0 */() {
     let x /* 0#0 */ = 1;
@@ -20,7 +20,7 @@ fn y /* 0#0 */() { }
 /*
 Expansions:
 0: parent: ExpnId(0), call_site_ctxt: #0, def_site_ctxt: #0, kind: Root
-1: parent: ExpnId(0), call_site_ctxt: #0, def_site_ctxt: #0, kind: Macro { kind: Bang, name: "foo", proc_macro: false }
+1: parent: ExpnId(0), call_site_ctxt: #0, def_site_ctxt: #0, kind: Macro(Bang, "foo")
 
 SyntaxContexts:
 #0: parent: #0, outer_mark: (ExpnId(0), Opaque)

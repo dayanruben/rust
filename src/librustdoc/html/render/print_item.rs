@@ -133,7 +133,7 @@ pub(super) fn print_item(cx: &Context<'_>, item: &clean::Item, buf: &mut Buffer,
         clean::StructItem(ref s) => item_struct(buf, cx, item, s),
         clean::UnionItem(ref s) => item_union(buf, cx, item, s),
         clean::EnumItem(ref e) => item_enum(buf, cx, item, e),
-        clean::TypedefItem(ref t, _) => item_typedef(buf, cx, item, t),
+        clean::TypedefItem(ref t, is_associated) => item_typedef(buf, cx, item, t, is_associated),
         clean::MacroItem(ref m) => item_macro(buf, cx, item, m),
         clean::ProcMacroItem(ref m) => item_proc_macro(buf, cx, item, m),
         clean::PrimitiveItem(_) => item_primitive(buf, cx, item),
@@ -289,7 +289,7 @@ fn item_module(w: &mut Buffer, cx: &Context<'_>, item: &clean::Item, items: &[cl
                         w,
                         "<div class=\"item-left\"><code>{}extern crate {} as {};",
                         myitem.visibility.print_with_space(myitem.def_id, cx),
-                        anchor(myitem.def_id.expect_real(), &*src.as_str(), cx),
+                        anchor(myitem.def_id.expect_def_id(), &*src.as_str(), cx),
                         myitem.name.as_ref().unwrap(),
                     ),
                     None => write!(
@@ -297,7 +297,7 @@ fn item_module(w: &mut Buffer, cx: &Context<'_>, item: &clean::Item, items: &[cl
                         "<div class=\"item-left\"><code>{}extern crate {};",
                         myitem.visibility.print_with_space(myitem.def_id, cx),
                         anchor(
-                            myitem.def_id.expect_real(),
+                            myitem.def_id.expect_def_id(),
                             &*myitem.name.as_ref().unwrap().as_str(),
                             cx
                         ),
@@ -669,9 +669,9 @@ fn item_trait(w: &mut Buffer, cx: &Context<'_>, it: &clean::Item, t: &clean::Tra
     }
 
     // If there are methods directly on this trait object, render them here.
-    render_assoc_items(w, cx, it, it.def_id.expect_real(), AssocItemRender::All);
+    render_assoc_items(w, cx, it, it.def_id.expect_def_id(), AssocItemRender::All);
 
-    if let Some(implementors) = cx.cache.implementors.get(&it.def_id.expect_real()) {
+    if let Some(implementors) = cx.cache.implementors.get(&it.def_id.expect_def_id()) {
         // The DefId is for the first Type found with that name. The bool is
         // if any Types with the same name but different DefId have been found.
         let mut implementor_dups: FxHashMap<Symbol, (DefId, bool)> = FxHashMap::default();
@@ -787,7 +787,7 @@ fn item_trait(w: &mut Buffer, cx: &Context<'_>, it: &clean::Item, t: &clean::Tra
         path = if it.def_id.is_local() {
             cx.current.join("/")
         } else {
-            let (ref path, _) = cx.cache.external_paths[&it.def_id.expect_real()];
+            let (ref path, _) = cx.cache.external_paths[&it.def_id.expect_def_id()];
             path[..path.len() - 1].join("/")
         },
         ty = it.type_(),
@@ -813,7 +813,7 @@ fn item_trait_alias(w: &mut Buffer, cx: &Context<'_>, it: &clean::Item, t: &clea
     // won't be visible anywhere in the docs. It would be nice to also show
     // associated items from the aliased type (see discussion in #32077), but
     // we need #14072 to make sense of the generics.
-    render_assoc_items(w, cx, it, it.def_id.expect_real(), AssocItemRender::All)
+    render_assoc_items(w, cx, it, it.def_id.expect_def_id(), AssocItemRender::All)
 }
 
 fn item_opaque_ty(w: &mut Buffer, cx: &Context<'_>, it: &clean::Item, t: &clean::OpaqueTy) {
@@ -834,12 +834,21 @@ fn item_opaque_ty(w: &mut Buffer, cx: &Context<'_>, it: &clean::Item, t: &clean:
     // won't be visible anywhere in the docs. It would be nice to also show
     // associated items from the aliased type (see discussion in #32077), but
     // we need #14072 to make sense of the generics.
-    render_assoc_items(w, cx, it, it.def_id.expect_real(), AssocItemRender::All)
+    render_assoc_items(w, cx, it, it.def_id.expect_def_id(), AssocItemRender::All)
 }
 
-fn item_typedef(w: &mut Buffer, cx: &Context<'_>, it: &clean::Item, t: &clean::Typedef) {
+fn item_typedef(
+    w: &mut Buffer,
+    cx: &Context<'_>,
+    it: &clean::Item,
+    t: &clean::Typedef,
+    is_associated: bool,
+) {
     w.write_str("<pre class=\"rust typedef\">");
     render_attributes_in_pre(w, it, "");
+    if !is_associated {
+        write!(w, "{}", it.visibility.print_with_space(it.def_id, cx));
+    }
     write!(
         w,
         "type {}{}{where_clause} = {type_};</pre>",
@@ -851,7 +860,7 @@ fn item_typedef(w: &mut Buffer, cx: &Context<'_>, it: &clean::Item, t: &clean::T
 
     document(w, cx, it, None);
 
-    let def_id = it.def_id.expect_real();
+    let def_id = it.def_id.expect_def_id();
     // Render any items associated directly to this alias, as otherwise they
     // won't be visible anywhere in the docs. It would be nice to also show
     // associated items from the aliased type (see discussion in #32077), but
@@ -903,7 +912,7 @@ fn item_union(w: &mut Buffer, cx: &Context<'_>, it: &clean::Item, s: &clean::Uni
             document(w, cx, field, Some(it));
         }
     }
-    let def_id = it.def_id.expect_real();
+    let def_id = it.def_id.expect_def_id();
     render_assoc_items(w, cx, it, def_id, AssocItemRender::All);
     document_type_layout(w, cx, def_id);
 }
@@ -1041,7 +1050,7 @@ fn item_enum(w: &mut Buffer, cx: &Context<'_>, it: &clean::Item, e: &clean::Enum
             }
         }
     }
-    let def_id = it.def_id.expect_real();
+    let def_id = it.def_id.expect_def_id();
     render_assoc_items(w, cx, it, def_id, AssocItemRender::All);
     document_type_layout(w, cx, def_id);
 }
@@ -1093,7 +1102,7 @@ fn item_proc_macro(w: &mut Buffer, cx: &Context<'_>, it: &clean::Item, m: &clean
 
 fn item_primitive(w: &mut Buffer, cx: &Context<'_>, it: &clean::Item) {
     document(w, cx, it, None);
-    render_assoc_items(w, cx, it, it.def_id.expect_real(), AssocItemRender::All)
+    render_assoc_items(w, cx, it, it.def_id.expect_def_id(), AssocItemRender::All)
 }
 
 fn item_constant(w: &mut Buffer, cx: &Context<'_>, it: &clean::Item, c: &clean::Constant) {
@@ -1182,7 +1191,7 @@ fn item_struct(w: &mut Buffer, cx: &Context<'_>, it: &clean::Item, s: &clean::St
             }
         }
     }
-    let def_id = it.def_id.expect_real();
+    let def_id = it.def_id.expect_def_id();
     render_assoc_items(w, cx, it, def_id, AssocItemRender::All);
     document_type_layout(w, cx, def_id);
 }
@@ -1213,7 +1222,7 @@ fn item_foreign_type(w: &mut Buffer, cx: &Context<'_>, it: &clean::Item) {
 
     document(w, cx, it, None);
 
-    render_assoc_items(w, cx, it, it.def_id.expect_real(), AssocItemRender::All)
+    render_assoc_items(w, cx, it, it.def_id.expect_def_id(), AssocItemRender::All)
 }
 
 fn item_keyword(w: &mut Buffer, cx: &Context<'_>, it: &clean::Item) {

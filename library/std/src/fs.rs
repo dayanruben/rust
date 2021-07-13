@@ -880,8 +880,7 @@ impl OpenOptions {
     /// This function will return an error under a number of different
     /// circumstances. Some of these error conditions are listed here, together
     /// with their [`io::ErrorKind`]. The mapping to [`io::ErrorKind`]s is not
-    /// part of the compatibility contract of the function, especially the
-    /// [`Other`] kind might change to more specific kinds in the future.
+    /// part of the compatibility contract of the function.
     ///
     /// * [`NotFound`]: The specified file does not exist and neither `create`
     ///   or `create_new` is set.
@@ -895,9 +894,11 @@ impl OpenOptions {
     ///   exists.
     /// * [`InvalidInput`]: Invalid combinations of open options (truncate
     ///   without write access, no access mode set, etc.).
-    /// * [`Other`]: One of the directory components of the specified file path
+    ///
+    /// The following errors don't match any existing [`io::ErrorKind`] at the moment:
+    /// * One of the directory components of the specified file path
     ///   was not, in fact, a directory.
-    /// * [`Other`]: Filesystem-level errors: full disk, write permission
+    /// * Filesystem-level errors: full disk, write permission
     ///   requested on a read-only file system, exceeded disk quota, too many
     ///   open files, too long filename, too many symbolic links in the
     ///   specified path (Unix-like systems only), etc.
@@ -913,7 +914,6 @@ impl OpenOptions {
     /// [`AlreadyExists`]: io::ErrorKind::AlreadyExists
     /// [`InvalidInput`]: io::ErrorKind::InvalidInput
     /// [`NotFound`]: io::ErrorKind::NotFound
-    /// [`Other`]: io::ErrorKind::Other
     /// [`PermissionDenied`]: io::ErrorKind::PermissionDenied
     #[stable(feature = "rust1", since = "1.0.0")]
     pub fn open<P: AsRef<Path>>(&self, path: P) -> io::Result<File> {
@@ -1551,7 +1551,6 @@ impl AsInner<fs_imp::DirEntry> for DirEntry {
 ///     Ok(())
 /// }
 /// ```
-#[doc(alias = "delete")]
 #[stable(feature = "rust1", since = "1.0.0")]
 pub fn remove_file<P: AsRef<Path>>(path: P) -> io::Result<()> {
     fs_imp::unlink(path.as_ref())
@@ -1737,8 +1736,11 @@ pub fn copy<P: AsRef<Path>, Q: AsRef<Path>>(from: P, to: Q) -> io::Result<u64> {
 ///
 /// # Platform-specific behavior
 ///
-/// This function currently corresponds to the `linkat` function with no flags
-/// on Unix and the `CreateHardLink` function on Windows.
+/// This function currently corresponds the `CreateHardLink` function on Windows.
+/// On most Unix systems, it corresponds to the `linkat` function with no flags.
+/// On Android, VxWorks, and Redox, it instead corresponds to the `link` function.
+/// On MacOS, it uses the `linkat` function if it is available, but on very old
+/// systems where `linkat` is not available, `link` is selected at runtime instead.
 /// Note that, this [may change in the future][changes].
 ///
 /// [changes]: io#platform-specific-behavior
@@ -1986,7 +1988,6 @@ pub fn create_dir_all<P: AsRef<Path>>(path: P) -> io::Result<()> {
 ///     Ok(())
 /// }
 /// ```
-#[doc(alias = "delete")]
 #[stable(feature = "rust1", since = "1.0.0")]
 pub fn remove_dir<P: AsRef<Path>>(path: P) -> io::Result<()> {
     fs_imp::rmdir(path.as_ref())
@@ -2024,7 +2025,6 @@ pub fn remove_dir<P: AsRef<Path>>(path: P) -> io::Result<()> {
 ///     Ok(())
 /// }
 /// ```
-#[doc(alias = "delete")]
 #[stable(feature = "rust1", since = "1.0.0")]
 pub fn remove_dir_all<P: AsRef<Path>>(path: P) -> io::Result<()> {
     fs_imp::remove_dir_all(path.as_ref())
@@ -2216,7 +2216,7 @@ impl DirBuilder {
             Some(p) => self.create_dir_all(p)?,
             None => {
                 return Err(io::Error::new_const(
-                    io::ErrorKind::Other,
+                    io::ErrorKind::Uncategorized,
                     &"failed to create whole tree",
                 ));
             }

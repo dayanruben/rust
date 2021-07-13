@@ -14,6 +14,12 @@ rustc_queries! {
         desc { "trigger a delay span bug" }
     }
 
+    query resolutions(_: ()) -> &'tcx ty::ResolverOutputs {
+        eval_always
+        no_hash
+        desc { "get the resolver outputs" }
+    }
+
     /// Represents crate as a whole (as distinct from the top-level crate module).
     /// If you call `hir_crate` (e.g., indirectly by calling `tcx.hir().krate()`),
     /// we will have to assume that any change means that you need to be recompiled.
@@ -207,7 +213,6 @@ rustc_queries! {
     }
 
     query expn_that_defined(key: DefId) -> rustc_span::ExpnId {
-        eval_always
         desc { |tcx| "expansion that defined `{}`", tcx.def_path_str(key) }
     }
 
@@ -916,6 +921,10 @@ rustc_queries! {
         desc { |tcx| "looking up const stability of `{}`", tcx.def_path_str(def_id) }
     }
 
+    query should_inherit_track_caller(def_id: DefId) -> bool {
+        desc { |tcx| "computing should_inherit_track_caller of `{}`", tcx.def_path_str(def_id) }
+    }
+
     query lookup_deprecation_entry(def_id: DefId) -> Option<DeprecationEntry> {
         desc { |tcx| "checking whether `{}` is deprecated", tcx.def_path_str(def_id) }
     }
@@ -1129,11 +1138,14 @@ rustc_queries! {
 
     query module_exports(def_id: LocalDefId) -> Option<&'tcx [Export<LocalDefId>]> {
         desc { |tcx| "looking up items exported by `{}`", tcx.def_path_str(def_id.to_def_id()) }
-        eval_always
     }
 
     query impl_defaultness(def_id: DefId) -> hir::Defaultness {
         desc { |tcx| "looking up whether `{}` is a default impl", tcx.def_path_str(def_id) }
+    }
+
+    query impl_constness(def_id: DefId) -> hir::Constness {
+        desc { |tcx| "looking up whether `{}` is a const impl", tcx.def_path_str(def_id) }
     }
 
     query check_item_well_formed(key: LocalDefId) -> () {
@@ -1233,10 +1245,6 @@ rustc_queries! {
     query proc_macro_decls_static(_: ()) -> Option<LocalDefId> {
         desc { "looking up the derive registrar for a crate" }
     }
-    query crate_disambiguator(_: CrateNum) -> CrateDisambiguator {
-        eval_always
-        desc { "looking up the disambiguator a crate" }
-    }
     // The macro which defines `rustc_metadata::provide_extern` depends on this query's name.
     // Changing the name should cause a compiler error, but in case that changes, be aware.
     query crate_hash(_: CrateNum) -> Svh {
@@ -1323,7 +1331,6 @@ rustc_queries! {
     }
 
     query visibility(def_id: DefId) -> ty::Visibility {
-        eval_always
         desc { |tcx| "computing visibility of `{}`", tcx.def_path_str(def_id) }
     }
 
@@ -1348,8 +1355,6 @@ rustc_queries! {
         desc { |tcx| "collecting child items of `{}`", tcx.def_path_str(def_id) }
     }
     query extern_mod_stmt_cnum(def_id: LocalDefId) -> Option<CrateNum> {
-        // This depends on untracked global state (`tcx.extern_crate_map`)
-        eval_always
         desc { |tcx| "computing crate imported by `{}`", tcx.def_path_str(def_id.to_def_id()) }
     }
 
@@ -1426,16 +1431,12 @@ rustc_queries! {
         eval_always
     }
     query maybe_unused_trait_import(def_id: LocalDefId) -> bool {
-        eval_always
         desc { |tcx| "maybe_unused_trait_import for `{}`", tcx.def_path_str(def_id.to_def_id()) }
     }
     query maybe_unused_extern_crates(_: ()) -> &'tcx [(LocalDefId, Span)] {
-        eval_always
         desc { "looking up all possibly unused extern crates" }
     }
-    query names_imported_by_glob_use(def_id: LocalDefId)
-        -> &'tcx FxHashSet<Symbol> {
-        eval_always
+    query names_imported_by_glob_use(def_id: LocalDefId) -> &'tcx FxHashSet<Symbol> {
         desc { |tcx| "names_imported_by_glob_use for `{}`", tcx.def_path_str(def_id.to_def_id()) }
     }
 
@@ -1444,8 +1445,7 @@ rustc_queries! {
         eval_always
         desc { "calculating the stability index for the local crate" }
     }
-    query all_crate_nums(_: ()) -> &'tcx [CrateNum] {
-        eval_always
+    query crates(_: ()) -> &'tcx [CrateNum] {
         desc { "fetching all foreign CrateNum instances" }
     }
 
@@ -1557,12 +1557,6 @@ rustc_queries! {
         NoSolution
     > {
         desc { "evaluating trait selection obligation `{}`", goal.value }
-    }
-
-    query type_implements_trait(
-        key: (DefId, Ty<'tcx>, SubstsRef<'tcx>, ty::ParamEnv<'tcx>, )
-    ) -> bool {
-        desc { "evaluating `type_implements_trait` `{:?}`", key }
     }
 
     /// Do not call this query directly: part of the `Eq` type-op
@@ -1711,5 +1705,9 @@ rustc_queries! {
     /// size, to account for partial initialisation. See #49298 for details.)
     query conservative_is_privately_uninhabited(key: ty::ParamEnvAnd<'tcx, Ty<'tcx>>) -> bool {
         desc { "conservatively checking if {:?} is privately uninhabited", key }
+    }
+
+    query limits(key: ()) -> Limits {
+        desc { "looking up limits" }
     }
 }

@@ -445,7 +445,7 @@ impl<'a, 'tcx> EncodeContext<'a, 'tcx> {
     }
 
     fn encode_def_path_table(&mut self) {
-        let table = self.tcx.hir().definitions().def_path_table();
+        let table = self.tcx.resolutions(()).definitions.def_path_table();
         if self.is_proc_macro {
             for def_index in std::iter::once(CRATE_DEF_INDEX)
                 .chain(self.tcx.hir().krate().proc_macros.iter().map(|p| p.owner.local_def_index))
@@ -671,7 +671,6 @@ impl<'a, 'tcx> EncodeContext<'a, 'tcx> {
             extra_filename: tcx.sess.opts.cg.extra_filename.clone(),
             triple: tcx.sess.opts.target_triple.clone(),
             hash: tcx.crate_hash(LOCAL_CRATE),
-            disambiguator: tcx.sess.local_crate_disambiguator(),
             stable_crate_id: tcx.def_path_hash(LOCAL_CRATE.as_def_id()).stable_crate_id(),
             panic_strategy: tcx.sess.panic_strategy(),
             edition: tcx.sess.edition(),
@@ -1063,7 +1062,7 @@ impl EncodeContext<'a, 'tcx> {
 
         let data = ModData {
             reexports,
-            expansion: tcx.hir().definitions().expansion_that_defined(local_def_id),
+            expansion: tcx.resolutions(()).definitions.expansion_that_defined(local_def_id),
         };
 
         record!(self.tables.kind[def_id] <- EntryKind::Mod(self.lazy(data)));
@@ -1223,7 +1222,12 @@ impl EncodeContext<'a, 'tcx> {
                 let fn_data = if let hir::ImplItemKind::Fn(ref sig, body) = ast_item.kind {
                     FnData {
                         asyncness: sig.header.asyncness,
-                        constness: sig.header.constness,
+                        // Can be inside `impl const Trait`, so using sig.header.constness is not reliable
+                        constness: if self.tcx.is_const_fn_raw(def_id) {
+                            hir::Constness::Const
+                        } else {
+                            hir::Constness::NotConst
+                        },
                         param_names: self.encode_fn_param_names_for_body(body),
                     }
                 } else {
@@ -1408,7 +1412,7 @@ impl EncodeContext<'a, 'tcx> {
                     adt_def.repr,
                 )
             }
-            hir::ItemKind::Impl(hir::Impl { defaultness, .. }) => {
+            hir::ItemKind::Impl(hir::Impl { defaultness, constness, .. }) => {
                 let trait_ref = self.tcx.impl_trait_ref(def_id);
                 let polarity = self.tcx.impl_polarity(def_id);
                 let parent = if let Some(trait_ref) = trait_ref {
@@ -1433,8 +1437,13 @@ impl EncodeContext<'a, 'tcx> {
                     }
                 });
 
-                let data =
-                    ImplData { polarity, defaultness, parent_impl: parent, coerce_unsized_info };
+                let data = ImplData {
+                    polarity,
+                    defaultness,
+                    constness,
+                    parent_impl: parent,
+                    coerce_unsized_info,
+                };
 
                 EntryKind::Impl(self.lazy(data))
             }
@@ -1668,7 +1677,7 @@ impl EncodeContext<'a, 'tcx> {
 
     fn encode_crate_deps(&mut self) -> Lazy<[CrateDep]> {
         empty_proc_macro!(self);
-        let crates = self.tcx.crates();
+        let crates = self.tcx.crates(());
 
         let mut deps = crates
             .iter()
@@ -1755,7 +1764,7 @@ impl EncodeContext<'a, 'tcx> {
             .map(|(trait_def_id, mut impls)| {
                 // Bring everything into deterministic order for hashing
                 impls.sort_by_cached_key(|&(index, _)| {
-                    tcx.hir().definitions().def_path_hash(LocalDefId { local_def_index: index })
+                    tcx.hir().def_path_hash(LocalDefId { local_def_index: index })
                 });
 
                 TraitImpls {

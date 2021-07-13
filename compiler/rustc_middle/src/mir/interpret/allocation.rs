@@ -8,12 +8,15 @@ use std::ptr;
 
 use rustc_ast::Mutability;
 use rustc_data_structures::sorted_map::SortedMap;
+use rustc_span::DUMMY_SP;
 use rustc_target::abi::{Align, HasDataLayout, Size};
 
 use super::{
-    read_target_uint, write_target_uint, AllocId, InterpError, Pointer, Scalar, ScalarMaybeUninit,
-    UndefinedBehaviorInfo, UninitBytesAccess, UnsupportedOpInfo,
+    read_target_uint, write_target_uint, AllocId, InterpError, InterpResult, Pointer,
+    ResourceExhaustionInfo, Scalar, ScalarMaybeUninit, UndefinedBehaviorInfo, UninitBytesAccess,
+    UnsupportedOpInfo,
 };
+use crate::ty;
 
 /// This type represents an Allocation in the Miri/CTFE core engine.
 ///
@@ -121,15 +124,33 @@ impl<Tag> Allocation<Tag> {
         Allocation::from_bytes(slice, Align::ONE, Mutability::Not)
     }
 
-    pub fn uninit(size: Size, align: Align) -> Self {
-        Allocation {
-            bytes: vec![0; size.bytes_usize()],
+    /// Try to create an Allocation of `size` bytes, failing if there is not enough memory
+    /// available to the compiler to do so.
+    pub fn uninit(size: Size, align: Align, panic_on_fail: bool) -> InterpResult<'static, Self> {
+        let mut bytes = Vec::new();
+        bytes.try_reserve(size.bytes_usize()).map_err(|_| {
+            // This results in an error that can happen non-deterministically, since the memory
+            // available to the compiler can change between runs. Normally queries are always
+            // deterministic. However, we can be non-determinstic here because all uses of const
+            // evaluation (including ConstProp!) will make compilation fail (via hard error
+            // or ICE) upon encountering a `MemoryExhausted` error.
+            if panic_on_fail {
+                panic!("Allocation::uninit called with panic_on_fail had allocation failure")
+            }
+            ty::tls::with(|tcx| {
+                tcx.sess.delay_span_bug(DUMMY_SP, "exhausted memory during interpreation")
+            });
+            InterpError::ResourceExhaustion(ResourceExhaustionInfo::MemoryExhausted)
+        })?;
+        bytes.resize(size.bytes_usize(), 0);
+        Ok(Allocation {
+            bytes,
             relocations: Relocations::new(),
             init_mask: InitMask::new(size, false),
             align,
             mutability: Mutability::Mut,
             extra: (),
-        }
+        })
     }
 }
 
@@ -340,6 +361,8 @@ impl<Tag: Copy, Extra> Allocation<Tag, Extra> {
         range: AllocRange,
         val: ScalarMaybeUninit<Tag>,
     ) -> AllocResult {
+        assert!(self.mutability == Mutability::Mut);
+
         let val = match val {
             ScalarMaybeUninit::Scalar(scalar) => scalar,
             ScalarMaybeUninit::Uninit => {
@@ -463,6 +486,7 @@ impl<Tag: Copy, Extra> Allocation<Tag, Extra> {
         if range.size.bytes() == 0 {
             return;
         }
+        assert!(self.mutability == Mutability::Mut);
         self.init_mask.set_range(range.start, range.end(), is_init);
     }
 }
@@ -488,7 +512,7 @@ impl InitMaskCompressed {
 /// Transferring the initialization mask to other allocations.
 impl<Tag, Extra> Allocation<Tag, Extra> {
     /// Creates a run-length encoding of the initialization mask.
-    pub fn compress_uninit_range(&self, src: Pointer<Tag>, size: Size) -> InitMaskCompressed {
+    pub fn compress_uninit_range(&self, range: AllocRange) -> InitMaskCompressed {
         // Since we are copying `size` bytes from `src` to `dest + i * size` (`for i in 0..repeat`),
         // a naive initialization mask copying algorithm would repeatedly have to read the initialization mask from
         // the source and write it to the destination. Even if we optimized the memory accesses,
@@ -502,13 +526,13 @@ impl<Tag, Extra> Allocation<Tag, Extra> {
         // where each element toggles the state.
 
         let mut ranges = smallvec::SmallVec::<[u64; 1]>::new();
-        let initial = self.init_mask.get(src.offset);
+        let initial = self.init_mask.get(range.start);
         let mut cur_len = 1;
         let mut cur = initial;
 
-        for i in 1..size.bytes() {
+        for i in 1..range.size.bytes() {
             // FIXME: optimize to bitshift the current uninitialized block's bits and read the top bit.
-            if self.init_mask.get(src.offset + Size::from_bytes(i)) == cur {
+            if self.init_mask.get(range.start + Size::from_bytes(i)) == cur {
                 cur_len += 1;
             } else {
                 ranges.push(cur_len);
@@ -526,24 +550,23 @@ impl<Tag, Extra> Allocation<Tag, Extra> {
     pub fn mark_compressed_init_range(
         &mut self,
         defined: &InitMaskCompressed,
-        dest: Pointer<Tag>,
-        size: Size,
+        range: AllocRange,
         repeat: u64,
     ) {
         // An optimization where we can just overwrite an entire range of initialization
         // bits if they are going to be uniformly `1` or `0`.
         if defined.ranges.len() <= 1 {
             self.init_mask.set_range_inbounds(
-                dest.offset,
-                dest.offset + size * repeat, // `Size` operations
+                range.start,
+                range.start + range.size * repeat, // `Size` operations
                 defined.initial,
             );
             return;
         }
 
         for mut j in 0..repeat {
-            j *= size.bytes();
-            j += dest.offset.bytes();
+            j *= range.size.bytes();
+            j += range.start.bytes();
             let mut cur = defined.initial;
             for range in &defined.ranges {
                 let old_j = j;

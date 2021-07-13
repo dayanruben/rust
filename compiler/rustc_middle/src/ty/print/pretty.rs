@@ -1437,7 +1437,7 @@ impl<F: fmt::Write> Printer<'tcx> for FmtPrinter<'_, 'tcx, F> {
     }
 
     fn print_type(mut self, ty: Ty<'tcx>) -> Result<Self::Type, Self::Error> {
-        let type_length_limit = self.tcx.sess.type_length_limit();
+        let type_length_limit = self.tcx.type_length_limit();
         if type_length_limit.value_within_limit(self.printed_type_count) {
             self.printed_type_count += 1;
             self.pretty_print_type(ty)
@@ -2248,7 +2248,7 @@ fn for_each_def(tcx: TyCtxt<'_>, mut collect_fn: impl for<'b> FnMut(&'b Ident, N
     let queue = &mut Vec::new();
     let mut seen_defs: DefIdSet = Default::default();
 
-    for &cnum in tcx.crates().iter() {
+    for &cnum in tcx.crates(()).iter() {
         let def_id = DefId { krate: cnum, index: CRATE_DEF_INDEX };
 
         // Ignore crates that are not direct dependencies.
@@ -2313,7 +2313,7 @@ fn trimmed_def_paths(tcx: TyCtxt<'_>, (): ()) -> FxHashMap<DefId, Symbol> {
     let unique_symbols_rev: &mut FxHashMap<(Namespace, Symbol), Option<DefId>> =
         &mut FxHashMap::default();
 
-    for symbol_set in tcx.glob_map.values() {
+    for symbol_set in tcx.resolutions(()).glob_map.values() {
         for symbol in symbol_set {
             unique_symbols_rev.insert((Namespace::TypeNS, *symbol), None);
             unique_symbols_rev.insert((Namespace::ValueNS, *symbol), None);

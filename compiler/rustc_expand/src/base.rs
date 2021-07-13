@@ -809,17 +809,10 @@ impl SyntaxExtension {
         call_site: Span,
         descr: Symbol,
         macro_def_id: Option<DefId>,
+        parent_module: Option<DefId>,
     ) -> ExpnData {
-        use SyntaxExtensionKind::*;
-        let proc_macro = match self.kind {
-            // User-defined proc macro
-            Bang(..) | Attr(..) | Derive(..) => true,
-            // Consider everthing else to be not a proc
-            // macro for diagnostic purposes
-            LegacyBang(..) | LegacyAttr(..) | NonMacroAttr { .. } | LegacyDerive(..) => false,
-        };
         ExpnData::new(
-            ExpnKind::Macro { kind: self.macro_kind(), name: descr, proc_macro },
+            ExpnKind::Macro(self.macro_kind(), descr),
             parent,
             call_site,
             self.span,
@@ -828,6 +821,7 @@ impl SyntaxExtension {
             self.local_inner_macros,
             self.edition,
             macro_def_id,
+            parent_module,
         )
     }
 }

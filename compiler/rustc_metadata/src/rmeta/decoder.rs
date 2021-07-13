@@ -633,10 +633,6 @@ impl CrateRoot<'_> {
         self.name
     }
 
-    crate fn disambiguator(&self) -> CrateDisambiguator {
-        self.disambiguator
-    }
-
     crate fn hash(&self) -> Svh {
         self.hash
     }
@@ -729,37 +725,30 @@ impl<'a, 'tcx> CrateMetadataRef<'a> {
             .decode((self, sess))
     }
 
-    fn load_proc_macro(&self, def_id: DefId, sess: &Session) -> SyntaxExtension {
-        let (name, kind, helper_attrs) = match *self.raw_proc_macro(def_id.index) {
+    fn load_proc_macro(&self, id: DefIndex, sess: &Session) -> SyntaxExtension {
+        let (name, kind, helper_attrs) = match *self.raw_proc_macro(id) {
             ProcMacro::CustomDerive { trait_name, attributes, client } => {
                 let helper_attrs =
                     attributes.iter().cloned().map(Symbol::intern).collect::<Vec<_>>();
                 (
                     trait_name,
-                    SyntaxExtensionKind::Derive(Box::new(ProcMacroDerive {
-                        client,
-                        krate: def_id.krate,
-                    })),
+                    SyntaxExtensionKind::Derive(Box::new(ProcMacroDerive { client })),
                     helper_attrs,
                 )
             }
-            ProcMacro::Attr { name, client } => (
-                name,
-                SyntaxExtensionKind::Attr(Box::new(AttrProcMacro { client, krate: def_id.krate })),
-                Vec::new(),
-            ),
-            ProcMacro::Bang { name, client } => (
-                name,
-                SyntaxExtensionKind::Bang(Box::new(BangProcMacro { client, krate: def_id.krate })),
-                Vec::new(),
-            ),
+            ProcMacro::Attr { name, client } => {
+                (name, SyntaxExtensionKind::Attr(Box::new(AttrProcMacro { client })), Vec::new())
+            }
+            ProcMacro::Bang { name, client } => {
+                (name, SyntaxExtensionKind::Bang(Box::new(BangProcMacro { client })), Vec::new())
+            }
         };
 
-        let attrs: Vec<_> = self.get_item_attrs(def_id.index, sess).collect();
+        let attrs: Vec<_> = self.get_item_attrs(id, sess).collect();
         SyntaxExtension::new(
             sess,
             kind,
-            self.get_span(def_id.index, sess),
+            self.get_span(id, sess),
             helper_attrs,
             self.root.edition,
             Symbol::intern(name),
@@ -961,6 +950,10 @@ impl<'a, 'tcx> CrateMetadataRef<'a> {
 
     fn get_impl_defaultness(&self, id: DefIndex) -> hir::Defaultness {
         self.get_impl_data(id).defaultness
+    }
+
+    fn get_impl_constness(&self, id: DefIndex) -> hir::Constness {
+        self.get_impl_data(id).constness
     }
 
     fn get_coerce_unsized_info(&self, id: DefIndex) -> Option<ty::adjustment::CoerceUnsizedInfo> {
@@ -1940,8 +1933,8 @@ impl CrateMetadata {
         self.root.name
     }
 
-    crate fn disambiguator(&self) -> CrateDisambiguator {
-        self.root.disambiguator
+    crate fn stable_crate_id(&self) -> StableCrateId {
+        self.root.stable_crate_id
     }
 
     crate fn hash(&self) -> Svh {

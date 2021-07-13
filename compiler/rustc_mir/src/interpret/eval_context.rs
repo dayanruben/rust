@@ -13,12 +13,13 @@ use rustc_middle::ty::layout::{self, TyAndLayout};
 use rustc_middle::ty::{
     self, query::TyCtxtAt, subst::SubstsRef, ParamEnv, Ty, TyCtxt, TypeFoldable,
 };
+use rustc_session::Limit;
 use rustc_span::{Pos, Span};
 use rustc_target::abi::{Align, HasDataLayout, LayoutOf, Size, TargetDataLayout};
 
 use super::{
-    Immediate, MPlaceTy, Machine, MemPlace, MemPlaceMeta, Memory, Operand, Place, PlaceTy,
-    ScalarMaybeUninit, StackPopJump,
+    Immediate, MPlaceTy, Machine, MemPlace, MemPlaceMeta, Memory, MemoryKind, Operand, Place,
+    PlaceTy, ScalarMaybeUninit, StackPopJump,
 };
 use crate::transform::validate::equal_up_to_regions;
 use crate::util::storage::AlwaysLiveLocals;
@@ -39,6 +40,9 @@ pub struct InterpCx<'mir, 'tcx, M: Machine<'mir, 'tcx>> {
 
     /// The virtual memory system.
     pub memory: Memory<'mir, 'tcx, M>,
+
+    /// The recursion limit (cached from `tcx.recursion_limit(())`)
+    pub recursion_limit: Limit,
 }
 
 // The Phantomdata exists to prevent this type from being `Send`. If it were sent across a thread
@@ -388,12 +392,17 @@ impl<'mir, 'tcx: 'mir, M: Machine<'mir, 'tcx>> InterpCx<'mir, 'tcx, M> {
             tcx: tcx.at(root_span),
             param_env,
             memory: Memory::new(tcx, memory_extra),
+            recursion_limit: tcx.recursion_limit(),
         }
     }
 
     #[inline(always)]
     pub fn cur_span(&self) -> Span {
-        self.stack().last().map_or(self.tcx.span, |f| f.current_span())
+        self.stack()
+            .iter()
+            .rev()
+            .find(|frame| !frame.instance.def.requires_caller_location(*self.tcx))
+            .map_or(self.tcx.span, |f| f.current_span())
     }
 
     #[inline(always)]
@@ -891,7 +900,7 @@ impl<'mir, 'tcx: 'mir, M: Machine<'mir, 'tcx>> InterpCx<'mir, 'tcx, M> {
             // due to the local having ZST type.
             let ptr = ptr.assert_ptr();
             trace!("deallocating local: {:?}", self.memory.dump_alloc(ptr.alloc_id));
-            self.memory.deallocate_local(ptr)?;
+            self.memory.deallocate(ptr, None, MemoryKind::Stack)?;
         };
         Ok(())
     }
@@ -922,7 +931,12 @@ impl<'mir, 'tcx: 'mir, M: Machine<'mir, 'tcx>> InterpCx<'mir, 'tcx, M> {
     #[must_use]
     pub fn generate_stacktrace(&self) -> Vec<FrameInfo<'tcx>> {
         let mut frames = Vec::new();
-        for frame in self.stack().iter().rev() {
+        for frame in self
+            .stack()
+            .iter()
+            .rev()
+            .skip_while(|frame| frame.instance.def.requires_caller_location(*self.tcx))
+        {
             let lint_root = frame.current_source_info().and_then(|source_info| {
                 match &frame.body.source_scopes[source_info.scope].local_data {
                     mir::ClearCrossCrate::Set(data) => Some(data.lint_root),

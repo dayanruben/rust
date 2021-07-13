@@ -37,9 +37,6 @@ use crate::html::markdown::{markdown_links, MarkdownLink};
 use crate::lint::{BROKEN_INTRA_DOC_LINKS, PRIVATE_INTRA_DOC_LINKS};
 use crate::passes::Pass;
 
-mod early;
-crate use early::IntraLinkCrateLoader;
-
 crate const COLLECT_INTRA_DOC_LINKS: Pass = Pass {
     name: "collect-intra-doc-links",
     run: collect_intra_doc_links,
@@ -833,49 +830,48 @@ impl<'a, 'tcx> DocFolder for LinkCollector<'a, 'tcx> {
     fn fold_item(&mut self, item: Item) -> Option<Item> {
         use rustc_middle::ty::DefIdTree;
 
-        let parent_node = if item.is_fake() {
-            None
-        } else {
-            find_nearest_parent_module(self.cx.tcx, item.def_id.expect_real())
-        };
-
+        let parent_node =
+            item.def_id.as_def_id().and_then(|did| find_nearest_parent_module(self.cx.tcx, did));
         if parent_node.is_some() {
             trace!("got parent node for {:?} {:?}, id {:?}", item.type_(), item.name, item.def_id);
         }
 
         // find item's parent to resolve `Self` in item's docs below
         debug!("looking for the `Self` type");
-        let self_id = if item.is_fake() {
-            None
-        // Checking if the item is a field in an enum variant
-        } else if (matches!(self.cx.tcx.def_kind(item.def_id.expect_real()), DefKind::Field)
-            && matches!(
-                self.cx.tcx.def_kind(self.cx.tcx.parent(item.def_id.expect_real()).unwrap()),
-                DefKind::Variant
-            ))
-        {
-            self.cx
-                .tcx
-                .parent(item.def_id.expect_real())
-                .and_then(|item_id| self.cx.tcx.parent(item_id))
-        } else if matches!(
-            self.cx.tcx.def_kind(item.def_id.expect_real()),
-            DefKind::AssocConst
-                | DefKind::AssocFn
-                | DefKind::AssocTy
-                | DefKind::Variant
-                | DefKind::Field
-        ) {
-            self.cx.tcx.parent(item.def_id.expect_real())
-        // HACK(jynelson): `clean` marks associated types as `TypedefItem`, not as `AssocTypeItem`.
-        // Fixing this breaks `fn render_deref_methods`.
-        // As a workaround, see if the parent of the item is an `impl`; if so this must be an associated item,
-        // regardless of what rustdoc wants to call it.
-        } else if let Some(parent) = self.cx.tcx.parent(item.def_id.expect_real()) {
-            let parent_kind = self.cx.tcx.def_kind(parent);
-            Some(if parent_kind == DefKind::Impl { parent } else { item.def_id.expect_real() })
-        } else {
-            Some(item.def_id.expect_real())
+        let self_id = match item.def_id.as_def_id() {
+            None => None,
+            Some(did)
+                if (matches!(self.cx.tcx.def_kind(did), DefKind::Field)
+                    && matches!(
+                        self.cx.tcx.def_kind(self.cx.tcx.parent(did).unwrap()),
+                        DefKind::Variant
+                    )) =>
+            {
+                self.cx.tcx.parent(did).and_then(|item_id| self.cx.tcx.parent(item_id))
+            }
+            Some(did)
+                if matches!(
+                    self.cx.tcx.def_kind(did),
+                    DefKind::AssocConst
+                        | DefKind::AssocFn
+                        | DefKind::AssocTy
+                        | DefKind::Variant
+                        | DefKind::Field
+                ) =>
+            {
+                self.cx.tcx.parent(did)
+            }
+            Some(did) => match self.cx.tcx.parent(did) {
+                // HACK(jynelson): `clean` marks associated types as `TypedefItem`, not as `AssocTypeItem`.
+                // Fixing this breaks `fn render_deref_methods`.
+                // As a workaround, see if the parent of the item is an `impl`; if so this must be an associated item,
+                // regardless of what rustdoc wants to call it.
+                Some(parent) => {
+                    let parent_kind = self.cx.tcx.def_kind(parent);
+                    Some(if parent_kind == DefKind::Impl { parent } else { did })
+                }
+                None => Some(did),
+            },
         };
 
         // FIXME(jynelson): this shouldn't go through stringification, rustdoc should just use the DefId directly
@@ -900,7 +896,7 @@ impl<'a, 'tcx> DocFolder for LinkCollector<'a, 'tcx> {
         let inner_docs = item.inner_docs(self.cx.tcx);
 
         if item.is_mod() && inner_docs {
-            self.mod_ids.push(item.def_id.expect_real());
+            self.mod_ids.push(item.def_id.expect_def_id());
         }
 
         // We want to resolve in the lexical scope of the documentation.
@@ -927,7 +923,7 @@ impl<'a, 'tcx> DocFolder for LinkCollector<'a, 'tcx> {
 
         Some(if item.is_mod() {
             if !inner_docs {
-                self.mod_ids.push(item.def_id.expect_real());
+                self.mod_ids.push(item.def_id.expect_def_id());
             }
 
             let ret = self.fold_item_recur(item);
@@ -1238,10 +1234,10 @@ impl LinkCollector<'_, '_> {
             // item can be non-local e.g. when using #[doc(primitive = "pointer")]
             if let Some((src_id, dst_id)) = id
                 .as_local()
-                // The `expect_real()` should be okay because `local_def_id_to_hir_id`
+                // The `expect_def_id()` should be okay because `local_def_id_to_hir_id`
                 // would presumably panic if a fake `DefIndex` were passed.
                 .and_then(|dst_id| {
-                    item.def_id.expect_real().as_local().map(|src_id| (src_id, dst_id))
+                    item.def_id.expect_def_id().as_local().map(|src_id| (src_id, dst_id))
                 })
             {
                 let hir_src = self.cx.tcx.hir().local_def_id_to_hir_id(src_id);
@@ -1614,6 +1610,8 @@ impl Disambiguator {
             return Suggestion::Macro;
         } else if kind == DefKind::Fn || kind == DefKind::AssocFn {
             return Suggestion::Function;
+        } else if kind == DefKind::Field {
+            return Suggestion::RemoveDisambiguator;
         }
 
         let prefix = match kind {
@@ -1678,6 +1676,8 @@ enum Suggestion {
     Function,
     /// `m!`
     Macro,
+    /// `foo` without any disambiguator
+    RemoveDisambiguator,
 }
 
 impl Suggestion {
@@ -1686,6 +1686,7 @@ impl Suggestion {
             Self::Prefix(x) => format!("prefix with `{}@`", x).into(),
             Self::Function => "add parentheses".into(),
             Self::Macro => "add an exclamation mark".into(),
+            Self::RemoveDisambiguator => "remove the disambiguator".into(),
         }
     }
 
@@ -1695,6 +1696,7 @@ impl Suggestion {
             Self::Prefix(prefix) => format!("{}@{}", prefix, path_str),
             Self::Function => format!("{}()", path_str),
             Self::Macro => format!("{}!", path_str),
+            Self::RemoveDisambiguator => path_str.into(),
         }
     }
 }

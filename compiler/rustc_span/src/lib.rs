@@ -45,8 +45,6 @@ pub mod lev_distance;
 mod span_encoding;
 pub use span_encoding::{Span, DUMMY_SP};
 
-pub mod crate_disambiguator;
-
 pub mod symbol;
 pub use symbol::{sym, Symbol};
 
@@ -99,19 +97,65 @@ impl SessionGlobals {
     }
 }
 
-pub fn with_session_globals<R>(edition: Edition, f: impl FnOnce() -> R) -> R {
+#[inline]
+pub fn create_session_globals_then<R>(edition: Edition, f: impl FnOnce() -> R) -> R {
+    assert!(
+        !SESSION_GLOBALS.is_set(),
+        "SESSION_GLOBALS should never be overwritten! \
+         Use another thread if you need another SessionGlobals"
+    );
     let session_globals = SessionGlobals::new(edition);
     SESSION_GLOBALS.set(&session_globals, f)
 }
 
-pub fn with_default_session_globals<R>(f: impl FnOnce() -> R) -> R {
-    with_session_globals(edition::DEFAULT_EDITION, f)
+#[inline]
+pub fn set_session_globals_then<R>(session_globals: &SessionGlobals, f: impl FnOnce() -> R) -> R {
+    assert!(
+        !SESSION_GLOBALS.is_set(),
+        "SESSION_GLOBALS should never be overwritten! \
+         Use another thread if you need another SessionGlobals"
+    );
+    SESSION_GLOBALS.set(session_globals, f)
+}
+
+#[inline]
+pub fn create_default_session_if_not_set_then<R, F>(f: F) -> R
+where
+    F: FnOnce(&SessionGlobals) -> R,
+{
+    create_session_if_not_set_then(edition::DEFAULT_EDITION, f)
+}
+
+#[inline]
+pub fn create_session_if_not_set_then<R, F>(edition: Edition, f: F) -> R
+where
+    F: FnOnce(&SessionGlobals) -> R,
+{
+    if !SESSION_GLOBALS.is_set() {
+        let session_globals = SessionGlobals::new(edition);
+        SESSION_GLOBALS.set(&session_globals, || SESSION_GLOBALS.with(f))
+    } else {
+        SESSION_GLOBALS.with(f)
+    }
+}
+
+#[inline]
+pub fn with_session_globals<R, F>(f: F) -> R
+where
+    F: FnOnce(&SessionGlobals) -> R,
+{
+    SESSION_GLOBALS.with(f)
+}
+
+#[inline]
+pub fn create_default_session_globals_then<R>(f: impl FnOnce() -> R) -> R {
+    create_session_globals_then(edition::DEFAULT_EDITION, f)
 }
 
 // If this ever becomes non thread-local, `decode_syntax_context`
 // and `decode_expn_id` will need to be updated to handle concurrent
 // deserialization.
-scoped_tls::scoped_thread_local!(pub static SESSION_GLOBALS: SessionGlobals);
+scoped_tls::scoped_thread_local!(static SESSION_GLOBALS: SessionGlobals);
 
 // FIXME: We should use this enum or something like it to get rid of the
 // use of magic `/rust/1.x/...` paths across the board.
@@ -476,10 +520,7 @@ impl Span {
 
     /// Returns `true` if `span` originates in a derive-macro's expansion.
     pub fn in_derive_expansion(self) -> bool {
-        matches!(
-            self.ctxt().outer_expn_data().kind,
-            ExpnKind::Macro { kind: MacroKind::Derive, name: _, proc_macro: _ }
-        )
+        matches!(self.ctxt().outer_expn_data().kind, ExpnKind::Macro(MacroKind::Derive, _))
     }
 
     #[inline]
@@ -857,13 +898,13 @@ impl<D: Decoder> Decodable<D> for Span {
 /// the `SourceMap` provided to this function. If that is not available,
 /// we fall back to printing the raw `Span` field values.
 pub fn with_source_map<T, F: FnOnce() -> T>(source_map: Lrc<SourceMap>, f: F) -> T {
-    SESSION_GLOBALS.with(|session_globals| {
+    with_session_globals(|session_globals| {
         *session_globals.source_map.borrow_mut() = Some(source_map);
     });
     struct ClearSourceMap;
     impl Drop for ClearSourceMap {
         fn drop(&mut self) {
-            SESSION_GLOBALS.with(|session_globals| {
+            with_session_globals(|session_globals| {
                 session_globals.source_map.borrow_mut().take();
             });
         }
@@ -882,7 +923,7 @@ pub fn debug_with_source_map(
 }
 
 pub fn default_span_debug(span: Span, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    SESSION_GLOBALS.with(|session_globals| {
+    with_session_globals(|session_globals| {
         if let Some(source_map) = &*session_globals.source_map.borrow() {
             debug_with_source_map(span, f, source_map)
         } else {
@@ -1508,13 +1549,11 @@ impl SourceFile {
     /// number. If the source_file is empty or the position is located before the
     /// first line, `None` is returned.
     pub fn lookup_line(&self, pos: BytePos) -> Option<usize> {
-        if self.lines.is_empty() {
-            return None;
+        match self.lines.binary_search(&pos) {
+            Ok(idx) => Some(idx),
+            Err(0) => None,
+            Err(idx) => Some(idx - 1),
         }
-
-        let line_index = lookup_line(&self.lines[..], pos);
-        assert!(line_index < self.lines.len() as isize);
-        if line_index >= 0 { Some(line_index as usize) } else { None }
     }
 
     pub fn line_bounds(&self, line_index: usize) -> Range<BytePos> {
@@ -1910,16 +1949,6 @@ pub struct InnerSpan {
 impl InnerSpan {
     pub fn new(start: usize, end: usize) -> InnerSpan {
         InnerSpan { start, end }
-    }
-}
-
-// Given a slice of line start positions and a position, returns the index of
-// the line the position is on. Returns -1 if the position is located before
-// the first line.
-fn lookup_line(lines: &[BytePos], pos: BytePos) -> isize {
-    match lines.binary_search(&pos) {
-        Ok(line) => line as isize,
-        Err(line) => line as isize - 1,
     }
 }
 

@@ -18,7 +18,7 @@ use rustc_middle::middle::stability::DeprecationEntry;
 use rustc_middle::ty::query::Providers;
 use rustc_middle::ty::{self, TyCtxt, Visibility};
 use rustc_session::utils::NativeLibKind;
-use rustc_session::{CrateDisambiguator, Session};
+use rustc_session::{Session, StableCrateId};
 use rustc_span::source_map::{Span, Spanned};
 use rustc_span::symbol::Symbol;
 
@@ -168,6 +168,7 @@ provide! { <'tcx> tcx, def_id, other, cdata,
     is_no_builtins => { cdata.root.no_builtins }
     symbol_mangling_version => { cdata.root.symbol_mangling_version }
     impl_defaultness => { cdata.get_impl_defaultness(def_id.index) }
+    impl_constness => { cdata.get_impl_constness(def_id.index) }
     reachable_non_generics => {
         let reachable_non_generics = tcx
             .exported_symbols(cdata.cnum)
@@ -185,7 +186,6 @@ provide! { <'tcx> tcx, def_id, other, cdata,
     }
     native_libraries => { Lrc::new(cdata.get_native_libraries(tcx.sess)) }
     foreign_modules => { cdata.get_foreign_modules(tcx) }
-    crate_disambiguator => { cdata.root.disambiguator }
     crate_hash => { cdata.root.hash }
     crate_host_hash => { cdata.host_hash }
     crate_name => { cdata.root.name }
@@ -312,7 +312,7 @@ pub fn provide(providers: &mut Providers) {
             // which is to say, its not deterministic in general. But
             // we believe that libstd is consistently assigned crate
             // num 1, so it should be enough to resolve #46112.
-            let mut crates: Vec<CrateNum> = (*tcx.crates()).to_owned();
+            let mut crates: Vec<CrateNum> = (*tcx.crates(())).to_owned();
             crates.sort();
 
             for &cnum in crates.iter() {
@@ -412,7 +412,7 @@ impl CStore {
 
         let data = self.get_crate_data(id.krate);
         if data.root.is_proc_macro_crate() {
-            return LoadedMacro::ProcMacro(data.load_proc_macro(id, sess));
+            return LoadedMacro::ProcMacro(data.load_proc_macro(id.index, sess));
         }
 
         let span = data.get_span(id.index, sess);
@@ -489,8 +489,8 @@ impl CrateStore for CStore {
         self.get_crate_data(cnum).root.name
     }
 
-    fn crate_disambiguator_untracked(&self, cnum: CrateNum) -> CrateDisambiguator {
-        self.get_crate_data(cnum).root.disambiguator
+    fn stable_crate_id_untracked(&self, cnum: CrateNum) -> StableCrateId {
+        self.get_crate_data(cnum).root.stable_crate_id
     }
 
     fn crate_hash_untracked(&self, cnum: CrateNum) -> Svh {

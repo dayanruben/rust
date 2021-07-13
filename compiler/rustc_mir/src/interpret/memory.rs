@@ -207,9 +207,9 @@ impl<'mir, 'tcx, M: Machine<'mir, 'tcx>> Memory<'mir, 'tcx, M> {
         size: Size,
         align: Align,
         kind: MemoryKind<M::MemoryKind>,
-    ) -> Pointer<M::PointerTag> {
-        let alloc = Allocation::uninit(size, align);
-        self.allocate_with(alloc, kind)
+    ) -> InterpResult<'static, Pointer<M::PointerTag>> {
+        let alloc = Allocation::uninit(size, align, M::PANIC_ON_ALLOC_FAIL)?;
+        Ok(self.allocate_with(alloc, kind))
     }
 
     pub fn allocate_bytes(
@@ -257,7 +257,7 @@ impl<'mir, 'tcx, M: Machine<'mir, 'tcx>> Memory<'mir, 'tcx, M> {
 
         // For simplicities' sake, we implement reallocate as "alloc, copy, dealloc".
         // This happens so rarely, the perf advantage is outweighed by the maintenance cost.
-        let new_ptr = self.allocate(new_size, new_align, kind);
+        let new_ptr = self.allocate(new_size, new_align, kind)?;
         let old_size = match old_size_and_align {
             Some((size, _align)) => size,
             None => self.get_raw(ptr.alloc_id)?.size(),
@@ -274,17 +274,6 @@ impl<'mir, 'tcx, M: Machine<'mir, 'tcx>> Memory<'mir, 'tcx, M> {
         self.deallocate(ptr, old_size_and_align, kind)?;
 
         Ok(new_ptr)
-    }
-
-    /// Deallocate a local, or do nothing if that local has been made into a global.
-    pub fn deallocate_local(&mut self, ptr: Pointer<M::PointerTag>) -> InterpResult<'tcx> {
-        // The allocation might be already removed by global interning.
-        // This can only really happen in the CTFE instance, not in miri.
-        if self.alloc_map.contains_key(&ptr.alloc_id) {
-            self.deallocate(ptr, None, MemoryKind::Stack)
-        } else {
-            Ok(())
-        }
     }
 
     pub fn deallocate(
@@ -1049,7 +1038,7 @@ impl<'mir, 'tcx, M: Machine<'mir, 'tcx>> Memory<'mir, 'tcx, M> {
             num_copies,
         );
         // Prepare a copy of the initialization mask.
-        let compressed = src_alloc.compress_uninit_range(src, size);
+        let compressed = src_alloc.compress_uninit_range(alloc_range(src.offset, size));
         // This checks relocation edges on the src.
         let src_bytes = src_alloc
             .get_bytes_with_uninit_and_ptr(&tcx, alloc_range(src.offset, size))
@@ -1110,7 +1099,11 @@ impl<'mir, 'tcx, M: Machine<'mir, 'tcx>> Memory<'mir, 'tcx, M> {
         }
 
         // now fill in all the "init" data
-        dest_alloc.mark_compressed_init_range(&compressed, dest, size, num_copies);
+        dest_alloc.mark_compressed_init_range(
+            &compressed,
+            alloc_range(dest.offset, size),
+            num_copies,
+        );
         // copy the relocations to the destination
         dest_alloc.mark_relocation_range(relocations);
 

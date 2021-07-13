@@ -13,7 +13,7 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::str;
 
-use crate::{Edition, Span, DUMMY_SP, SESSION_GLOBALS};
+use crate::{with_session_globals, Edition, Span, DUMMY_SP};
 
 #[cfg(test)]
 mod tests;
@@ -155,6 +155,7 @@ symbols! {
         FormatSpec,
         Formatter,
         From,
+        FromIterator,
         Future,
         FxHashMap,
         FxHashSet,
@@ -353,6 +354,7 @@ symbols! {
         cfg_eval,
         cfg_panic,
         cfg_sanitize,
+        cfg_target_abi,
         cfg_target_feature,
         cfg_target_has_atomic,
         cfg_target_thread_local,
@@ -461,6 +463,7 @@ symbols! {
         decode,
         default_alloc_error_handler,
         default_lib_allocator,
+        default_method_body_is_const,
         default_type_parameter_fallback,
         default_type_params,
         delay_span_bug_from_inside_query,
@@ -755,6 +758,7 @@ symbols! {
         minnumf64,
         mips_target_feature,
         misc,
+        mmx_reg,
         modifiers,
         module,
         module_path,
@@ -898,6 +902,7 @@ symbols! {
         prefetch_read_instruction,
         prefetch_write_data,
         prefetch_write_instruction,
+        preg,
         prelude,
         prelude_import,
         preserves_flags,
@@ -933,6 +938,7 @@ symbols! {
         quote,
         range_inclusive_new,
         raw_dylib,
+        raw_eq,
         raw_identifiers,
         raw_ref_op,
         re_rebalance_coherence,
@@ -947,7 +953,7 @@ symbols! {
         receiver,
         recursion_limit,
         reexport_test_harness_main,
-        ref_unwind_safe,
+        ref_unwind_safe_trait,
         reference,
         reflect,
         reg,
@@ -1073,7 +1079,6 @@ symbols! {
         self_in_typedefs,
         self_struct_ctor,
         semitransparent,
-        send,
         send_trait,
         shl,
         shl_assign,
@@ -1199,6 +1204,7 @@ symbols! {
         sync,
         sync_trait,
         t32,
+        target_abi,
         target_arch,
         target_endian,
         target_env,
@@ -1299,7 +1305,7 @@ symbols! {
         unused_qualifications,
         unwind,
         unwind_attributes,
-        unwind_safe,
+        unwind_safe_trait,
         unwrap,
         unwrap_or,
         use_extern_macros,
@@ -1342,6 +1348,7 @@ symbols! {
         wrapping_sub,
         wreg,
         write_bytes,
+        x87_reg,
         xmm_reg,
         ymm_reg,
         zmm_reg,
@@ -1790,7 +1797,7 @@ impl Ident {
 
 #[inline]
 fn with_interner<T, F: FnOnce(&mut Interner) -> T>(f: F) -> T {
-    SESSION_GLOBALS.with(|session_globals| f(&mut *session_globals.symbol_interner.lock()))
+    with_session_globals(|session_globals| f(&mut *session_globals.symbol_interner.lock()))
 }
 
 /// An alternative to [`Symbol`], useful when the chars within the symbol need to

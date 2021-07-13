@@ -227,20 +227,6 @@ impl<'tcx> Clean<GenericBound> for ty::PolyTraitRef<'tcx> {
     }
 }
 
-impl<'tcx> Clean<Option<Vec<GenericBound>>> for InternalSubsts<'tcx> {
-    fn clean(&self, cx: &mut DocContext<'_>) -> Option<Vec<GenericBound>> {
-        let mut v = Vec::new();
-        v.extend(self.regions().filter_map(|r| r.clean(cx)).map(GenericBound::Outlives));
-        v.extend(self.types().map(|t| {
-            GenericBound::TraitBound(
-                PolyTrait { trait_: t.clean(cx), generic_params: Vec::new() },
-                hir::TraitBoundModifier::None,
-            )
-        }));
-        if !v.is_empty() { Some(v) } else { None }
-    }
-}
-
 impl Clean<Lifetime> for hir::Lifetime {
     fn clean(&self, cx: &mut DocContext<'_>) -> Lifetime {
         let def = cx.tcx.named_region(self.hir_id);
@@ -293,12 +279,6 @@ impl Clean<Constant> for hir::ConstArg {
                 .clean(cx),
             kind: ConstantKind::Anonymous { body: self.value.body },
         }
-    }
-}
-
-impl Clean<Lifetime> for ty::GenericParamDef {
-    fn clean(&self, _cx: &mut DocContext<'_>) -> Lifetime {
-        Lifetime(self.name)
     }
 }
 
@@ -1764,12 +1744,6 @@ impl Clean<Variant> for hir::VariantData<'_> {
     }
 }
 
-impl Clean<Span> for rustc_span::Span {
-    fn clean(&self, _cx: &mut DocContext<'_>) -> Span {
-        Span::from_rustc_span(*self)
-    }
-}
-
 impl Clean<Path> for hir::Path<'_> {
     fn clean(&self, cx: &mut DocContext<'_>) -> Path {
         Path {
@@ -1811,20 +1785,6 @@ impl Clean<GenericArgs> for hir::GenericArgs<'_> {
 impl Clean<PathSegment> for hir::PathSegment<'_> {
     fn clean(&self, cx: &mut DocContext<'_>) -> PathSegment {
         PathSegment { name: self.ident.name, args: self.args().clean(cx) }
-    }
-}
-
-impl Clean<String> for Ident {
-    #[inline]
-    fn clean(&self, cx: &mut DocContext<'_>) -> String {
-        self.name.clean(cx)
-    }
-}
-
-impl Clean<String> for Symbol {
-    #[inline]
-    fn clean(&self, _: &mut DocContext<'_>) -> String {
-        self.to_string()
     }
 }
 
@@ -2011,6 +1971,7 @@ fn clean_extern_crate(
         if let Some(items) = inline::try_inline(
             cx,
             cx.tcx.parent_module(krate.hir_id()).to_def_id(),
+            Some(krate.def_id.to_def_id()),
             res,
             name,
             Some(attrs),
@@ -2066,7 +2027,8 @@ fn clean_use_statement(
     // forcefully don't inline if this is not public or if the
     // #[doc(no_inline)] attribute is present.
     // Don't inline doc(hidden) imports so they can be stripped at a later stage.
-    let mut denied = !import.vis.node.is_pub()
+    let mut denied = !(import.vis.node.is_pub()
+        || (cx.render_options.document_private && import.vis.node.is_pub_restricted()))
         || pub_underscore
         || attrs.iter().any(|a| {
             a.has_name(sym::doc)
@@ -2102,17 +2064,19 @@ fn clean_use_statement(
         }
         if !denied {
             let mut visited = FxHashSet::default();
+            let import_def_id = import.def_id.to_def_id();
 
             if let Some(mut items) = inline::try_inline(
                 cx,
                 cx.tcx.parent_module(import.hir_id()).to_def_id(),
+                Some(import_def_id),
                 path.res,
                 name,
                 Some(attrs),
                 &mut visited,
             ) {
                 items.push(Item::from_def_id_and_parts(
-                    import.def_id.to_def_id(),
+                    import_def_id,
                     None,
                     ImportItem(Import::new_simple(name, resolve_use_source(cx, path), false)),
                     cx,
@@ -2171,46 +2135,15 @@ impl Clean<Item> for (&hir::MacroDef<'_>, Option<Symbol>) {
     fn clean(&self, cx: &mut DocContext<'_>) -> Item {
         let (item, renamed) = self;
         let name = renamed.unwrap_or(item.ident.name);
-        let tts = item.ast.body.inner_tokens().trees().collect::<Vec<_>>();
-        // Extract the spans of all matchers. They represent the "interface" of the macro.
-        let matchers = tts.chunks(4).map(|arm| arm[0].span()).collect::<Vec<_>>();
-        let source = if item.ast.macro_rules {
-            format!(
-                "macro_rules! {} {{\n{}}}",
-                name,
-                matchers
-                    .iter()
-                    .map(|span| { format!("    {} => {{ ... }};\n", span.to_src(cx)) })
-                    .collect::<String>(),
-            )
-        } else {
-            let vis = item.vis.clean(cx);
-            let def_id = item.def_id.to_def_id();
-
-            if matchers.len() <= 1 {
-                format!(
-                    "{}macro {}{} {{\n    ...\n}}",
-                    vis.to_src_with_space(cx.tcx, def_id),
-                    name,
-                    matchers.iter().map(|span| span.to_src(cx)).collect::<String>(),
-                )
-            } else {
-                format!(
-                    "{}macro {} {{\n{}}}",
-                    vis.to_src_with_space(cx.tcx, def_id),
-                    name,
-                    matchers
-                        .iter()
-                        .map(|span| { format!("    {} => {{ ... }},\n", span.to_src(cx)) })
-                        .collect::<String>(),
-                )
-            }
-        };
+        let def_id = item.def_id.to_def_id();
 
         Item::from_hir_id_and_parts(
             item.hir_id(),
             Some(name),
-            MacroItem(Macro { source, imported_from: None }),
+            MacroItem(Macro {
+                source: display_macro_source(cx, name, &item.ast, def_id, &item.vis),
+                imported_from: None,
+            }),
             cx,
         )
     }
@@ -2231,25 +2164,6 @@ impl Clean<TypeBindingKind> for hir::TypeBindingKind<'_> {
             hir::TypeBindingKind::Constraint { ref bounds } => {
                 TypeBindingKind::Constraint { bounds: bounds.iter().map(|b| b.clean(cx)).collect() }
             }
-        }
-    }
-}
-
-enum SimpleBound {
-    TraitBound(Vec<PathSegment>, Vec<SimpleBound>, Vec<GenericParamDef>, hir::TraitBoundModifier),
-    Outlives(Lifetime),
-}
-
-impl From<GenericBound> for SimpleBound {
-    fn from(bound: GenericBound) -> Self {
-        match bound.clone() {
-            GenericBound::Outlives(l) => SimpleBound::Outlives(l),
-            GenericBound::TraitBound(t, mod_) => match t.trait_ {
-                Type::ResolvedPath { path, .. } => {
-                    SimpleBound::TraitBound(path.segments, Vec::new(), t.generic_params, mod_)
-                }
-                _ => panic!("Unexpected bound {:?}", bound),
-            },
         }
     }
 }

@@ -26,7 +26,7 @@
 
 use crate::edition::Edition;
 use crate::symbol::{kw, sym, Symbol};
-use crate::SESSION_GLOBALS;
+use crate::with_session_globals;
 use crate::{BytePos, CachingSourceMapView, ExpnIdCache, SourceFile, Span, DUMMY_SP};
 
 use crate::def_id::{CrateNum, DefId, DefPathHash, CRATE_DEF_INDEX, LOCAL_CRATE};
@@ -144,10 +144,7 @@ impl ExpnId {
             let expn_data = self.expn_data();
             // Stop going up the backtrace once include! is encountered
             if expn_data.is_root()
-                || matches!(
-                    expn_data.kind,
-                    ExpnKind::Macro { kind: MacroKind::Bang, name: sym::include, proc_macro: _ }
-                )
+                || expn_data.kind == ExpnKind::Macro(MacroKind::Bang, sym::include)
             {
                 break;
             }
@@ -181,6 +178,7 @@ impl HygieneData {
             DUMMY_SP,
             edition,
             Some(DefId::local(CRATE_DEF_INDEX)),
+            None,
         );
         root_data.orig_id = Some(0);
 
@@ -200,7 +198,7 @@ impl HygieneData {
     }
 
     pub fn with<T, F: FnOnce(&mut HygieneData) -> T>(f: F) -> T {
-        SESSION_GLOBALS.with(|session_globals| f(&mut *session_globals.hygiene_data.borrow_mut()))
+        with_session_globals(|session_globals| f(&mut *session_globals.hygiene_data.borrow_mut()))
     }
 
     fn fresh_expn(&mut self, mut expn_data: Option<ExpnData>) -> ExpnId {
@@ -687,7 +685,7 @@ impl Span {
     ) -> Span {
         self.fresh_expansion(ExpnData {
             allow_internal_unstable,
-            ..ExpnData::default(ExpnKind::Desugaring(reason), self, edition, None)
+            ..ExpnData::default(ExpnKind::Desugaring(reason), self, edition, None, None)
         })
     }
 }
@@ -711,6 +709,31 @@ pub struct ExpnData {
     /// call_site span would have its own ExpnData, with the call_site
     /// pointing to the `foo!` invocation.
     pub call_site: Span,
+    /// The crate that originally created this `ExpnData`. During
+    /// metadata serialization, we only encode `ExpnData`s that were
+    /// created locally - when our serialized metadata is decoded,
+    /// foreign `ExpnId`s will have their `ExpnData` looked up
+    /// from the crate specified by `Crate
+    krate: CrateNum,
+    /// The raw that this `ExpnData` had in its original crate.
+    /// An `ExpnData` can be created before being assigned an `ExpnId`,
+    /// so this might be `None` until `set_expn_data` is called
+    // This is used only for serialization/deserialization purposes:
+    // two `ExpnData`s that differ only in their `orig_id` should
+    // be considered equivalent.
+    #[stable_hasher(ignore)]
+    orig_id: Option<u32>,
+    /// Used to force two `ExpnData`s to have different `Fingerprint`s.
+    /// Due to macro expansion, it's possible to end up with two `ExpnId`s
+    /// that have identical `ExpnData`s. This violates the contract of `HashStable`
+    /// - the two `ExpnId`s are not equal, but their `Fingerprint`s are equal
+    /// (since the numerical `ExpnId` value is not considered by the `HashStable`
+    /// implementation).
+    ///
+    /// The `disambiguator` field is set by `update_disambiguator` when two distinct
+    /// `ExpnId`s would end up with the same `Fingerprint`. Since `ExpnData` includes
+    /// a `krate` field, this value only needs to be unique within a single crate.
+    disambiguator: u32,
 
     // --- The part specific to the macro/desugaring definition.
     // --- It may be reasonable to share this part between expansions with the same definition,
@@ -734,32 +757,8 @@ pub struct ExpnData {
     /// The `DefId` of the macro being invoked,
     /// if this `ExpnData` corresponds to a macro invocation
     pub macro_def_id: Option<DefId>,
-    /// The crate that originally created this `ExpnData`. During
-    /// metadata serialization, we only encode `ExpnData`s that were
-    /// created locally - when our serialized metadata is decoded,
-    /// foreign `ExpnId`s will have their `ExpnData` looked up
-    /// from the crate specified by `Crate
-    krate: CrateNum,
-    /// The raw that this `ExpnData` had in its original crate.
-    /// An `ExpnData` can be created before being assigned an `ExpnId`,
-    /// so this might be `None` until `set_expn_data` is called
-    // This is used only for serialization/deserialization purposes:
-    // two `ExpnData`s that differ only in their `orig_id` should
-    // be considered equivalent.
-    #[stable_hasher(ignore)]
-    orig_id: Option<u32>,
-
-    /// Used to force two `ExpnData`s to have different `Fingerprint`s.
-    /// Due to macro expansion, it's possible to end up with two `ExpnId`s
-    /// that have identical `ExpnData`s. This violates the contract of `HashStable`
-    /// - the two `ExpnId`s are not equal, but their `Fingerprint`s are equal
-    /// (since the numerical `ExpnId` value is not considered by the `HashStable`
-    /// implementation).
-    ///
-    /// The `disambiguator` field is set by `update_disambiguator` when two distinct
-    /// `ExpnId`s would end up with the same `Fingerprint`. Since `ExpnData` includes
-    /// a `krate` field, this value only needs to be unique within a single crate.
-    disambiguator: u32,
+    /// The normal module (`mod`) in which the expanded macro was defined.
+    pub parent_module: Option<DefId>,
 }
 
 // These would require special handling of `orig_id`.
@@ -777,6 +776,7 @@ impl ExpnData {
         local_inner_macros: bool,
         edition: Edition,
         macro_def_id: Option<DefId>,
+        parent_module: Option<DefId>,
     ) -> ExpnData {
         ExpnData {
             kind,
@@ -788,6 +788,7 @@ impl ExpnData {
             local_inner_macros,
             edition,
             macro_def_id,
+            parent_module,
             krate: LOCAL_CRATE,
             orig_id: None,
             disambiguator: 0,
@@ -800,6 +801,7 @@ impl ExpnData {
         call_site: Span,
         edition: Edition,
         macro_def_id: Option<DefId>,
+        parent_module: Option<DefId>,
     ) -> ExpnData {
         ExpnData {
             kind,
@@ -811,6 +813,7 @@ impl ExpnData {
             local_inner_macros: false,
             edition,
             macro_def_id,
+            parent_module,
             krate: LOCAL_CRATE,
             orig_id: None,
             disambiguator: 0,
@@ -823,10 +826,11 @@ impl ExpnData {
         edition: Edition,
         allow_internal_unstable: Lrc<[Symbol]>,
         macro_def_id: Option<DefId>,
+        parent_module: Option<DefId>,
     ) -> ExpnData {
         ExpnData {
             allow_internal_unstable: Some(allow_internal_unstable),
-            ..ExpnData::default(kind, call_site, edition, macro_def_id)
+            ..ExpnData::default(kind, call_site, edition, macro_def_id, parent_module)
         }
     }
 
@@ -842,13 +846,7 @@ pub enum ExpnKind {
     /// No expansion, aka root expansion. Only `ExpnId::root()` has this kind.
     Root,
     /// Expansion produced by a macro.
-    Macro {
-        kind: MacroKind,
-        name: Symbol,
-        /// If `true`, this macro is a procedural macro. This
-        /// flag is only used for diagnostic purposes
-        proc_macro: bool,
-    },
+    Macro(MacroKind, Symbol),
     /// Transform done by the compiler on the AST.
     AstPass(AstPass),
     /// Desugaring done by the compiler during HIR lowering.
@@ -861,7 +859,7 @@ impl ExpnKind {
     pub fn descr(&self) -> String {
         match *self {
             ExpnKind::Root => kw::PathRoot.to_string(),
-            ExpnKind::Macro { kind, name, proc_macro: _ } => match kind {
+            ExpnKind::Macro(macro_kind, name) => match macro_kind {
                 MacroKind::Bang => format!("{}!", name),
                 MacroKind::Attr => format!("#[{}]", name),
                 MacroKind::Derive => format!("#[derive({})]", name),
@@ -1359,8 +1357,9 @@ fn update_disambiguator(expn_id: ExpnId) {
         }
     }
 
-    let source_map = SESSION_GLOBALS
-        .with(|session_globals| session_globals.source_map.borrow().as_ref().unwrap().clone());
+    let source_map = with_session_globals(|session_globals| {
+        session_globals.source_map.borrow().as_ref().unwrap().clone()
+    });
 
     let mut ctx =
         DummyHashStableContext { caching_source_map: CachingSourceMapView::new(&source_map) };

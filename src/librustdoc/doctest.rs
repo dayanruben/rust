@@ -112,7 +112,6 @@ crate fn run(options: Options) -> Result<(), ErrorReported> {
 
     let res = interface::run_compiler(config, |compiler| {
         compiler.enter(|queries| {
-            let _lower_to_hir = queries.lower_to_hir()?;
             let mut global_ctxt = queries.global_ctxt()?.take();
 
             let collector = global_ctxt.enter(|tcx| {
@@ -514,7 +513,7 @@ crate fn make_test(
     // Uses librustc_ast to parse the doctest and find if there's a main fn and the extern
     // crate already is included.
     let result = rustc_driver::catch_fatal_errors(|| {
-        rustc_span::with_session_globals(edition, || {
+        rustc_span::create_session_if_not_set_then(edition, |_| {
             use rustc_errors::emitter::{Emitter, EmitterWriter};
             use rustc_errors::Handler;
             use rustc_parse::maybe_new_parser_from_source_str;

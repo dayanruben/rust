@@ -325,6 +325,9 @@ fn register_builtins(store: &mut LintStore, no_interleave_lints: bool) {
     store.register_renamed("redundant_semicolon", "redundant_semicolons");
     store.register_renamed("overlapping_patterns", "overlapping_range_endpoints");
     store.register_renamed("safe_packed_borrows", "unaligned_references");
+    store.register_renamed("disjoint_capture_migration", "rust_2021_incompatible_closure_captures");
+    store.register_renamed("or_patterns_back_compat", "rust_2021_incompatible_or_patterns");
+    store.register_renamed("non_fmt_panic", "non_fmt_panics");
 
     // These were moved to tool lints, but rustc still sees them when compiling normally, before
     // tool lints are registered, so `check_tool_name_for_backwards_compat` doesn't work. Use
@@ -472,10 +475,10 @@ fn register_builtins(store: &mut LintStore, no_interleave_lints: bool) {
 }
 
 fn register_internals(store: &mut LintStore) {
-    store.register_lints(&DefaultHashTypes::get_lints());
-    store.register_early_pass(|| box DefaultHashTypes::new());
     store.register_lints(&LintPassImpl::get_lints());
     store.register_early_pass(|| box LintPassImpl);
+    store.register_lints(&DefaultHashTypes::get_lints());
+    store.register_late_pass(|| box DefaultHashTypes);
     store.register_lints(&ExistingDocKeyword::get_lints());
     store.register_late_pass(|| box ExistingDocKeyword);
     store.register_lints(&TyTyKind::get_lints());
@@ -494,3 +497,6 @@ fn register_internals(store: &mut LintStore) {
         ],
     );
 }
+
+#[cfg(test)]
+mod tests;
