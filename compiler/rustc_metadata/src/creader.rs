@@ -130,8 +130,11 @@ impl<'a> std::fmt::Debug for CrateDump<'a> {
 }
 
 impl CStore {
-    crate fn from_tcx(tcx: TyCtxt<'_>) -> &CStore {
-        tcx.cstore_as_any().downcast_ref::<CStore>().expect("`tcx.cstore` is not a `CStore`")
+    pub fn from_tcx(tcx: TyCtxt<'_>) -> &CStore {
+        tcx.cstore_untracked()
+            .as_any()
+            .downcast_ref::<CStore>()
+            .expect("`tcx.cstore` is not a `CStore`")
     }
 
     fn alloc_new_crate_num(&mut self) -> CrateNum {
@@ -599,7 +602,11 @@ impl<'a> CrateLoader<'a> {
         // don't want to match a host crate against an equivalent target one
         // already loaded.
         let root = library.metadata.get_root();
-        Ok(Some(if locator.triple == self.sess.opts.target_triple {
+        // FIXME: why is this condition necessary? It was adding in #33625 but I
+        // don't know why and the original author doesn't remember ...
+        let can_reuse_cratenum =
+            locator.triple == self.sess.opts.target_triple || locator.is_proc_macro == Some(true);
+        Ok(Some(if can_reuse_cratenum {
             let mut result = LoadResult::Loaded(library);
             self.cstore.iter_crate_data(|cnum, data| {
                 if data.name() == root.name() && root.hash() == data.hash() {
