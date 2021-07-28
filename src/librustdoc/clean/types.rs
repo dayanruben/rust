@@ -227,7 +227,7 @@ impl ExternalCrate {
         if root.is_local() {
             tcx.hir()
                 .krate()
-                .item
+                .module()
                 .item_ids
                 .iter()
                 .filter_map(|&id| {
@@ -293,7 +293,7 @@ impl ExternalCrate {
         if root.is_local() {
             tcx.hir()
                 .krate()
-                .item
+                .module()
                 .item_ids
                 .iter()
                 .filter_map(|&id| {
@@ -2007,6 +2007,7 @@ crate enum GenericArg {
     Lifetime(Lifetime),
     Type(Type),
     Const(Constant),
+    Infer,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Hash)]

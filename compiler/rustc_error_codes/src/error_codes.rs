@@ -287,6 +287,7 @@ E0539: include_str!("./error_codes/E0539.md"),
 E0541: include_str!("./error_codes/E0541.md"),
 E0542: include_str!("./error_codes/E0542.md"),
 E0543: include_str!("./error_codes/E0543.md"),
+E0544: include_str!("./error_codes/E0544.md"),
 E0545: include_str!("./error_codes/E0545.md"),
 E0546: include_str!("./error_codes/E0546.md"),
 E0547: include_str!("./error_codes/E0547.md"),
@@ -418,6 +419,7 @@ E0716: include_str!("./error_codes/E0716.md"),
 E0718: include_str!("./error_codes/E0718.md"),
 E0719: include_str!("./error_codes/E0719.md"),
 E0720: include_str!("./error_codes/E0720.md"),
+E0722: include_str!("./error_codes/E0722.md"),
 E0724: include_str!("./error_codes/E0724.md"),
 E0725: include_str!("./error_codes/E0725.md"),
 E0727: include_str!("./error_codes/E0727.md"),
@@ -449,6 +451,7 @@ E0753: include_str!("./error_codes/E0753.md"),
 E0754: include_str!("./error_codes/E0754.md"),
 E0755: include_str!("./error_codes/E0755.md"),
 E0756: include_str!("./error_codes/E0756.md"),
+E0757: include_str!("./error_codes/E0757.md"),
 E0758: include_str!("./error_codes/E0758.md"),
 E0759: include_str!("./error_codes/E0759.md"),
 E0760: include_str!("./error_codes/E0760.md"),
@@ -608,7 +611,6 @@ E0783: include_str!("./error_codes/E0783.md"),
     E0523,
 //  E0526, // shuffle indices are not constant
 //  E0540, // multiple rustc_deprecated attributes
-    E0544, // multiple stability levels
 //  E0548, // replaced with a generic attribute input check
 //  E0553, // multiple rustc_const_unstable attributes
 //  E0555, // replaced with a generic attribute input check
@@ -634,10 +636,8 @@ E0783: include_str!("./error_codes/E0783.md"),
     E0711, // a feature has been declared with conflicting stability attributes
     E0717, // rustc_promotable without stability attribute
 //  E0721, // `await` keyword
-    E0722, // Malformed `#[optimize]` attribute
 //    E0723, unstable feature in `const` context
     E0726, // non-explicit (not `'_`) elided lifetime in unsupported position
 //  E0738, // Removed; errored on `#[track_caller] fn`s in `extern "Rust" { ... }`.
-    E0757, // `#[ffi_const]` functions cannot be `#[ffi_pure]`
     E0772, // `'static' obligation coming from `impl dyn Trait {}` or `impl Foo for dyn Bar {}`.
 }

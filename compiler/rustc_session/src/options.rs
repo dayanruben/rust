@@ -135,7 +135,6 @@ top_level_options!(
         debuginfo: DebugInfo [TRACKED],
         lint_opts: Vec<(String, lint::Level)> [TRACKED_NO_CRATE_HASH],
         lint_cap: Option<lint::Level> [TRACKED_NO_CRATE_HASH],
-        force_warns: Vec<String> [TRACKED_NO_CRATE_HASH],
         describe_lints: bool [UNTRACKED],
         output_types: OutputTypes [TRACKED],
         search_paths: Vec<SearchPath> [UNTRACKED],
@@ -1149,6 +1148,8 @@ options! {
         (default: no)"),
     mir_opt_level: Option<usize> = (None, parse_opt_number, [TRACKED],
         "MIR optimization level (0-4; default: 1 in non optimized builds and 2 in optimized builds)"),
+    move_size_limit: Option<usize> = (None, parse_opt_number, [TRACKED],
+        "the size at which the `large_assignments` lint starts to be emitted"),
     mutable_noalias: Option<bool> = (None, parse_opt_bool, [TRACKED],
         "emit noalias metadata for mutable references (default: yes for LLVM >= 12, otherwise no)"),
     new_llvm_pass_manager: Option<bool> = (None, parse_opt_bool, [TRACKED],
@@ -1251,7 +1252,7 @@ options! {
         "specify the events recorded by the self profiler;
         for example: `-Z self-profile-events=default,query-keys`
         all options: none, all, default, generic-activity, query-provider, query-cache-hit
-                     query-blocked, incr-cache-load, query-keys, function-args, args, llvm"),
+                     query-blocked, incr-cache-load, incr-result-hashing, query-keys, function-args, args, llvm"),
     share_generics: Option<bool> = (None, parse_opt_bool, [TRACKED],
         "make the current crate share its generic instantiations"),
     show_span: Option<String> = (None, parse_opt_string, [TRACKED],
@@ -1309,7 +1310,7 @@ options! {
         "take the brakes off const evaluation. NOTE: this is unsound (default: no)"),
     unpretty: Option<String> = (None, parse_unpretty, [UNTRACKED],
         "present the input source, unstable (and less-pretty) variants;
-        valid types are any of the types for `--pretty`, as well as:
+        `normal`, `identified`,
         `expanded`, `expanded,identified`,
         `expanded,hygiene` (with internal representations),
         `everybody_loops` (all function bodies replaced with `loop {}`),

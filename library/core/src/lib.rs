@@ -49,6 +49,10 @@
 //
 // This cfg won't affect doc tests.
 #![cfg(not(test))]
+// To run libcore tests without x.py without ending up with two copies of libcore, Miri needs to be
+// able to "empty" this crate. See <https://github.com/rust-lang/miri-test-libstd/issues/4>.
+// rustc itself never sets the feature, so this line has no affect there.
+#![cfg(any(not(feature = "miri-test-libstd"), test, doctest))]
 #![stable(feature = "core", since = "1.6.0")]
 #![doc(
     html_playground_url = "https://play.rust-lang.org/",
@@ -82,7 +86,7 @@
 #![feature(const_refs_to_cell)]
 #![feature(const_panic)]
 #![feature(const_pin)]
-#![feature(const_fn_union)]
+#![cfg_attr(bootstrap, feature(const_fn_union))]
 #![feature(const_impl_trait)]
 #![feature(const_fn_floating_point_arithmetic)]
 #![feature(const_fn_fn_ptr_basics)]
@@ -155,7 +159,7 @@
 #![feature(rtm_target_feature)]
 #![feature(f16c_target_feature)]
 #![feature(hexagon_target_feature)]
-#![feature(const_fn_transmute)]
+#![cfg_attr(bootstrap, feature(const_fn_transmute))]
 #![feature(abi_unadjusted)]
 #![feature(adx_target_feature)]
 #![feature(associated_type_bounds)]
@@ -316,5 +320,35 @@ pub mod primitive;
 #[unstable(feature = "stdsimd", issue = "48556")]
 mod core_arch;
 
+#[doc = include_str!("../../stdarch/crates/core_arch/src/core_arch_docs.md")]
 #[stable(feature = "simd_arch", since = "1.27.0")]
-pub use core_arch::arch;
+pub mod arch {
+    #[stable(feature = "simd_arch", since = "1.27.0")]
+    pub use crate::core_arch::arch::*;
+
+    /// Inline assembly.
+    ///
+    /// Read the [unstable book] for the usage.
+    ///
+    /// [unstable book]: ../../unstable-book/library-features/asm.html
+    #[unstable(
+        feature = "asm",
+        issue = "72016",
+        reason = "inline assembly is not stable enough for use and is subject to change"
+    )]
+    #[rustc_builtin_macro]
+    pub macro asm("assembly template", $(operands,)* $(options($(option),*))?) {
+        /* compiler built-in */
+    }
+
+    /// Module-level inline assembly.
+    #[unstable(
+        feature = "global_asm",
+        issue = "35119",
+        reason = "`global_asm!` is not stable enough for use and is subject to change"
+    )]
+    #[rustc_builtin_macro]
+    pub macro global_asm("assembly template", $(operands,)* $(options($(option),*))?) {
+        /* compiler built-in */
+    }
+}
