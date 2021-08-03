@@ -486,7 +486,7 @@ declare_features! (
     (active, async_closure, "1.37.0", Some(62290), None),
 
     /// Allows `impl Trait` to be used inside type aliases (RFC 2515).
-    (incomplete, type_alias_impl_trait, "1.38.0", Some(63063), None),
+    (active, type_alias_impl_trait, "1.38.0", Some(63063), None),
 
     /// Allows the definition of `const extern fn` and `const unsafe extern fn`.
     (active, const_extern_fn, "1.40.0", Some(64926), None),
@@ -619,9 +619,6 @@ declare_features! (
     /// Allows macro attributes to observe output of `#[derive]`.
     (active, macro_attributes_in_derive_output, "1.51.0", Some(81119), None),
 
-    /// Allows the use of type alias impl trait in function return positions
-    (active, min_type_alias_impl_trait, "1.52.0", Some(63063), None),
-
     /// Allows associated types in inherent impls.
     (incomplete, inherent_associated_types, "1.52.0", Some(8995), None),
 
@@ -679,6 +676,19 @@ declare_features! (
 
     /// Allows `#[derive(Default)]` and `#[default]` on enums.
     (active, derive_default_enum, "1.56.0", Some(86985), None),
+
+    /// Allows `for _ in _` loops in const contexts.
+    (active, const_for, "1.56.0", Some(87575), None),
+
+    /// Allows the `?` operator in const contexts.
+    (active, const_try, "1.56.0", Some(74935), None),
+
+    /// Allows upcasting trait objects via supertraits.
+    /// Trait upcasting is casting, e.g., `dyn Foo -> dyn Bar` where `Foo: Bar`.
+    (incomplete, trait_upcasting, "1.56.0", Some(65991), None),
+
+    /// Allows explicit generic arguments specification with `impl Trait` present.
+    (active, explicit_generic_args_with_impl_trait, "1.56.0", Some(83701), None),
 
     // -------------------------------------------------------------------------
     // feature-group-end: actual feature gates

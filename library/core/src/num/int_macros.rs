@@ -1,9 +1,10 @@
 macro_rules! int_impl {
-    ($SelfT:ty, $ActualT:ident, $UnsignedT:ty, $BITS:expr, $Min:expr, $Max:expr,
+    ($SelfT:ty, $ActualT:ident, $UnsignedT:ty, $BITS:expr, $BITS_MINUS_ONE:expr, $Min:expr, $Max:expr,
      $rot:expr, $rot_op:expr, $rot_result:expr, $swap_op:expr, $swapped:expr,
      $reversed:expr, $le_bytes:expr, $be_bytes:expr,
      $to_xe_bytes_doc:expr, $from_xe_bytes_doc:expr) => {
-        /// The smallest value that can be represented by this integer type.
+        /// The smallest value that can be represented by this integer type,
+        #[doc = concat!("-2<sup>", $BITS_MINUS_ONE, "</sup>.")]
         ///
         /// # Examples
         ///
@@ -15,7 +16,8 @@ macro_rules! int_impl {
         #[stable(feature = "assoc_int_consts", since = "1.43.0")]
         pub const MIN: Self = !0 ^ ((!0 as $UnsignedT) >> 1) as Self;
 
-        /// The largest value that can be represented by this integer type.
+        /// The largest value that can be represented by this integer type,
+        #[doc = concat!("2<sup>", $BITS_MINUS_ONE, "</sup> - 1.")]
         ///
         /// # Examples
         ///
@@ -1746,7 +1748,7 @@ macro_rules! int_impl {
 
         /// Returns the logarithm of the number with respect to an arbitrary base.
         ///
-        /// This method may not be optimized owing to implementation details;
+        /// This method might not be optimized owing to implementation details;
         /// `log2` can produce results more efficiently for base 2, and `log10`
         /// can produce results more efficiently for base 10.
         ///
@@ -1854,7 +1856,7 @@ macro_rules! int_impl {
         ///
         /// Returns `None` if the number is negative or zero, or if the base is not at least 2.
         ///
-        /// This method may not be optimized owing to implementation details;
+        /// This method might not be optimized owing to implementation details;
         /// `checked_log2` can produce results more efficiently for base 2, and
         /// `checked_log10` can produce results more efficiently for base 10.
         ///

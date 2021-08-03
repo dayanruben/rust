@@ -323,6 +323,7 @@ symbols! {
         await_macro,
         bang,
         begin_panic,
+        begin_panic_fmt,
         bench,
         bin,
         bind_by_move_pattern_guards,
@@ -409,6 +410,8 @@ symbols! {
         const_fn_transmute,
         const_fn_union,
         const_fn_unsize,
+        const_for,
+        const_format_args,
         const_generic_defaults,
         const_generics,
         const_generics_defaults,
@@ -420,6 +423,7 @@ symbols! {
         const_loop,
         const_mut_refs,
         const_panic,
+        const_panic_fmt,
         const_precise_live_drops,
         const_ptr,
         const_raw_ptr_deref,
@@ -429,6 +433,7 @@ symbols! {
         const_trait_bound_opt_out,
         const_trait_impl,
         const_transmute,
+        const_try,
         constant,
         constructor,
         contents,
@@ -549,6 +554,7 @@ symbols! {
         expected,
         expf32,
         expf64,
+        explicit_generic_args_with_impl_trait,
         export_name,
         expr,
         extended_key_value_attributes,
@@ -586,6 +592,7 @@ symbols! {
         fmaf32,
         fmaf64,
         fmt,
+        fmt_as_str,
         fmt_internals,
         fmul_fast,
         fn_align,
@@ -881,6 +888,7 @@ symbols! {
         panic_2021,
         panic_abort,
         panic_bounds_check,
+        panic_fmt,
         panic_handler,
         panic_impl,
         panic_implementation,
@@ -1263,6 +1271,7 @@ symbols! {
         trace_macros,
         track_caller,
         trait_alias,
+        trait_upcasting,
         transmute,
         transparent,
         transparent_enums,
@@ -1589,6 +1598,10 @@ impl Symbol {
 
     pub fn as_u32(self) -> u32 {
         self.0.as_u32()
+    }
+
+    pub fn len(self) -> usize {
+        with_interner(|interner| interner.get(self).len())
     }
 
     pub fn is_empty(self) -> bool {

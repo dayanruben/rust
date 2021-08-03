@@ -15,7 +15,8 @@ macro_rules! uint_impl {
         #[stable(feature = "assoc_int_consts", since = "1.43.0")]
         pub const MIN: Self = 0;
 
-        /// The largest value that can be represented by this integer type.
+        /// The largest value that can be represented by this integer type,
+        #[doc = concat!("2<sup>", $BITS, "</sup> - 1.")]
         ///
         /// # Examples
         ///
@@ -636,7 +637,7 @@ macro_rules! uint_impl {
 
         /// Returns the logarithm of the number with respect to an arbitrary base.
         ///
-        /// This method may not be optimized owing to implementation details;
+        /// This method might not be optimized owing to implementation details;
         /// `log2` can produce results more efficiently for base 2, and `log10`
         /// can produce results more efficiently for base 10.
         ///
@@ -744,7 +745,7 @@ macro_rules! uint_impl {
         ///
         /// Returns `None` if the number is zero, or if the base is not at least 2.
         ///
-        /// This method may not be optimized owing to implementation details;
+        /// This method might not be optimized owing to implementation details;
         /// `checked_log2` can produce results more efficiently for base 2, and
         /// `checked_log10` can produce results more efficiently for base 10.
         ///

@@ -2720,6 +2720,9 @@ declare_lint! {
     /// The asm block must not contain any operands other than `const` and
     /// `sym`. Additionally, naked function should specify a non-Rust ABI.
     ///
+    /// Naked functions cannot be inlined. All forms of the `inline` attribute
+    /// are prohibited.
+    ///
     /// While other definitions of naked functions were previously accepted,
     /// they are unsupported and might not work reliably. This is a
     /// [future-incompatible] lint that will transition into hard error in
@@ -2799,7 +2802,7 @@ declare_lint! {
     /// [issue #79813]: https://github.com/rust-lang/rust/issues/79813
     /// [future-incompatible]: ../index.md#future-incompatible-lints
     pub SEMICOLON_IN_EXPRESSIONS_FROM_MACROS,
-    Allow,
+    Warn,
     "trailing semicolon in macro body used as expression",
     @future_incompatible = FutureIncompatibleInfo {
         reference: "issue #79813 <https://github.com/rust-lang/rust/issues/79813>",

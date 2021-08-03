@@ -1360,6 +1360,12 @@ impl<T, A: Allocator> Vec<T, A> {
     /// Removes and returns the element at position `index` within the vector,
     /// shifting all elements after it to the left.
     ///
+    /// Note: Because this shifts over the remaining elements, it has a
+    /// worst-case performance of O(n). If you don't need the order of elements
+    /// to be preserved, use [`swap_remove`] instead.
+    ///
+    /// [`swap_remove`]: Vec::swap_remove
+    ///
     /// # Panics
     ///
     /// Panics if `index` is out of bounds.
@@ -1372,9 +1378,11 @@ impl<T, A: Allocator> Vec<T, A> {
     /// assert_eq!(v, [1, 3]);
     /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
+    #[track_caller]
     pub fn remove(&mut self, index: usize) -> T {
         #[cold]
         #[inline(never)]
+        #[track_caller]
         fn assert_failed(index: usize, len: usize) -> ! {
             panic!("removal index (is {}) should be < len (is {})", index, len);
         }
@@ -2229,7 +2237,7 @@ impl<T, A: Allocator> Vec<T, A> {
         unsafe {
             let mut ptr = self.as_mut_ptr().add(self.len());
             // Use SetLenOnDrop to work around bug where compiler
-            // may not realize the store through `ptr` through self.set_len()
+            // might not realize the store through `ptr` through self.set_len()
             // don't alias.
             let mut local_len = SetLenOnDrop::new(&mut self.len);
 

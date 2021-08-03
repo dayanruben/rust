@@ -73,6 +73,7 @@
 #![feature(cfg_target_has_atomic)]
 #![feature(const_heap)]
 #![feature(const_alloc_layout)]
+#![feature(const_arguments_as_str)]
 #![feature(const_assert_type)]
 #![feature(const_discriminant)]
 #![feature(const_cell_into_inner)]
@@ -128,6 +129,7 @@
 #![feature(exhaustive_patterns)]
 #![feature(no_core)]
 #![feature(auto_traits)]
+#![feature(pin_deref_mut)]
 #![feature(prelude_import)]
 #![feature(ptr_metadata)]
 #![feature(repr_simd, platform_intrinsics)]
@@ -168,8 +170,7 @@
 #![feature(no_niche)] // rust-lang/rust#68303
 #![feature(no_coverage)] // rust-lang/rust#84605
 #![deny(unsafe_op_in_unsafe_fn)]
-#![cfg_attr(bootstrap, deny(or_patterns_back_compat))]
-#![cfg_attr(not(bootstrap), deny(rust_2021_incompatible_or_patterns))]
+#![deny(rust_2021_incompatible_or_patterns)]
 
 // allow using `core::` in intra-doc links
 #[allow(unused_extern_crates)]
