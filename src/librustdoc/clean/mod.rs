@@ -95,7 +95,8 @@ impl Clean<Item> for doctree::Module<'_> {
 
         // determine if we should display the inner contents or
         // the outer `mod` item for the source code.
-        let span = Span::from_rustc_span({
+
+        let span = Span::new({
             let where_outer = self.where_outer(cx.tcx);
             let sm = cx.sess().source_map();
             let outer = sm.lookup_char_pos(where_outer.lo());
@@ -324,7 +325,7 @@ impl<'a> Clean<Option<WherePredicate>> for ty::Predicate<'a> {
     fn clean(&self, cx: &mut DocContext<'_>) -> Option<WherePredicate> {
         let bound_predicate = self.kind();
         match bound_predicate.skip_binder() {
-            ty::PredicateKind::Trait(pred, _) => Some(bound_predicate.rebind(pred).clean(cx)),
+            ty::PredicateKind::Trait(pred) => Some(bound_predicate.rebind(pred).clean(cx)),
             ty::PredicateKind::RegionOutlives(pred) => pred.clean(cx),
             ty::PredicateKind::TypeOutlives(pred) => pred.clean(cx),
             ty::PredicateKind::Projection(pred) => Some(pred.clean(cx)),
@@ -636,7 +637,7 @@ impl<'a, 'tcx> Clean<Generics> for (&'a ty::Generics, ty::GenericPredicates<'tcx
                 let param_idx = (|| {
                     let bound_p = p.kind();
                     match bound_p.skip_binder() {
-                        ty::PredicateKind::Trait(pred, _constness) => {
+                        ty::PredicateKind::Trait(pred) => {
                             if let ty::Param(param) = pred.self_ty().kind() {
                                 return Some(param.index);
                             }
@@ -675,11 +676,10 @@ impl<'a, 'tcx> Clean<Generics> for (&'a ty::Generics, ty::GenericPredicates<'tcx
                         if let Some(((_, trait_did, name), rhs)) =
                             proj.as_ref().and_then(|(lhs, rhs)| Some((lhs.projection()?, rhs)))
                         {
-                            impl_trait_proj.entry(param_idx).or_default().push((
-                                trait_did.into(),
-                                name,
-                                rhs,
-                            ));
+                            impl_trait_proj
+                                .entry(param_idx)
+                                .or_default()
+                                .push((trait_did, name, rhs));
                         }
 
                         return None;
@@ -1555,9 +1555,7 @@ impl<'tcx> Clean<Type> for Ty<'tcx> {
                     .filter_map(|bound| {
                         let bound_predicate = bound.kind();
                         let trait_ref = match bound_predicate.skip_binder() {
-                            ty::PredicateKind::Trait(tr, _constness) => {
-                                bound_predicate.rebind(tr.trait_ref)
-                            }
+                            ty::PredicateKind::Trait(tr) => bound_predicate.rebind(tr.trait_ref),
                             ty::PredicateKind::TypeOutlives(ty::OutlivesPredicate(_ty, reg)) => {
                                 if let Some(r) = reg.clean(cx) {
                                     regions.push(GenericBound::Outlives(r));

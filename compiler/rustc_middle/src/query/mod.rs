@@ -342,6 +342,16 @@ rustc_queries! {
         }
     }
 
+    query symbols_for_closure_captures(
+        key: (LocalDefId, DefId)
+    ) -> Vec<rustc_span::Symbol> {
+        desc {
+            |tcx| "symbols for captures of closure `{}` in `{}`",
+            tcx.def_path_str(key.1),
+            tcx.def_path_str(key.0.to_def_id())
+        }
+    }
+
     /// MIR after our optimization passes have run. This is MIR that is ready
     /// for codegen. This is also the only query that can fetch non-local MIR, at present.
     query optimized_mir(key: DefId) -> &'tcx mir::Body<'tcx> {
@@ -977,6 +987,11 @@ rustc_queries! {
         desc { |tcx| "finding all vtable entries for trait {}", tcx.def_path_str(key.def_id()) }
     }
 
+    query vtable_trait_upcasting_coercion_new_vptr_slot(key: (ty::PolyTraitRef<'tcx>, ty::PolyTraitRef<'tcx>)) -> Option<usize> {
+        desc { |tcx| "finding the slot within vtable for trait {} vtable ptr during trait upcasting coercion from {} vtable",
+            tcx.def_path_str(key.1.def_id()), tcx.def_path_str(key.0.def_id()) }
+    }
+
     query codegen_fulfill_obligation(
         key: (ty::ParamEnv<'tcx>, ty::PolyTraitRef<'tcx>)
     ) -> Result<ImplSource<'tcx, ()>, ErrorReported> {
@@ -1246,9 +1261,6 @@ rustc_queries! {
     /// crate, returning `None` if there is no entry point (such as for library crates).
     query entry_fn(_: ()) -> Option<(DefId, EntryFnType)> {
         desc { "looking up the entry function of a crate" }
-    }
-    query plugin_registrar_fn(_: ()) -> Option<LocalDefId> {
-        desc { "looking up the plugin registrar for a crate" }
     }
     query proc_macro_decls_static(_: ()) -> Option<LocalDefId> {
         desc { "looking up the derive registrar for a crate" }

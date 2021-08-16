@@ -359,6 +359,7 @@ E0621: include_str!("./error_codes/E0621.md"),
 E0622: include_str!("./error_codes/E0622.md"),
 E0623: include_str!("./error_codes/E0623.md"),
 E0624: include_str!("./error_codes/E0624.md"),
+E0625: include_str!("./error_codes/E0625.md"),
 E0626: include_str!("./error_codes/E0626.md"),
 E0627: include_str!("./error_codes/E0627.md"),
 E0628: include_str!("./error_codes/E0628.md"),
@@ -478,6 +479,7 @@ E0780: include_str!("./error_codes/E0780.md"),
 E0781: include_str!("./error_codes/E0781.md"),
 E0782: include_str!("./error_codes/E0782.md"),
 E0783: include_str!("./error_codes/E0783.md"),
+E0784: include_str!("./error_codes/E0784.md"),
 ;
 //  E0006, // merged with E0005
 //  E0008, // cannot bind by-move into a pattern guard
@@ -622,7 +624,6 @@ E0783: include_str!("./error_codes/E0783.md"),
 //  E0611, // merged into E0616
 //  E0612, // merged into E0609
 //  E0613, // Removed (merged with E0609)
-    E0625, // thread-local statics cannot be accessed at compile-time
 //  E0629, // missing 'feature' (rustc_const_unstable)
 //  E0630, // rustc_const_unstable attribute must be paired with stable/unstable
            // attribute
@@ -636,7 +637,7 @@ E0783: include_str!("./error_codes/E0783.md"),
     E0711, // a feature has been declared with conflicting stability attributes
     E0717, // rustc_promotable without stability attribute
 //  E0721, // `await` keyword
-//    E0723, unstable feature in `const` context
+//  E0723, unstable feature in `const` context
     E0726, // non-explicit (not `'_`) elided lifetime in unsupported position
 //  E0738, // Removed; errored on `#[track_caller] fn`s in `extern "Rust" { ... }`.
     E0772, // `'static' obligation coming from `impl dyn Trait {}` or `impl Foo for dyn Bar {}`.

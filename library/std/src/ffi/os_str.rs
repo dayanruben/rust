@@ -271,7 +271,9 @@ impl OsString {
     ///
     /// Note that the allocator may give the collection more space than it
     /// requests. Therefore, capacity can not be relied upon to be precisely
-    /// minimal. Prefer reserve if future insertions are expected.
+    /// minimal. Prefer [`reserve`] if future insertions are expected.
+    ///
+    /// [`reserve`]: OsString::reserve
     ///
     /// # Examples
     ///
@@ -319,7 +321,6 @@ impl OsString {
     /// # Examples
     ///
     /// ```
-    /// #![feature(shrink_to)]
     /// use std::ffi::OsString;
     ///
     /// let mut s = OsString::from("foo");
@@ -333,7 +334,7 @@ impl OsString {
     /// assert!(s.capacity() >= 3);
     /// ```
     #[inline]
-    #[unstable(feature = "shrink_to", reason = "new API", issue = "56431")]
+    #[stable(feature = "shrink_to", since = "1.56.0")]
     pub fn shrink_to(&mut self, min_capacity: usize) {
         self.inner.shrink_to(min_capacity)
     }

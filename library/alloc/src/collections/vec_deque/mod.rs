@@ -19,6 +19,7 @@ use core::slice;
 
 use crate::alloc::{Allocator, Global};
 use crate::collections::TryReserveError;
+use crate::collections::TryReserveErrorKind;
 use crate::raw_vec::RawVec;
 use crate::vec::Vec;
 
@@ -697,7 +698,9 @@ impl<T, A: Allocator> VecDeque<T, A> {
     ///
     /// Note that the allocator may give the collection more space than it
     /// requests. Therefore, capacity can not be relied upon to be precisely
-    /// minimal. Prefer `reserve` if future insertions are expected.
+    /// minimal. Prefer [`reserve`] if future insertions are expected.
+    ///
+    /// [`reserve`]: VecDeque::reserve
     ///
     /// # Errors
     ///
@@ -771,7 +774,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
         let new_cap = used_cap
             .checked_add(additional)
             .and_then(|needed_cap| needed_cap.checked_next_power_of_two())
-            .ok_or(TryReserveError::CapacityOverflow)?;
+            .ok_or(TryReserveErrorKind::CapacityOverflow)?;
 
         if new_cap > old_cap {
             self.buf.try_reserve_exact(used_cap, new_cap - used_cap)?;
@@ -813,7 +816,6 @@ impl<T, A: Allocator> VecDeque<T, A> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(shrink_to)]
     /// use std::collections::VecDeque;
     ///
     /// let mut buf = VecDeque::with_capacity(15);
@@ -824,7 +826,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
     /// buf.shrink_to(0);
     /// assert!(buf.capacity() >= 4);
     /// ```
-    #[unstable(feature = "shrink_to", reason = "new API", issue = "56431")]
+    #[stable(feature = "shrink_to", since = "1.56.0")]
     pub fn shrink_to(&mut self, min_capacity: usize) {
         let min_capacity = cmp::min(min_capacity, self.capacity());
         // We don't have to worry about an overflow as neither `self.len()` nor `self.capacity()`

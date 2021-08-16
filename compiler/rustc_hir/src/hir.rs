@@ -1,4 +1,3 @@
-// ignore-tidy-filelength
 use crate::def::{CtorKind, DefKind, Res};
 use crate::def_id::{DefId, CRATE_DEF_ID};
 crate use crate::hir_id::{HirId, ItemLocalId};
@@ -1483,6 +1482,7 @@ impl Expr<'_> {
             ExprKind::Type(..) | ExprKind::Cast(..) => ExprPrecedence::Cast,
             ExprKind::DropTemps(ref expr, ..) => expr.precedence(),
             ExprKind::If(..) => ExprPrecedence::If,
+            ExprKind::Let(..) => ExprPrecedence::Let,
             ExprKind::Loop(..) => ExprPrecedence::Loop,
             ExprKind::Match(..) => ExprPrecedence::Match,
             ExprKind::Closure(..) => ExprPrecedence::Closure,
@@ -1553,6 +1553,7 @@ impl Expr<'_> {
             | ExprKind::Break(..)
             | ExprKind::Continue(..)
             | ExprKind::Ret(..)
+            | ExprKind::Let(..)
             | ExprKind::Loop(..)
             | ExprKind::Assign(..)
             | ExprKind::InlineAsm(..)
@@ -1635,6 +1636,7 @@ impl Expr<'_> {
             | ExprKind::Break(..)
             | ExprKind::Continue(..)
             | ExprKind::Ret(..)
+            | ExprKind::Let(..)
             | ExprKind::Loop(..)
             | ExprKind::Assign(..)
             | ExprKind::InlineAsm(..)
@@ -1726,6 +1728,11 @@ pub enum ExprKind<'hir> {
     /// This construct only exists to tweak the drop order in HIR lowering.
     /// An example of that is the desugaring of `for` loops.
     DropTemps(&'hir Expr<'hir>),
+    /// A `let $pat = $expr` expression.
+    ///
+    /// These are not `Local` and only occur as expressions.
+    /// The `let Some(x) = foo()` in `if let Some(x) = foo()` is an example of `Let(..)`.
+    Let(&'hir Pat<'hir>, &'hir Expr<'hir>, Span),
     /// An `if` block, with an optional else block.
     ///
     /// I.e., `if <expr> { <expr> } else { <expr> }`.
@@ -1885,15 +1892,6 @@ pub enum LocalSource {
 pub enum MatchSource {
     /// A `match _ { .. }`.
     Normal,
-    /// An `if let _ = _ { .. }` (optionally with `else { .. }`).
-    IfLetDesugar { contains_else_clause: bool },
-    /// An `if let _ = _ => { .. }` match guard.
-    IfLetGuardDesugar,
-    /// A `while _ { .. }` (which was desugared to a `loop { match _ { .. } }`).
-    WhileDesugar,
-    /// A `while let _ = _ { .. }` (which was desugared to a
-    /// `loop { match _ { .. } }`).
-    WhileLetDesugar,
     /// A desugared `for _ in _ { .. }` loop.
     ForLoopDesugar,
     /// A desugared `?` operator.
@@ -1903,12 +1901,11 @@ pub enum MatchSource {
 }
 
 impl MatchSource {
-    pub fn name(self) -> &'static str {
+    #[inline]
+    pub const fn name(self) -> &'static str {
         use MatchSource::*;
         match self {
             Normal => "match",
-            IfLetDesugar { .. } | IfLetGuardDesugar => "if",
-            WhileDesugar | WhileLetDesugar => "while",
             ForLoopDesugar => "for",
             TryDesugar => "?",
             AwaitDesugar => ".await",
@@ -1923,8 +1920,6 @@ pub enum LoopSource {
     Loop,
     /// A `while _ { .. }` loop.
     While,
-    /// A `while let _ = _ { .. }` loop.
-    WhileLet,
     /// A `for _ in _ { .. }` loop.
     ForLoop,
 }
@@ -1933,7 +1928,7 @@ impl LoopSource {
     pub fn name(self) -> &'static str {
         match self {
             LoopSource::Loop => "loop",
-            LoopSource::While | LoopSource::WhileLet => "while",
+            LoopSource::While => "while",
             LoopSource::ForLoop => "for",
         }
     }
@@ -2752,6 +2747,15 @@ pub enum Constness {
     NotConst,
 }
 
+impl fmt::Display for Constness {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match *self {
+            Self::Const => "const",
+            Self::NotConst => "non-const",
+        })
+    }
+}
+
 #[derive(Copy, Clone, Encodable, Debug, HashStable_Generic)]
 pub struct FnHeader {
     pub unsafety: Unsafety,
@@ -3253,8 +3257,13 @@ impl<'hir> Node<'hir> {
         }
     }
 
-    /// Returns `Constness::Const` when this node is a const fn/impl.
-    pub fn constness(&self) -> Constness {
+    /// Returns `Constness::Const` when this node is a const fn/impl/item,
+    ///
+    /// HACK(fee1-dead): or an associated type in a trait. This works because
+    /// only typeck cares about const trait predicates, so although the predicates
+    /// query would return const predicates when it does not need to be const,
+    /// it wouldn't have any effect.
+    pub fn constness_for_typeck(&self) -> Constness {
         match self {
             Node::Item(Item {
                 kind: ItemKind::Fn(FnSig { header: FnHeader { constness, .. }, .. }, ..),
@@ -3269,6 +3278,11 @@ impl<'hir> Node<'hir> {
                 ..
             })
             | Node::Item(Item { kind: ItemKind::Impl(Impl { constness, .. }), .. }) => *constness,
+
+            Node::Item(Item { kind: ItemKind::Const(..), .. })
+            | Node::TraitItem(TraitItem { kind: TraitItemKind::Const(..), .. })
+            | Node::TraitItem(TraitItem { kind: TraitItemKind::Type(..), .. })
+            | Node::ImplItem(ImplItem { kind: ImplItemKind::Const(..), .. }) => Constness::Const,
 
             _ => Constness::NotConst,
         }

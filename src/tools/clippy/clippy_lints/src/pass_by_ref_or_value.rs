@@ -2,9 +2,9 @@ use std::cmp;
 use std::iter;
 
 use clippy_utils::diagnostics::span_lint_and_sugg;
-use clippy_utils::is_self_ty;
 use clippy_utils::source::snippet;
 use clippy_utils::ty::is_copy;
+use clippy_utils::{is_self, is_self_ty};
 use if_chain::if_chain;
 use rustc_ast::attr;
 use rustc_errors::Applicability;
@@ -14,6 +14,7 @@ use rustc_hir::{BindingAnnotation, Body, FnDecl, HirId, Impl, ItemKind, MutTy, M
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_middle::ty;
 use rustc_session::{declare_tool_lint, impl_lint_pass};
+use rustc_span::def_id::LocalDefId;
 use rustc_span::{sym, Span};
 use rustc_target::abi::LayoutOf;
 use rustc_target::spec::abi::Abi;
@@ -134,13 +135,12 @@ impl<'tcx> PassByRefOrValue {
         }
     }
 
-    fn check_poly_fn(&mut self, cx: &LateContext<'tcx>, hir_id: HirId, decl: &FnDecl<'_>, span: Option<Span>) {
-        if self.avoid_breaking_exported_api && cx.access_levels.is_exported(hir_id) {
+    fn check_poly_fn(&mut self, cx: &LateContext<'tcx>, def_id: LocalDefId, decl: &FnDecl<'_>, span: Option<Span>) {
+        if self.avoid_breaking_exported_api && cx.access_levels.is_exported(def_id) {
             return;
         }
-        let fn_def_id = cx.tcx.hir().local_def_id(hir_id);
 
-        let fn_sig = cx.tcx.fn_sig(fn_def_id);
+        let fn_sig = cx.tcx.fn_sig(def_id);
         let fn_sig = cx.tcx.erase_late_bound_regions(fn_sig);
 
         let fn_body = cx.enclosing_body.map(|id| cx.tcx.hir().body(id));
@@ -170,7 +170,7 @@ impl<'tcx> PassByRefOrValue {
                         if size <= self.ref_min_size;
                         if let hir::TyKind::Rptr(_, MutTy { ty: decl_ty, .. }) = input.kind;
                         then {
-                            let value_type = if is_self_ty(decl_ty) {
+                            let value_type = if fn_body.and_then(|body| body.params.get(index)).map_or(false, is_self) {
                                 "self".into()
                             } else {
                                 snippet(cx, decl_ty.span, "_").into()
@@ -231,7 +231,7 @@ impl<'tcx> LateLintPass<'tcx> for PassByRefOrValue {
         }
 
         if let hir::TraitItemKind::Fn(method_sig, _) = &item.kind {
-            self.check_poly_fn(cx, item.hir_id(), &*method_sig.decl, None);
+            self.check_poly_fn(cx, item.def_id, &*method_sig.decl, None);
         }
     }
 
@@ -278,6 +278,6 @@ impl<'tcx> LateLintPass<'tcx> for PassByRefOrValue {
             }
         }
 
-        self.check_poly_fn(cx, hir_id, decl, Some(span));
+        self.check_poly_fn(cx, cx.tcx.hir().local_def_id(hir_id), decl, Some(span));
     }
 }

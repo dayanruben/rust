@@ -115,6 +115,7 @@ The `std` column in the table below has the following meanings:
 target | std | notes
 -------|:---:|-------
 `aarch64-apple-ios` | ✓ | ARM64 iOS
+[`aarch64-apple-ios-sim`](platform-support/aarch64-apple-ios-sim.md) | ✓ | Apple iOS Simulator on ARM64
 `aarch64-fuchsia` | ✓ | ARM64 Fuchsia
 `aarch64-linux-android` | ✓ | ARM64 Android
 `aarch64-unknown-none-softfloat` | * | Bare ARM64, softfloat
@@ -196,10 +197,10 @@ host tools.
 target | std | host | notes
 -------|:---:|:----:|-------
 `aarch64-apple-ios-macabi` | ? |  | Apple Catalyst on ARM64
-[`aarch64-apple-ios-sim`](platform-support/aarch64-apple-ios-sim.md) | ✓ |  | Apple iOS Simulator on ARM64
 `aarch64-apple-tvos` | * |  | ARM64 tvOS
 `aarch64-unknown-freebsd` | ✓ | ✓ | ARM64 FreeBSD
 `aarch64-unknown-hermit` | ? |  |
+`aarch64-unknown-uefi` | * |  | ARM64 UEFI
 `aarch64-unknown-linux-gnu_ilp32` | ✓ | ✓ | ARM64 Linux (ILP32 ABI)
 `aarch64-unknown-netbsd` | ✓ | ✓ |
 `aarch64-unknown-openbsd` | ✓ | ✓ | ARM64 OpenBSD
@@ -255,6 +256,7 @@ target | std | host | notes
 `powerpc64le-unknown-linux-musl` | ? |  |
 `riscv32gc-unknown-linux-gnu` |   |   | RISC-V Linux (kernel 5.4, glibc 2.33)
 `riscv32gc-unknown-linux-musl` |   |   | RISC-V Linux (kernel 5.4, musl + RISCV32 support patches)
+`riscv32imc-esp-espidf` | ✓ |  | RISC-V ESP-IDF
 `riscv64gc-unknown-linux-musl` |   |   | RISC-V Linux (kernel 4.20, musl 1.2.0)
 `s390x-unknown-linux-musl` |  |  | S390x Linux (kernel 2.6.32, MUSL)
 `sparc-unknown-linux-gnu` | ✓ |  | 32-bit SPARC Linux

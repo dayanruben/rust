@@ -1392,11 +1392,11 @@ extern "C" void LLVMRustFreeOperandBundleDef(OperandBundleDef *Bundle) {
   delete Bundle;
 }
 
-extern "C" LLVMValueRef LLVMRustBuildCall(LLVMBuilderRef B, LLVMValueRef Fn,
+extern "C" LLVMValueRef LLVMRustBuildCall(LLVMBuilderRef B, LLVMTypeRef Ty, LLVMValueRef Fn,
                                           LLVMValueRef *Args, unsigned NumArgs,
                                           OperandBundleDef *Bundle) {
   Value *Callee = unwrap(Fn);
-  FunctionType *FTy = cast<FunctionType>(Callee->getType()->getPointerElementType());
+  FunctionType *FTy = unwrap<FunctionType>(Ty);
   unsigned Len = Bundle ? 1 : 0;
   ArrayRef<OperandBundleDef> Bundles = makeArrayRef(Bundle, Len);
   return wrap(unwrap(B)->CreateCall(
@@ -1437,12 +1437,12 @@ extern "C" LLVMValueRef LLVMRustBuildMemSet(LLVMBuilderRef B,
 }
 
 extern "C" LLVMValueRef
-LLVMRustBuildInvoke(LLVMBuilderRef B, LLVMValueRef Fn, LLVMValueRef *Args,
-                    unsigned NumArgs, LLVMBasicBlockRef Then,
-                    LLVMBasicBlockRef Catch, OperandBundleDef *Bundle,
-                    const char *Name) {
+LLVMRustBuildInvoke(LLVMBuilderRef B, LLVMTypeRef Ty, LLVMValueRef Fn,
+                    LLVMValueRef *Args, unsigned NumArgs,
+                    LLVMBasicBlockRef Then, LLVMBasicBlockRef Catch,
+                    OperandBundleDef *Bundle, const char *Name) {
   Value *Callee = unwrap(Fn);
-  FunctionType *FTy = cast<FunctionType>(Callee->getType()->getPointerElementType());
+  FunctionType *FTy = unwrap<FunctionType>(Ty);
   unsigned Len = Bundle ? 1 : 0;
   ArrayRef<OperandBundleDef> Bundles = makeArrayRef(Bundle, Len);
   return wrap(unwrap(B)->CreateInvoke(FTy, Callee, unwrap(Then), unwrap(Catch),
@@ -1549,6 +1549,16 @@ extern "C" LLVMRustLinkage LLVMRustGetLinkage(LLVMValueRef V) {
 extern "C" void LLVMRustSetLinkage(LLVMValueRef V,
                                    LLVMRustLinkage RustLinkage) {
   LLVMSetLinkage(V, fromRust(RustLinkage));
+}
+
+extern "C" LLVMValueRef LLVMRustConstInBoundsGEP2(LLVMTypeRef Ty,
+                                                  LLVMValueRef ConstantVal,
+                                                  LLVMValueRef *ConstantIndices,
+                                                  unsigned NumIndices) {
+  ArrayRef<Constant *> IdxList(unwrap<Constant>(ConstantIndices, NumIndices),
+                               NumIndices);
+  Constant *Val = unwrap<Constant>(ConstantVal);
+  return wrap(ConstantExpr::getInBoundsGetElementPtr(unwrap(Ty), Val, IdxList));
 }
 
 // Returns true if both high and low were successfully set. Fails in case constant wasn’t any of

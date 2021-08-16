@@ -302,7 +302,14 @@ impl AsmBuilderMethods<'tcx> for Builder<'a, 'll, 'tcx> {
                         "~{flags}".to_string(),
                     ]);
                 }
-                InlineAsmArch::RiscV32 | InlineAsmArch::RiscV64 => {}
+                InlineAsmArch::RiscV32 | InlineAsmArch::RiscV64 => {
+                    constraints.extend_from_slice(&[
+                        "~{vtype}".to_string(),
+                        "~{vl}".to_string(),
+                        "~{vxsat}".to_string(),
+                        "~{vxrm}".to_string(),
+                    ]);
+                }
                 InlineAsmArch::Nvptx64 => {}
                 InlineAsmArch::PowerPC | InlineAsmArch::PowerPC64 => {}
                 InlineAsmArch::Hexagon => {}
@@ -425,7 +432,7 @@ impl AsmMethods for CodegenCx<'ll, 'tcx> {
     }
 }
 
-fn inline_asm_call(
+pub(crate) fn inline_asm_call(
     bx: &mut Builder<'a, 'll, 'tcx>,
     asm: &str,
     cons: &str,
@@ -464,7 +471,7 @@ fn inline_asm_call(
                 alignstack,
                 llvm::AsmDialect::from_generic(dia),
             );
-            let call = bx.call(v, inputs, None);
+            let call = bx.call(fty, v, inputs, None);
 
             // Store mark in a metadata node so we can map LLVM errors
             // back to source locations.  See #17552.

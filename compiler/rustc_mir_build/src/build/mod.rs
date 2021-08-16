@@ -2,7 +2,6 @@ use crate::build;
 use crate::build::expr::as_place::PlaceBuilder;
 use crate::build::scope::DropKind;
 use crate::thir::pattern::pat_from_hir;
-use rustc_attr::{self as attr, UnwindAttr};
 use rustc_errors::ErrorReported;
 use rustc_hir as hir;
 use rustc_hir::def_id::{DefId, LocalDefId};
@@ -16,10 +15,9 @@ use rustc_middle::mir::*;
 use rustc_middle::thir::{BindingMode, Expr, ExprId, LintLevel, PatKind, Thir};
 use rustc_middle::ty::subst::Subst;
 use rustc_middle::ty::{self, Ty, TyCtxt, TypeFoldable, TypeckResults};
-use rustc_span::symbol::{kw, sym};
+use rustc_span::symbol::sym;
 use rustc_span::Span;
 use rustc_target::spec::abi::Abi;
-use rustc_target::spec::PanicStrategy;
 
 use super::lints;
 
@@ -581,60 +579,6 @@ macro_rules! unpack {
     }};
 }
 
-fn should_abort_on_panic(tcx: TyCtxt<'_>, fn_def_id: LocalDefId, abi: Abi) -> bool {
-    // Validate `#[unwind]` syntax regardless of platform-specific panic strategy.
-    let attrs = &tcx.get_attrs(fn_def_id.to_def_id());
-    let unwind_attr = attr::find_unwind_attr(&tcx.sess, attrs);
-
-    // We never unwind, so it's not relevant to stop an unwind.
-    if tcx.sess.panic_strategy() != PanicStrategy::Unwind {
-        return false;
-    }
-
-    match unwind_attr {
-        // If an `#[unwind]` attribute was found, we should adhere to it.
-        Some(UnwindAttr::Allowed) => false,
-        Some(UnwindAttr::Aborts) => true,
-        // If no attribute was found and the panic strategy is `unwind`, then we should examine
-        // the function's ABI string to determine whether it should abort upon panic.
-        None if tcx.features().c_unwind => {
-            use Abi::*;
-            match abi {
-                // In the case of ABI's that have an `-unwind` equivalent, check whether the ABI
-                // permits unwinding. If so, we should not abort. Otherwise, we should.
-                C { unwind } | Stdcall { unwind } | System { unwind } | Thiscall { unwind } => {
-                    !unwind
-                }
-                // Rust and `rust-call` functions are allowed to unwind, and should not abort.
-                Rust | RustCall => false,
-                // Other ABI's should abort.
-                Cdecl
-                | Fastcall
-                | Vectorcall
-                | Aapcs
-                | Win64
-                | SysV64
-                | PtxKernel
-                | Msp430Interrupt
-                | X86Interrupt
-                | AmdGpuKernel
-                | EfiApi
-                | AvrInterrupt
-                | AvrNonBlockingInterrupt
-                | CCmseNonSecureCall
-                | Wasm
-                | RustIntrinsic
-                | PlatformIntrinsic
-                | Unadjusted => true,
-            }
-        }
-        // If the `c_unwind` feature gate is not active, follow the behavior that was in place
-        // prior to #76570. This is a special case: some functions have a C ABI but are meant to
-        // unwind anyway. Don't stop them.
-        None => false, // FIXME(#58794); should be `!(abi == Abi::Rust || abi == Abi::RustCall)`
-    }
-}
-
 ///////////////////////////////////////////////////////////////////////////
 /// the main entry point for building MIR for a function
 
@@ -704,8 +648,7 @@ where
             }));
         let source_info = builder.source_info(fn_end);
         builder.cfg.terminate(return_block, source_info, TerminatorKind::Return);
-        let should_abort = should_abort_on_panic(tcx, fn_def.did, abi);
-        builder.build_drop_trees(should_abort);
+        builder.build_drop_trees();
         return_block.unit()
     }));
 
@@ -752,7 +695,7 @@ fn construct_const<'a, 'tcx>(
     let source_info = builder.source_info(span);
     builder.cfg.terminate(block, source_info, TerminatorKind::Return);
 
-    builder.build_drop_trees(false);
+    builder.build_drop_trees();
 
     builder.finish()
 }
@@ -959,13 +902,16 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                 ty::Generator(_, substs, _) => ty::UpvarSubsts::Generator(substs),
                 _ => span_bug!(self.fn_span, "upvars with non-closure env ty {:?}", closure_ty),
             };
+            let def_id = self.def_id.as_local().unwrap();
+            let capture_syms = tcx.symbols_for_closure_captures((def_id, fn_def_id));
             let capture_tys = upvar_substs.upvar_tys();
-            let captures_with_tys =
-                hir_typeck_results.closure_min_captures_flattened(fn_def_id).zip(capture_tys);
+            let captures_with_tys = hir_typeck_results
+                .closure_min_captures_flattened(fn_def_id)
+                .zip(capture_tys.zip(capture_syms));
 
             self.upvar_mutbls = captures_with_tys
                 .enumerate()
-                .map(|(i, (captured_place, ty))| {
+                .map(|(i, (captured_place, (ty, sym)))| {
                     let capture = captured_place.info.capture_kind;
                     let var_id = match captured_place.place.base {
                         HirPlaceBase::Upvar(upvar_id) => upvar_id.var_path.hir_id,
@@ -973,14 +919,6 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                     };
 
                     let mutability = captured_place.mutability;
-
-                    // FIXME(project-rfc-2229#8): Store more precise information
-                    let mut name = kw::Empty;
-                    if let Some(Node::Binding(pat)) = tcx_hir.find(var_id) {
-                        if let hir::PatKind::Binding(_, _, ident, _) = pat.kind {
-                            name = ident.name;
-                        }
-                    }
 
                     let mut projs = closure_env_projs.clone();
                     projs.push(ProjectionElem::Field(Field::new(i), ty));
@@ -992,7 +930,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                     };
 
                     self.var_debug_info.push(VarDebugInfo {
-                        name,
+                        name: sym,
                         source_info: SourceInfo::outermost(tcx_hir.span(var_id)),
                         value: VarDebugInfoContents::Place(Place {
                             local: ty::CAPTURE_STRUCT_LOCAL,

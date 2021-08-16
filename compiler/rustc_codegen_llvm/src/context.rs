@@ -24,6 +24,7 @@ use rustc_span::source_map::{Span, DUMMY_SP};
 use rustc_span::symbol::Symbol;
 use rustc_target::abi::{HasDataLayout, LayoutOf, PointeeInfo, Size, TargetDataLayout, VariantIdx};
 use rustc_target::spec::{HasTargetSpec, RelocModel, Target, TlsModel};
+use smallvec::SmallVec;
 
 use std::cell::{Cell, RefCell};
 use std::ffi::CStr;
@@ -74,8 +75,12 @@ pub struct CodegenCx<'ll, 'tcx> {
     /// See <https://llvm.org/docs/LangRef.html#the-llvm-used-global-variable> for details
     pub used_statics: RefCell<Vec<&'ll Value>>,
 
-    pub lltypes: RefCell<FxHashMap<(Ty<'tcx>, Option<VariantIdx>), &'ll Type>>,
+    /// Mapping of non-scalar types to llvm types and field remapping if needed.
+    pub type_lowering: RefCell<FxHashMap<(Ty<'tcx>, Option<VariantIdx>), TypeLowering<'ll>>>,
+
+    /// Mapping of scalar types to llvm types.
     pub scalar_lltypes: RefCell<FxHashMap<Ty<'tcx>, &'ll Type>>,
+
     pub pointee_infos: RefCell<FxHashMap<(Ty<'tcx>, Size), Option<PointeeInfo>>>,
     pub isize_ty: &'ll Type,
 
@@ -84,12 +89,21 @@ pub struct CodegenCx<'ll, 'tcx> {
 
     eh_personality: Cell<Option<&'ll Value>>,
     eh_catch_typeinfo: Cell<Option<&'ll Value>>,
-    pub rust_try_fn: Cell<Option<&'ll Value>>,
+    pub rust_try_fn: Cell<Option<(&'ll Type, &'ll Value)>>,
 
-    intrinsics: RefCell<FxHashMap<&'static str, &'ll Value>>,
+    intrinsics: RefCell<FxHashMap<&'static str, (&'ll Type, &'ll Value)>>,
 
     /// A counter that is used for generating local symbol names
     local_gen_sym_counter: Cell<usize>,
+}
+
+pub struct TypeLowering<'ll> {
+    /// Associated LLVM type
+    pub lltype: &'ll Type,
+
+    /// If padding is used the slice maps fields from source order
+    /// to llvm order.
+    pub field_remapping: Option<SmallVec<[u32; 4]>>,
 }
 
 fn to_llvm_tls_model(tls_model: TlsModel) -> llvm::ThreadLocalMode {
@@ -304,7 +318,7 @@ impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
             const_globals: Default::default(),
             statics_to_rauw: RefCell::new(Vec::new()),
             used_statics: RefCell::new(Vec::new()),
-            lltypes: Default::default(),
+            type_lowering: Default::default(),
             scalar_lltypes: Default::default(),
             pointee_infos: Default::default(),
             isize_ty,
@@ -452,7 +466,7 @@ impl MiscMethods<'tcx> for CodegenCx<'ll, 'tcx> {
 }
 
 impl CodegenCx<'b, 'tcx> {
-    crate fn get_intrinsic(&self, key: &str) -> &'b Value {
+    crate fn get_intrinsic(&self, key: &str) -> (&'b Type, &'b Value) {
         if let Some(v) = self.intrinsics.borrow().get(key).cloned() {
             return v;
         }
@@ -465,18 +479,18 @@ impl CodegenCx<'b, 'tcx> {
         name: &'static str,
         args: Option<&[&'b llvm::Type]>,
         ret: &'b llvm::Type,
-    ) -> &'b llvm::Value {
+    ) -> (&'b llvm::Type, &'b llvm::Value) {
         let fn_ty = if let Some(args) = args {
             self.type_func(args, ret)
         } else {
             self.type_variadic_func(&[], ret)
         };
         let f = self.declare_cfn(name, llvm::UnnamedAddr::No, fn_ty);
-        self.intrinsics.borrow_mut().insert(name, f);
-        f
+        self.intrinsics.borrow_mut().insert(name, (fn_ty, f));
+        (fn_ty, f)
     }
 
-    fn declare_intrinsic(&self, key: &str) -> Option<&'b Value> {
+    fn declare_intrinsic(&self, key: &str) -> Option<(&'b Type, &'b Value)> {
         macro_rules! ifn {
             ($name:expr, fn() -> $ret:expr) => (
                 if key == $name {

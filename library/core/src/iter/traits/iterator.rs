@@ -1,7 +1,3 @@
-// ignore-tidy-filelength
-// This file almost exclusively consists of the definition of `Iterator`. We
-// can't split that into multiple files.
-
 use crate::cmp::{self, Ordering};
 use crate::ops::{ControlFlow, Try};
 
@@ -2845,6 +2841,14 @@ pub trait Iterator {
     ///
     /// assert_eq!(left, [1, 3]);
     /// assert_eq!(right, [2, 4]);
+    ///
+    /// // you can also unzip multiple nested tuples at once
+    /// let a = [(1, (2, 3)), (4, (5, 6))];
+    ///
+    /// let (x, (y, z)): (Vec<_>, (Vec<_>, Vec<_>)) = a.iter().cloned().unzip();
+    /// assert_eq!(x, [1, 4]);
+    /// assert_eq!(y, [2, 5]);
+    /// assert_eq!(z, [3, 6]);
     /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     fn unzip<A, B, FromA, FromB>(self) -> (FromA, FromB)
@@ -2853,28 +2857,9 @@ pub trait Iterator {
         FromB: Default + Extend<B>,
         Self: Sized + Iterator<Item = (A, B)>,
     {
-        fn extend<'a, A, B>(
-            ts: &'a mut impl Extend<A>,
-            us: &'a mut impl Extend<B>,
-        ) -> impl FnMut((), (A, B)) + 'a {
-            move |(), (t, u)| {
-                ts.extend_one(t);
-                us.extend_one(u);
-            }
-        }
-
-        let mut ts: FromA = Default::default();
-        let mut us: FromB = Default::default();
-
-        let (lower_bound, _) = self.size_hint();
-        if lower_bound > 0 {
-            ts.extend_reserve(lower_bound);
-            us.extend_reserve(lower_bound);
-        }
-
-        self.fold((), extend(&mut ts, &mut us));
-
-        (ts, us)
+        let mut unzipped: (FromA, FromB) = Default::default();
+        unzipped.extend(self);
+        unzipped
     }
 
     /// Creates an iterator which copies all of its elements.
@@ -3456,7 +3441,7 @@ pub trait Iterator {
         self.map(f).is_sorted()
     }
 
-    /// See [TrustedRandomAccess]
+    /// See [TrustedRandomAccess][super::super::TrustedRandomAccess]
     // The unusual name is to avoid name collisions in method resolution
     // see #76479.
     #[inline]

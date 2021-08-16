@@ -3,8 +3,8 @@
 #![feature(link_cfg)]
 #![feature(nll)]
 #![feature(staged_api)]
-#![feature(unwind_attributes)]
 #![feature(static_nobundle)]
+#![feature(c_unwind)]
 #![cfg_attr(not(target_env = "msvc"), feature(libc))]
 
 cfg_if::cfg_if! {
@@ -13,6 +13,7 @@ cfg_if::cfg_if! {
     } else if #[cfg(any(
         target_os = "l4re",
         target_os = "none",
+        target_os = "espidf",
     ))] {
         // These "unix" family members do not have unwinder.
         // Note this also matches x86_64-unknown-none-linuxkernel.

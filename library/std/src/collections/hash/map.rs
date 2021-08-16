@@ -1,5 +1,3 @@
-// ignore-tidy-filelength
-
 #[cfg(test)]
 mod tests;
 
@@ -10,6 +8,7 @@ use hashbrown::hash_map as base;
 use crate::borrow::Borrow;
 use crate::cell::Cell;
 use crate::collections::TryReserveError;
+use crate::collections::TryReserveErrorKind;
 use crate::fmt::{self, Debug};
 #[allow(deprecated)]
 use crate::hash::{BuildHasher, Hash, Hasher, SipHasher13};
@@ -668,7 +667,6 @@ where
     /// # Examples
     ///
     /// ```
-    /// #![feature(shrink_to)]
     /// use std::collections::HashMap;
     ///
     /// let mut map: HashMap<i32, i32> = HashMap::with_capacity(100);
@@ -681,7 +679,7 @@ where
     /// assert!(map.capacity() >= 2);
     /// ```
     #[inline]
-    #[unstable(feature = "shrink_to", reason = "new API", issue = "56431")]
+    #[stable(feature = "shrink_to", since = "1.56.0")]
     pub fn shrink_to(&mut self, min_capacity: usize) {
         self.base.shrink_to(min_capacity);
     }
@@ -2992,9 +2990,11 @@ fn map_entry<'a, K: 'a, V: 'a>(raw: base::RustcEntry<'a, K, V>) -> Entry<'a, K, 
 #[inline]
 pub(super) fn map_try_reserve_error(err: hashbrown::TryReserveError) -> TryReserveError {
     match err {
-        hashbrown::TryReserveError::CapacityOverflow => TryReserveError::CapacityOverflow,
+        hashbrown::TryReserveError::CapacityOverflow => {
+            TryReserveErrorKind::CapacityOverflow.into()
+        }
         hashbrown::TryReserveError::AllocError { layout } => {
-            TryReserveError::AllocError { layout, non_exhaustive: () }
+            TryReserveErrorKind::AllocError { layout, non_exhaustive: () }.into()
         }
     }
 }

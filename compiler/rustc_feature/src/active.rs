@@ -281,9 +281,6 @@ declare_features! (
     // feature-group-start: actual feature gates
     // -------------------------------------------------------------------------
 
-    /// Allows using `#[plugin_registrar]` on functions.
-    (active, plugin_registrar, "1.0.0", Some(29597), None),
-
     /// Allows using `#![plugin(myplugin)]`.
     (active, plugin, "1.0.0", Some(29597), None),
 
@@ -310,11 +307,6 @@ declare_features! (
 
     /// Allows `extern "platform-intrinsic" { ... }`.
     (active, platform_intrinsics, "1.4.0", Some(27731), None),
-
-    /// Allows `#[unwind(..)]`.
-    ///
-    /// Permits specifying whether a function should permit unwinding or abort on unwind.
-    (active, unwind_attributes, "1.4.0", Some(58760), None),
 
     /// Allows attributes on expressions and non-item statements.
     (active, stmt_expr_attributes, "1.6.0", Some(15701), None),

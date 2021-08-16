@@ -450,8 +450,7 @@ impl Session {
     {
         let old_count = self.err_count();
         let result = f();
-        let errors = self.err_count() - old_count;
-        if errors == 0 { Ok(result) } else { Err(ErrorReported) }
+        if self.err_count() == old_count { Ok(result) } else { Err(ErrorReported) }
     }
     pub fn span_warn<S: Into<MultiSpan>>(&self, sp: S, msg: &str) {
         self.diagnostic().span_warn(sp, msg)
@@ -498,6 +497,10 @@ impl Session {
     #[inline]
     pub fn diagnostic(&self) -> &rustc_errors::Handler {
         &self.parse_sess.span_diagnostic
+    }
+
+    pub fn with_disabled_diagnostic<T, F: FnOnce() -> T>(&self, f: F) -> T {
+        self.parse_sess.span_diagnostic.with_disabled_diagnostic(f)
     }
 
     /// Analogous to calling methods on the given `DiagnosticBuilder`, but
@@ -787,12 +790,6 @@ impl Session {
             || self.opts.cg.force_unwind_tables.unwrap_or(
                 self.panic_strategy() == PanicStrategy::Unwind || self.target.default_uwtable,
             )
-    }
-
-    /// Returns the symbol name for the registrar function,
-    /// given the crate `Svh` and the function `DefIndex`.
-    pub fn generate_plugin_registrar_symbol(&self, stable_crate_id: StableCrateId) -> String {
-        format!("__rustc_plugin_registrar_{:08x}__", stable_crate_id.to_u64())
     }
 
     pub fn generate_proc_macro_decls_symbol(&self, stable_crate_id: StableCrateId) -> String {

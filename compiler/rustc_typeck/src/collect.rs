@@ -1,4 +1,3 @@
-// ignore-tidy-filelength
 //! "Collection" is the process of determining the type and other external
 //! details of each item in Rust. Collection is specifically concerned
 //! with *inter-procedural* things -- for example, for a function
@@ -14,8 +13,6 @@
 //!
 //! At present, however, we do run collection across all items in the
 //! crate as a kind of pass. This should eventually be factored away.
-
-// ignore-tidy-filelength
 
 use crate::astconv::{AstConv, SizedByDefault};
 use crate::bounds::Bounds;
@@ -367,7 +364,7 @@ impl AstConv<'tcx> for ItemCtxt<'tcx> {
     }
 
     fn default_constness_for_trait_bounds(&self) -> hir::Constness {
-        self.node().constness()
+        self.node().constness_for_typeck()
     }
 
     fn get_type_parameter_bounds(
@@ -643,7 +640,7 @@ fn type_param_predicates(
         )
         .into_iter()
         .filter(|(predicate, _)| match predicate.kind().skip_binder() {
-            ty::PredicateKind::Trait(data, _) => data.self_ty().is_param(index),
+            ty::PredicateKind::Trait(data) => data.self_ty().is_param(index),
             _ => false,
         }),
     );
@@ -1201,7 +1198,7 @@ fn super_predicates_that_define_assoc_type(
             // which will, in turn, reach indirect supertraits.
             for &(pred, span) in superbounds {
                 debug!("superbound: {:?}", pred);
-                if let ty::PredicateKind::Trait(bound, _) = pred.kind().skip_binder() {
+                if let ty::PredicateKind::Trait(bound) = pred.kind().skip_binder() {
                     tcx.at(span).super_predicates_of(bound.def_id());
                 }
             }
@@ -2442,7 +2439,7 @@ fn explicit_predicates_of(tcx: TyCtxt<'_>, def_id: DefId) -> ty::GenericPredicat
             .iter()
             .copied()
             .filter(|(pred, _)| match pred.kind().skip_binder() {
-                ty::PredicateKind::Trait(tr, _) => !is_assoc_item_ty(tr.self_ty()),
+                ty::PredicateKind::Trait(tr) => !is_assoc_item_ty(tr.self_ty()),
                 ty::PredicateKind::Projection(proj) => {
                     !is_assoc_item_ty(proj.projection_ty.self_ty())
                 }
@@ -2776,8 +2773,6 @@ fn codegen_fn_attrs(tcx: TyCtxt<'_>, id: DefId) -> CodegenFnAttrs {
             codegen_fn_attrs.flags |= CodegenFnAttrFlags::COLD;
         } else if tcx.sess.check_name(attr, sym::rustc_allocator) {
             codegen_fn_attrs.flags |= CodegenFnAttrFlags::ALLOCATOR;
-        } else if tcx.sess.check_name(attr, sym::unwind) {
-            codegen_fn_attrs.flags |= CodegenFnAttrFlags::UNWIND;
         } else if tcx.sess.check_name(attr, sym::ffi_returns_twice) {
             if tcx.is_foreign_item(id) {
                 codegen_fn_attrs.flags |= CodegenFnAttrFlags::FFI_RETURNS_TWICE;
@@ -2829,7 +2824,7 @@ fn codegen_fn_attrs(tcx: TyCtxt<'_>, id: DefId) -> CodegenFnAttrs {
                 .emit();
             }
         } else if tcx.sess.check_name(attr, sym::rustc_allocator_nounwind) {
-            codegen_fn_attrs.flags |= CodegenFnAttrFlags::RUSTC_ALLOCATOR_NOUNWIND;
+            codegen_fn_attrs.flags |= CodegenFnAttrFlags::NEVER_UNWIND;
         } else if tcx.sess.check_name(attr, sym::naked) {
             codegen_fn_attrs.flags |= CodegenFnAttrFlags::NAKED;
         } else if tcx.sess.check_name(attr, sym::no_mangle) {
@@ -3198,6 +3193,15 @@ fn codegen_fn_attrs(tcx: TyCtxt<'_>, id: DefId) -> CodegenFnAttrs {
     // also applies to weak symbols where they all have known symbol names.
     if codegen_fn_attrs.flags.contains(CodegenFnAttrFlags::RUSTC_STD_INTERNAL_SYMBOL) {
         codegen_fn_attrs.flags |= CodegenFnAttrFlags::NO_MANGLE;
+    }
+
+    // Any linkage to LLVM intrinsics for now forcibly marks them all as never
+    // unwinds since LLVM sometimes can't handle codegen which `invoke`s
+    // intrinsic functions.
+    if let Some(name) = &codegen_fn_attrs.link_name {
+        if name.as_str().starts_with("llvm.") {
+            codegen_fn_attrs.flags |= CodegenFnAttrFlags::NEVER_UNWIND;
+        }
     }
 
     codegen_fn_attrs

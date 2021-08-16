@@ -326,6 +326,25 @@ pub fn is_trait_method(cx: &LateContext<'_>, expr: &Expr<'_>, diag_item: Symbol)
         .map_or(false, |did| is_diag_trait_item(cx, did, diag_item))
 }
 
+/// Checks if the given expression is a path referring an item on the trait
+/// that is marked with the given diagnostic item.
+///
+/// For checking method call expressions instead of path expressions, use
+/// [`is_trait_method`].
+///
+/// For example, this can be used to find if an expression like `u64::default`
+/// refers to an item of the trait `Default`, which is associated with the
+/// `diag_item` of `sym::Default`.
+pub fn is_trait_item(cx: &LateContext<'_>, expr: &Expr<'_>, diag_item: Symbol) -> bool {
+    if let hir::ExprKind::Path(ref qpath) = expr.kind {
+        cx.qpath_res(qpath, expr.hir_id)
+            .opt_def_id()
+            .map_or(false, |def_id| is_diag_trait_item(cx, def_id, diag_item))
+    } else {
+        false
+    }
+}
+
 pub fn last_path_segment<'tcx>(path: &QPath<'tcx>) -> &'tcx PathSegment<'tcx> {
     match *path {
         QPath::Resolved(_, path) => path.segments.last().expect("A path must have at least one segment"),
@@ -556,6 +575,54 @@ pub fn trait_ref_of_method<'tcx>(cx: &LateContext<'tcx>, hir_id: HirId) -> Optio
         then { return impl_.of_trait.as_ref(); }
     }
     None
+}
+
+/// This method will return tuple of projection stack and root of the expression,
+/// used in `can_mut_borrow_both`.
+///
+/// For example, if `e` represents the `v[0].a.b[x]`
+/// this method will return a tuple, composed of a `Vec`
+/// containing the `Expr`s for `v[0], v[0].a, v[0].a.b, v[0].a.b[x]`
+/// and a `Expr` for root of them, `v`
+fn projection_stack<'a, 'hir>(mut e: &'a Expr<'hir>) -> (Vec<&'a Expr<'hir>>, &'a Expr<'hir>) {
+    let mut result = vec![];
+    let root = loop {
+        match e.kind {
+            ExprKind::Index(ep, _) | ExprKind::Field(ep, _) => {
+                result.push(e);
+                e = ep;
+            },
+            _ => break e,
+        };
+    };
+    result.reverse();
+    (result, root)
+}
+
+/// Checks if two expressions can be mutably borrowed simultaneously
+/// and they aren't dependent on borrowing same thing twice
+pub fn can_mut_borrow_both(cx: &LateContext<'_>, e1: &Expr<'_>, e2: &Expr<'_>) -> bool {
+    let (s1, r1) = projection_stack(e1);
+    let (s2, r2) = projection_stack(e2);
+    if !eq_expr_value(cx, r1, r2) {
+        return true;
+    }
+    for (x1, x2) in s1.iter().zip(s2.iter()) {
+        match (&x1.kind, &x2.kind) {
+            (ExprKind::Field(_, i1), ExprKind::Field(_, i2)) => {
+                if i1 != i2 {
+                    return true;
+                }
+            },
+            (ExprKind::Index(_, i1), ExprKind::Index(_, i2)) => {
+                if !eq_expr_value(cx, i1, i2) {
+                    return false;
+                }
+            },
+            _ => return false,
+        }
+    }
+    false
 }
 
 /// Checks if the top level expression can be moved into a closure as is.
@@ -894,17 +961,6 @@ pub fn is_else_clause(tcx: TyCtxt<'_>, expr: &Expr<'_>) -> bool {
     let map = tcx.hir();
     let mut iter = map.parent_iter(expr.hir_id);
     match iter.next() {
-        Some((arm_id, Node::Arm(..))) => matches!(
-            iter.next(),
-            Some((
-                _,
-                Node::Expr(Expr {
-                    kind: ExprKind::Match(_, [_, else_arm], MatchSource::IfLetDesugar { .. }),
-                    ..
-                })
-            ))
-            if else_arm.hir_id == arm_id
-        ),
         Some((
             _,
             Node::Expr(Expr {
@@ -1303,15 +1359,15 @@ pub fn if_sequence<'tcx>(mut expr: &'tcx Expr<'tcx>) -> (Vec<&'tcx Expr<'tcx>>, 
     let mut conds = Vec::new();
     let mut blocks: Vec<&Block<'_>> = Vec::new();
 
-    while let ExprKind::If(cond, then_expr, ref else_expr) = expr.kind {
-        conds.push(cond);
-        if let ExprKind::Block(block, _) = then_expr.kind {
+    while let Some(higher::IfOrIfLet { cond, then, r#else }) = higher::IfOrIfLet::hir(expr) {
+        conds.push(&*cond);
+        if let ExprKind::Block(ref block, _) = then.kind {
             blocks.push(block);
         } else {
             panic!("ExprKind::If node is not an ExprKind::Block");
         }
 
-        if let Some(else_expr) = *else_expr {
+        if let Some(ref else_expr) = r#else {
             expr = else_expr;
         } else {
             break;

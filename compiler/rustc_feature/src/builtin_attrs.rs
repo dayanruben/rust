@@ -292,18 +292,6 @@ pub const BUILTIN_ATTRIBUTES: &[BuiltinAttribute] = &[
 
     // Plugins:
     (
-        sym::plugin_registrar, Normal, template!(Word),
-        Gated(
-            Stability::Deprecated(
-                "https://github.com/rust-lang/rust/pull/64675",
-                Some("may be removed in a future compiler version"),
-            ),
-            sym::plugin_registrar,
-            "compiler plugins are deprecated",
-            cfg_fn!(plugin_registrar)
-        )
-    ),
-    (
         sym::plugin, CrateLevel, template!(List: "name"),
         Gated(
             Stability::Deprecated(
@@ -419,10 +407,6 @@ pub const BUILTIN_ATTRIBUTES: &[BuiltinAttribute] = &[
     ),
     gated!(panic_runtime, AssumedUsed, template!(Word), experimental!(panic_runtime)),
     gated!(needs_panic_runtime, AssumedUsed, template!(Word), experimental!(needs_panic_runtime)),
-    gated!(
-        unwind, AssumedUsed, template!(List: "allowed|aborts"), unwind_attributes,
-        experimental!(unwind),
-    ),
     gated!(
         compiler_builtins, AssumedUsed, template!(Word),
         "the `#[compiler_builtins]` attribute is used to identify the `compiler_builtins` crate \

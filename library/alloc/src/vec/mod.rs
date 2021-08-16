@@ -811,7 +811,9 @@ impl<T, A: Allocator> Vec<T, A> {
     ///
     /// Note that the allocator may give the collection more space than it
     /// requests. Therefore, capacity can not be relied upon to be precisely
-    /// minimal. Prefer `reserve` if future insertions are expected.
+    /// minimal. Prefer [`reserve`] if future insertions are expected.
+    ///
+    /// [`reserve`]: Vec::reserve
     ///
     /// # Panics
     ///
@@ -875,7 +877,9 @@ impl<T, A: Allocator> Vec<T, A> {
     ///
     /// Note that the allocator may give the collection more space than it
     /// requests. Therefore, capacity can not be relied upon to be precisely
-    /// minimal. Prefer `reserve` if future insertions are expected.
+    /// minimal. Prefer [`reserve`] if future insertions are expected.
+    ///
+    /// [`reserve`]: Vec::reserve
     ///
     /// # Errors
     ///
@@ -943,7 +947,6 @@ impl<T, A: Allocator> Vec<T, A> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(shrink_to)]
     /// let mut vec = Vec::with_capacity(10);
     /// vec.extend([1, 2, 3]);
     /// assert_eq!(vec.capacity(), 10);
@@ -953,7 +956,7 @@ impl<T, A: Allocator> Vec<T, A> {
     /// assert!(vec.capacity() >= 3);
     /// ```
     #[cfg(not(no_global_oom_handling))]
-    #[unstable(feature = "shrink_to", reason = "new API", issue = "56431")]
+    #[stable(feature = "shrink_to", since = "1.56.0")]
     pub fn shrink_to(&mut self, min_capacity: usize) {
         if self.capacity() > min_capacity {
             self.buf.shrink_to_fit(cmp::max(self.len, min_capacity));
@@ -2376,6 +2379,35 @@ impl<T, A: Allocator> ops::DerefMut for Vec<T, A> {
 }
 
 #[cfg(not(no_global_oom_handling))]
+trait SpecCloneFrom {
+    fn clone_from(this: &mut Self, other: &Self);
+}
+
+#[cfg(not(no_global_oom_handling))]
+impl<T: Clone, A: Allocator> SpecCloneFrom for Vec<T, A> {
+    default fn clone_from(this: &mut Self, other: &Self) {
+        // drop anything that will not be overwritten
+        this.truncate(other.len());
+
+        // self.len <= other.len due to the truncate above, so the
+        // slices here are always in-bounds.
+        let (init, tail) = other.split_at(this.len());
+
+        // reuse the contained values' allocations/resources.
+        this.clone_from_slice(init);
+        this.extend_from_slice(tail);
+    }
+}
+
+#[cfg(not(no_global_oom_handling))]
+impl<T: Copy, A: Allocator> SpecCloneFrom for Vec<T, A> {
+    fn clone_from(this: &mut Self, other: &Self) {
+        this.clear();
+        this.extend_from_slice(other);
+    }
+}
+
+#[cfg(not(no_global_oom_handling))]
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T: Clone, A: Allocator + Clone> Clone for Vec<T, A> {
     #[cfg(not(test))]
@@ -2395,16 +2427,7 @@ impl<T: Clone, A: Allocator + Clone> Clone for Vec<T, A> {
     }
 
     fn clone_from(&mut self, other: &Self) {
-        // drop anything that will not be overwritten
-        self.truncate(other.len());
-
-        // self.len <= other.len due to the truncate above, so the
-        // slices here are always in-bounds.
-        let (init, tail) = other.split_at(self.len());
-
-        // reuse the contained values' allocations/resources.
-        self.clone_from_slice(init);
-        self.extend_from_slice(tail);
+        SpecCloneFrom::clone_from(self, other)
     }
 }
 
