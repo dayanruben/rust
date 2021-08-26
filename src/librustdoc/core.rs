@@ -265,7 +265,7 @@ crate fn create_config(
         stderr: None,
         lint_caps,
         parse_sess_created: None,
-        register_lints: Some(box crate::lint::register_lints),
+        register_lints: Some(Box::new(crate::lint::register_lints)),
         override_queries: Some(|_sess, providers, _external_providers| {
             // Most lints will require typechecking, so just don't run them.
             providers.lint_mod = |_, _| {};
@@ -528,9 +528,7 @@ crate fn run_global_ctxt(
 
     let render_options = ctxt.render_options;
     let mut cache = ctxt.cache;
-    krate = tcx.sess.time("create_format_cache", || {
-        cache.populate(krate, tcx, &render_options.extern_html_root_urls, &render_options.output)
-    });
+    krate = tcx.sess.time("create_format_cache", || cache.populate(krate, tcx, &render_options));
 
     // The main crate doc comments are always collapsed.
     krate.collapsed = true;

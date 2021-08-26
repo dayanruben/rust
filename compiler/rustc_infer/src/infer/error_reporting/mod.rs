@@ -1180,16 +1180,26 @@ impl<'a, 'tcx> InferCtxt<'a, 'tcx> {
                     //         |   |
                     //         |   elided as they were the same
                     //         not elided, they were different, but irrelevant
+                    //
+                    // For bound lifetimes, keep the names of the lifetimes,
+                    // even if they are the same so that it's clear what's happening
+                    // if we have something like
+                    //
+                    // for<'r, 's> fn(Inv<'r>, Inv<'s>)
+                    // for<'r> fn(Inv<'r>, Inv<'r>)
                     let lifetimes = sub1.regions().zip(sub2.regions());
                     for (i, lifetimes) in lifetimes.enumerate() {
                         let l1 = lifetime_display(lifetimes.0);
                         let l2 = lifetime_display(lifetimes.1);
-                        if lifetimes.0 == lifetimes.1 {
-                            values.0.push_normal("'_");
-                            values.1.push_normal("'_");
-                        } else {
+                        if lifetimes.0 != lifetimes.1 {
                             values.0.push_highlighted(l1);
                             values.1.push_highlighted(l2);
+                        } else if lifetimes.0.is_late_bound() {
+                            values.0.push_normal(l1);
+                            values.1.push_normal(l2);
+                        } else {
+                            values.0.push_normal("'_");
+                            values.1.push_normal("'_");
                         }
                         self.push_comma(&mut values.0, &mut values.1, len, i);
                     }
@@ -1687,7 +1697,7 @@ impl<'a, 'tcx> InferCtxt<'a, 'tcx> {
         }
 
         // In some (most?) cases cause.body_id points to actual body, but in some cases
-        // it's a actual definition. According to the comments (e.g. in
+        // it's an actual definition. According to the comments (e.g. in
         // librustc_typeck/check/compare_method.rs:compare_predicate_entailment) the latter
         // is relied upon by some other code. This might (or might not) need cleanup.
         let body_owner_def_id =

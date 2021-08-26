@@ -58,7 +58,6 @@ This API is completely unstable and subject to change.
 #![doc(html_root_url = "https://doc.rust-lang.org/nightly/nightly-rustc/")]
 #![cfg_attr(bootstrap, feature(bindings_after_at))]
 #![feature(bool_to_option)]
-#![feature(box_syntax)]
 #![feature(crate_visibility_modifier)]
 #![feature(format_args_capture)]
 #![feature(in_band_lifetimes)]
@@ -292,7 +291,7 @@ fn check_main_fn_ty(tcx: TyCtxt<'_>, main_def_id: DefId) {
     }
 
     for attr in tcx.get_attrs(main_def_id) {
-        if tcx.sess.check_name(attr, sym::track_caller) {
+        if attr.has_name(sym::track_caller) {
             tcx.sess
                 .struct_span_err(
                     attr.span,
@@ -406,7 +405,7 @@ fn check_start_fn_ty(tcx: TyCtxt<'_>, start_def_id: DefId) {
 
                     let attrs = tcx.hir().attrs(start_id);
                     for attr in attrs {
-                        if tcx.sess.check_name(attr, sym::track_caller) {
+                        if attr.has_name(sym::track_caller) {
                             tcx.sess
                                 .struct_span_err(
                                     attr.span,

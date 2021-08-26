@@ -471,9 +471,6 @@ declare_features! (
     /// Allows #[repr(transparent)] on unions (RFC 2645).
     (active, transparent_unions, "1.37.0", Some(60405), None),
 
-    /// Allows explicit discriminants on non-unit enum variants.
-    (active, arbitrary_enum_discriminant, "1.37.0", Some(60553), None),
-
     /// Allows `async || body` closures.
     (active, async_closure, "1.37.0", Some(62290), None),
 
@@ -555,7 +552,7 @@ declare_features! (
     (incomplete, lazy_normalization_consts, "1.46.0", Some(72219), None),
 
     /// Allows `if let` guard in match arms.
-    (incomplete, if_let_guard, "1.47.0", Some(51114), None),
+    (active, if_let_guard, "1.47.0", Some(51114), None),
 
     /// Allows non-trivial generic constants which have to be manually propagated upwards.
     (incomplete, const_evaluatable_checked, "1.48.0", Some(76560), None),

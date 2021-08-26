@@ -103,6 +103,7 @@
 #![feature(const_type_id)]
 #![feature(const_type_name)]
 #![feature(const_unreachable_unchecked)]
+#![feature(const_default_impls)]
 #![feature(duration_consts_2)]
 #![feature(ptr_metadata)]
 #![feature(slice_ptr_get)]
@@ -110,6 +111,7 @@
 //
 // Language features:
 #![feature(abi_unadjusted)]
+#![feature(allow_internal_unsafe)]
 #![feature(allow_internal_unstable)]
 #![feature(asm)]
 #![feature(associated_type_bounds)]

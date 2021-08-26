@@ -45,12 +45,11 @@ use rustc_middle::ty::print::with_no_trimmed_paths;
 use rustc_middle::ty::subst::{GenericArgKind, Subst};
 use rustc_middle::ty::Instance;
 use rustc_middle::ty::{self, layout::LayoutError, Ty, TyCtxt};
-use rustc_session::lint::FutureIncompatibilityReason;
-use rustc_session::Session;
+use rustc_session::lint::{BuiltinLintDiagnostics, FutureIncompatibilityReason};
 use rustc_span::edition::Edition;
 use rustc_span::source_map::Spanned;
 use rustc_span::symbol::{kw, sym, Ident, Symbol};
-use rustc_span::{BytePos, Span};
+use rustc_span::{BytePos, InnerSpan, MultiSpan, Span};
 use rustc_target::abi::{LayoutOf, VariantIdx};
 use rustc_trait_selection::traits::misc::can_type_implement_copy;
 
@@ -344,7 +343,7 @@ impl UnsafeCode {
 
 impl EarlyLintPass for UnsafeCode {
     fn check_attribute(&mut self, cx: &EarlyContext<'_>, attr: &ast::Attribute) {
-        if cx.sess().check_name(attr, sym::allow_internal_unsafe) {
+        if attr.has_name(sym::allow_internal_unsafe) {
             self.report_unsafe(cx, attr.span, |lint| {
                 lint.build(
                     "`allow_internal_unsafe` allows defining \
@@ -492,12 +491,12 @@ pub struct MissingDoc {
 
 impl_lint_pass!(MissingDoc => [MISSING_DOCS]);
 
-fn has_doc(sess: &Session, attr: &ast::Attribute) -> bool {
+fn has_doc(attr: &ast::Attribute) -> bool {
     if attr.is_doc_comment() {
         return true;
     }
 
-    if !sess.check_name(attr, sym::doc) {
+    if !attr.has_name(sym::doc) {
         return false;
     }
 
@@ -554,7 +553,7 @@ impl MissingDoc {
         }
 
         let attrs = cx.tcx.get_attrs(def_id.to_def_id());
-        let has_doc = attrs.iter().any(|a| has_doc(cx.sess(), a));
+        let has_doc = attrs.iter().any(has_doc);
         if !has_doc {
             cx.struct_span_lint(
                 MISSING_DOCS,
@@ -568,10 +567,10 @@ impl MissingDoc {
 }
 
 impl<'tcx> LateLintPass<'tcx> for MissingDoc {
-    fn enter_lint_attrs(&mut self, cx: &LateContext<'_>, attrs: &[ast::Attribute]) {
+    fn enter_lint_attrs(&mut self, _cx: &LateContext<'_>, attrs: &[ast::Attribute]) {
         let doc_hidden = self.doc_hidden()
             || attrs.iter().any(|attr| {
-                cx.sess().check_name(attr, sym::doc)
+                attr.has_name(sym::doc)
                     && match attr.meta_item_list() {
                         None => false,
                         Some(l) => attr::list_contains_name(&l, sym::hidden),
@@ -595,7 +594,7 @@ impl<'tcx> LateLintPass<'tcx> for MissingDoc {
             }
 
             let attrs = cx.tcx.hir().attrs(macro_def.hir_id());
-            let has_doc = attrs.iter().any(|a| has_doc(cx.sess(), a));
+            let has_doc = attrs.iter().any(has_doc);
             if !has_doc {
                 cx.struct_span_lint(
                     MISSING_DOCS,
@@ -999,7 +998,7 @@ impl EarlyLintPass for DeprecatedAttr {
                 return;
             }
         }
-        if cx.sess().check_name(attr, sym::no_start) || cx.sess().check_name(attr, sym::crate_id) {
+        if attr.has_name(sym::no_start) || attr.has_name(sym::crate_id) {
             let path_str = pprust::path_to_string(&attr.get_normal_item().path);
             let msg = format!("use of deprecated attribute `{}`: no longer used.", path_str);
             lint_deprecated_attr(cx, attr, &msg, None);
@@ -1028,7 +1027,7 @@ fn warn_if_doc(cx: &EarlyContext<'_>, node_span: Span, node_kind: &str, attrs: &
 
         let span = sugared_span.take().unwrap_or(attr.span);
 
-        if is_doc_comment || cx.sess().check_name(attr, sym::doc) {
+        if is_doc_comment || attr.has_name(sym::doc) {
             cx.struct_span_lint(UNUSED_DOC_COMMENTS, span, |lint| {
                 let mut err = lint.build("unused doc comment");
                 err.span_label(
@@ -1301,7 +1300,7 @@ declare_lint_pass!(
 
 impl<'tcx> LateLintPass<'tcx> for UnstableFeatures {
     fn check_attribute(&mut self, cx: &LateContext<'_>, attr: &ast::Attribute) {
-        if cx.sess().check_name(attr, sym::feature) {
+        if attr.has_name(sym::feature) {
             if let Some(items) = attr.meta_item_list() {
                 for item in items {
                     cx.struct_span_lint(UNSTABLE_FEATURES, item.span(), |lint| {
@@ -1652,6 +1651,7 @@ impl<'tcx> LateLintPass<'tcx> for TrivialConstraints {
                     ObjectSafe(..) |
                     ClosureKind(..) |
                     Subtype(..) |
+                    Coerce(..) |
                     ConstEvaluatable(..) |
                     ConstEquate(..) |
                     TypeWellFormedFromEnv(..) => continue,
@@ -2770,7 +2770,7 @@ impl ClashingExternDeclarations {
                     overridden_link_name,
                     tcx.get_attrs(fi.def_id.to_def_id())
                         .iter()
-                        .find(|at| tcx.sess.check_name(at, sym::link_name))
+                        .find(|at| at.has_name(sym::link_name))
                         .unwrap()
                         .span,
                 )
@@ -3135,6 +3135,126 @@ impl<'tcx> LateLintPass<'tcx> for DerefNullPtr {
                         );
                         err.emit();
                     });
+                }
+            }
+        }
+    }
+}
+
+declare_lint! {
+    /// The `named_asm_labels` lint detects the use of named labels in the
+    /// inline `asm!` macro.
+    ///
+    /// ### Example
+    ///
+    /// ```rust,compile_fail
+    /// #![feature(asm)]
+    /// fn main() {
+    ///     unsafe {
+    ///         asm!("foo: bar");
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// {{produces}}
+    ///
+    /// ### Explanation
+    ///
+    /// LLVM is allowed to duplicate inline assembly blocks for any
+    /// reason, for example when it is in a function that gets inlined. Because
+    /// of this, GNU assembler [local labels] *must* be used instead of labels
+    /// with a name. Using named labels might cause assembler or linker errors.
+    ///
+    /// See the [unstable book] for more details.
+    ///
+    /// [local labels]: https://sourceware.org/binutils/docs/as/Symbol-Names.html#Local-Labels
+    /// [unstable book]: https://doc.rust-lang.org/nightly/unstable-book/library-features/asm.html#labels
+    pub NAMED_ASM_LABELS,
+    Deny,
+    "named labels in inline assembly",
+}
+
+declare_lint_pass!(NamedAsmLabels => [NAMED_ASM_LABELS]);
+
+impl<'tcx> LateLintPass<'tcx> for NamedAsmLabels {
+    fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx hir::Expr<'tcx>) {
+        if let hir::Expr {
+            kind: hir::ExprKind::InlineAsm(hir::InlineAsm { template_strs, .. }),
+            ..
+        } = expr
+        {
+            for (template_sym, template_snippet, template_span) in template_strs.iter() {
+                let template_str = &template_sym.as_str();
+                let find_label_span = |needle: &str| -> Option<Span> {
+                    if let Some(template_snippet) = template_snippet {
+                        let snippet = template_snippet.as_str();
+                        if let Some(pos) = snippet.find(needle) {
+                            let end = pos
+                                + &snippet[pos..]
+                                    .find(|c| c == ':')
+                                    .unwrap_or(snippet[pos..].len() - 1);
+                            let inner = InnerSpan::new(pos, end);
+                            return Some(template_span.from_inner(inner));
+                        }
+                    }
+
+                    None
+                };
+
+                let mut found_labels = Vec::new();
+
+                // A semicolon might not actually be specified as a separator for all targets, but it seems like LLVM accepts it always
+                let statements = template_str.split(|c| matches!(c, '\n' | ';'));
+                for statement in statements {
+                    // If there's a comment, trim it from the statement
+                    let statement = statement.find("//").map_or(statement, |idx| &statement[..idx]);
+                    let mut start_idx = 0;
+                    for (idx, _) in statement.match_indices(':') {
+                        let possible_label = statement[start_idx..idx].trim();
+                        let mut chars = possible_label.chars();
+                        if let Some(c) = chars.next() {
+                            // A label starts with an alphabetic character or . or _ and continues with alphanumeric characters, _, or $
+                            if (c.is_alphabetic() || matches!(c, '.' | '_'))
+                                && chars.all(|c| c.is_alphanumeric() || matches!(c, '_' | '$'))
+                            {
+                                found_labels.push(possible_label);
+                            } else {
+                                // If we encounter a non-label, there cannot be any further labels, so stop checking
+                                break;
+                            }
+                        } else {
+                            // Empty string means a leading ':' in this section, which is not a label
+                            break;
+                        }
+
+                        start_idx = idx + 1;
+                    }
+                }
+
+                debug!("NamedAsmLabels::check_expr(): found_labels: {:#?}", &found_labels);
+
+                if found_labels.len() > 0 {
+                    let spans = found_labels
+                        .into_iter()
+                        .filter_map(|label| find_label_span(label))
+                        .collect::<Vec<Span>>();
+                    // If there were labels but we couldn't find a span, combine the warnings and use the template span
+                    let target_spans: MultiSpan =
+                        if spans.len() > 0 { spans.into() } else { (*template_span).into() };
+
+                    cx.lookup_with_diagnostics(
+                            NAMED_ASM_LABELS,
+                            Some(target_spans),
+                            |diag| {
+                                let mut err =
+                                    diag.build("avoid using named labels in inline assembly");
+                                err.emit();
+                            },
+                            BuiltinLintDiagnostics::NamedAsmLabel(
+                                "only local labels of the form `<number>:` should be used in inline asm"
+                                    .to_string(),
+                            ),
+                        );
                 }
             }
         }

@@ -3,6 +3,7 @@
 // ```
 // npm install browser-ui-test
 // ```
+
 const fs = require("fs");
 const path = require("path");
 const os = require('os');
@@ -17,6 +18,11 @@ function showHelp() {
     console.log("  --no-headless              : disable headless mode");
     console.log("  --help                     : show this message then quit");
     console.log("  --tests-folder [PATH]      : location of the .GOML tests folder");
+    console.log("  --jobs [NUMBER]            : number of threads to run tests on");
+}
+
+function isNumeric(s) {
+    return /^\d+$/.test(s);
 }
 
 function parseOptions(args) {
@@ -27,6 +33,7 @@ function parseOptions(args) {
         "debug": false,
         "show_text": false,
         "no_headless": false,
+        "jobs": -1,
     };
     var correspondances = {
         "--doc-folder": "doc_folder",
@@ -39,13 +46,21 @@ function parseOptions(args) {
     for (var i = 0; i < args.length; ++i) {
         if (args[i] === "--doc-folder"
             || args[i] === "--tests-folder"
-            || args[i] === "--file") {
+            || args[i] === "--file"
+            || args[i] === "--jobs") {
             i += 1;
             if (i >= args.length) {
                 console.log("Missing argument after `" + args[i - 1] + "` option.");
                 return null;
             }
-            if (args[i - 1] !== "--file") {
+            if (args[i - 1] === "--jobs") {
+                if (!isNumeric(args[i])) {
+                    console.log(
+                        "`--jobs` option expects a positive number, found `" + args[i] + "`");
+                    return null;
+                }
+                opts["jobs"] = parseInt(args[i]);
+            } else if (args[i - 1] !== "--file") {
                 opts[correspondances[args[i - 1]]] = args[i];
             } else {
                 opts["files"].push(args[i]);
@@ -93,8 +108,13 @@ function char_printer(n_tests) {
             }
         },
         finish: function() {
-            const spaces = " ".repeat(max_per_line - (current % max_per_line));
-            process.stdout.write(`${spaces} (${current}/${n_tests})${os.EOL}${os.EOL}`);
+            if (current % max_per_line === 0) {
+                // Don't output if we are already at a matching line end
+                console.log("");
+            } else {
+                const spaces = " ".repeat(max_per_line - (current % max_per_line));
+                process.stdout.write(`${spaces} (${current}/${n_tests})${os.EOL}${os.EOL}`);
+            }
         },
     };
 }
@@ -153,8 +173,14 @@ async function main(argv) {
     files.sort();
 
     console.log(`Running ${files.length} rustdoc-gui tests...`);
-    process.setMaxListeners(files.length + 1);
-    let tests = [];
+
+    if (opts["jobs"] < 1) {
+        process.setMaxListeners(files.length + 1);
+    } else {
+        process.setMaxListeners(opts["jobs"] + 1);
+    }
+
+    const tests_queue = [];
     let results = {
         successful: [],
         failed: [],
@@ -164,8 +190,7 @@ async function main(argv) {
     for (let i = 0; i < files.length; ++i) {
         const file_name = files[i];
         const testPath = path.join(opts["tests_folder"], file_name);
-        tests.push(
-            runTest(testPath, options)
+        const callback = runTest(testPath, options)
             .then(out => {
                 const [output, nb_failures] = out;
                 results[nb_failures === 0 ? "successful" : "failed"].push({
@@ -173,10 +198,10 @@ async function main(argv) {
                     output: output,
                 });
                 if (nb_failures > 0) {
-                    status_bar.erroneous()
+                    status_bar.erroneous();
                     failed = true;
                 } else {
-                    status_bar.successful()
+                    status_bar.successful();
                 }
             })
             .catch(err => {
@@ -187,13 +212,19 @@ async function main(argv) {
                 status_bar.erroneous();
                 failed = true;
             })
-        );
+            .finally(() => {
+                // We now remove the promise from the tests_queue.
+                tests_queue.splice(tests_queue.indexOf(callback), 1);
+            });
+        tests_queue.push(callback);
         if (no_headless) {
-            await tests[i];
+            await tests_queue[i];
+        } else if (opts["jobs"] > 0 && tests_queue.length >= opts["jobs"]) {
+            await Promise.race(tests_queue);
         }
     }
-    if (!no_headless) {
-        await Promise.all(tests);
+    if (!no_headless && tests_queue.length > 0) {
+        await Promise.all(tests_queue);
     }
     status_bar.finish();
 

@@ -700,7 +700,7 @@ fn construct_const<'a, 'tcx>(
     builder.finish()
 }
 
-/// Construct MIR for a item that has had errors in type checking.
+/// Construct MIR for an item that has had errors in type checking.
 ///
 /// This is required because we may still want to run MIR passes on an item
 /// with type errors, but normal MIR construction can't handle that in general.
@@ -885,7 +885,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
         let tcx_hir = tcx.hir();
         let hir_typeck_results = self.typeck_results;
 
-        // In analyze_closure() in upvar.rs we gathered a list of upvars used by a
+        // In analyze_closure() in upvar.rs we gathered a list of upvars used by an
         // indexed closure and we stored in a map called closure_min_captures in TypeckResults
         // with the closure's DefId. Here, we run through that vec of UpvarIds for
         // the given closure and use the necessary information to create upvar
@@ -980,19 +980,19 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                         self.local_decls[local].mutability = mutability;
                         self.local_decls[local].source_info.scope = self.source_scope;
                         self.local_decls[local].local_info = if let Some(kind) = self_binding {
-                            Some(box LocalInfo::User(ClearCrossCrate::Set(
+                            Some(Box::new(LocalInfo::User(ClearCrossCrate::Set(
                                 BindingForm::ImplicitSelf(*kind),
-                            )))
+                            ))))
                         } else {
                             let binding_mode = ty::BindingMode::BindByValue(mutability);
-                            Some(box LocalInfo::User(ClearCrossCrate::Set(BindingForm::Var(
+                            Some(Box::new(LocalInfo::User(ClearCrossCrate::Set(BindingForm::Var(
                                 VarBindingForm {
                                     binding_mode,
                                     opt_ty_info,
                                     opt_match_place: Some((Some(place), span)),
                                     pat_span: span,
                                 },
-                            ))))
+                            )))))
                         };
                         self.var_indices.insert(var, LocalsForNode::One(local));
                     }

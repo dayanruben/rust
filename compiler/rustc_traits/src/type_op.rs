@@ -6,11 +6,9 @@ use rustc_infer::infer::{InferCtxt, TyCtxtInferExt};
 use rustc_infer::traits::TraitEngineExt as _;
 use rustc_middle::ty::query::Providers;
 use rustc_middle::ty::subst::{GenericArg, Subst, UserSelfTy, UserSubsts};
-use rustc_middle::ty::{
-    self, FnSig, Lift, PolyFnSig, PredicateKind, Ty, TyCtxt, TypeFoldable, Variance,
-};
+use rustc_middle::ty::{self, FnSig, Lift, PolyFnSig, Ty, TyCtxt, TypeFoldable, Variance};
 use rustc_middle::ty::{ParamEnv, ParamEnvAnd, Predicate, ToPredicate};
-use rustc_span::DUMMY_SP;
+use rustc_span::{Span, DUMMY_SP};
 use rustc_trait_selection::infer::InferCtxtBuilderExt;
 use rustc_trait_selection::infer::InferCtxtExt;
 use rustc_trait_selection::traits::query::normalize::AtExt;
@@ -87,16 +85,7 @@ impl AscribeUserTypeCx<'me, 'tcx> {
         Ok(())
     }
 
-    fn prove_predicate(&mut self, mut predicate: Predicate<'tcx>) {
-        if let PredicateKind::Trait(mut tr) = predicate.kind().skip_binder() {
-            if let hir::Constness::Const = tr.constness {
-                // FIXME check if we actually want to prove const predicates inside AscribeUserType
-                tr.constness = hir::Constness::NotConst;
-                predicate =
-                    predicate.kind().rebind(PredicateKind::Trait(tr)).to_predicate(self.tcx());
-            }
-        }
-
+    fn prove_predicate(&mut self, predicate: Predicate<'tcx>) {
         self.fulfill_cx.register_predicate_obligation(
             self.infcx,
             Obligation::new(ObligationCause::dummy(), self.param_env, predicate),
@@ -247,11 +236,25 @@ fn type_op_prove_predicate<'tcx>(
     canonicalized: Canonical<'tcx, ParamEnvAnd<'tcx, ProvePredicate<'tcx>>>,
 ) -> Result<&'tcx Canonical<'tcx, QueryResponse<'tcx, ()>>, NoSolution> {
     tcx.infer_ctxt().enter_canonical_trait_query(&canonicalized, |infcx, fulfill_cx, key| {
-        let (param_env, ProvePredicate { predicate }) = key.into_parts();
-        fulfill_cx.register_predicate_obligation(
-            infcx,
-            Obligation::new(ObligationCause::dummy(), param_env, predicate),
-        );
+        type_op_prove_predicate_with_span(infcx, fulfill_cx, key, None);
         Ok(())
     })
+}
+
+/// The core of the `type_op_prove_predicate` query: for diagnostics purposes in NLL HRTB errors,
+/// this query can be re-run to better track the span of the obligation cause, and improve the error
+/// message. Do not call directly unless you're in that very specific context.
+pub fn type_op_prove_predicate_with_span<'a, 'tcx: 'a>(
+    infcx: &'a InferCtxt<'a, 'tcx>,
+    fulfill_cx: &'a mut dyn TraitEngine<'tcx>,
+    key: ParamEnvAnd<'tcx, ProvePredicate<'tcx>>,
+    span: Option<Span>,
+) {
+    let cause = if let Some(span) = span {
+        ObligationCause::dummy_with_span(span)
+    } else {
+        ObligationCause::dummy()
+    };
+    let (param_env, ProvePredicate { predicate }) = key.into_parts();
+    fulfill_cx.register_predicate_obligation(infcx, Obligation::new(cause, param_env, predicate));
 }
