@@ -152,8 +152,8 @@ declare_lint! {
 declare_lint_pass!(BoxPointers => [BOX_POINTERS]);
 
 impl BoxPointers {
-    fn check_heap_type(&self, cx: &LateContext<'_>, span: Span, ty: Ty<'_>) {
-        for leaf in ty.walk() {
+    fn check_heap_type<'tcx>(&self, cx: &LateContext<'tcx>, span: Span, ty: Ty<'tcx>) {
+        for leaf in ty.walk(cx.tcx) {
             if let GenericArgKind::Type(leaf_ty) = leaf.unpack() {
                 if leaf_ty.is_box() {
                     cx.struct_span_lint(BOX_POINTERS, span, |lint| {
@@ -585,24 +585,6 @@ impl<'tcx> LateLintPass<'tcx> for MissingDoc {
 
     fn check_crate(&mut self, cx: &LateContext<'_>, krate: &hir::Crate<'_>) {
         self.check_missing_docs_attrs(cx, CRATE_DEF_ID, krate.module().inner, "the", "crate");
-
-        for macro_def in krate.exported_macros() {
-            // Non exported macros should be skipped, since `missing_docs` only
-            // applies to externally visible items.
-            if !cx.access_levels.is_exported(macro_def.def_id) {
-                continue;
-            }
-
-            let attrs = cx.tcx.hir().attrs(macro_def.hir_id());
-            let has_doc = attrs.iter().any(has_doc);
-            if !has_doc {
-                cx.struct_span_lint(
-                    MISSING_DOCS,
-                    cx.tcx.sess.source_map().guess_head_span(macro_def.span),
-                    |lint| lint.build("missing documentation for macro").emit(),
-                );
-            }
-        }
     }
 
     fn check_item(&mut self, cx: &LateContext<'_>, it: &hir::Item<'_>) {
@@ -636,6 +618,7 @@ impl<'tcx> LateLintPass<'tcx> for MissingDoc {
 
             hir::ItemKind::TyAlias(..)
             | hir::ItemKind::Fn(..)
+            | hir::ItemKind::Macro(..)
             | hir::ItemKind::Mod(..)
             | hir::ItemKind::Enum(..)
             | hir::ItemKind::Struct(..)
@@ -1656,7 +1639,7 @@ impl<'tcx> LateLintPass<'tcx> for TrivialConstraints {
                     ConstEquate(..) |
                     TypeWellFormedFromEnv(..) => continue,
                 };
-                if predicate.is_global() {
+                if predicate.is_global(cx.tcx) {
                     cx.struct_span_lint(TRIVIAL_BOUNDS, span, |lint| {
                         lint.build(&format!(
                             "{} bound {} does not depend on any type \
