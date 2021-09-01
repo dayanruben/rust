@@ -400,6 +400,11 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             };
 
             capture_info.capture_kind = capture_kind;
+            let capture_info = if let Some(existing) = processed.get(&place) {
+                determine_capture_info(*existing, capture_info)
+            } else {
+                capture_info
+            };
             processed.insert(place, capture_info);
         }
 
@@ -675,15 +680,13 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                         migrated_variables_concat
                     );
 
-                    let mut closure_body_span = self.tcx.hir().span(body_id.hir_id);
-
                     // If the body was entirely expanded from a macro
                     // invocation, i.e. the body is not contained inside the
                     // closure span, then we walk up the expansion until we
                     // find the span before the expansion.
-                    while !closure_body_span.is_dummy() && !closure_span.contains(closure_body_span) {
-                        closure_body_span = closure_body_span.parent().unwrap_or(DUMMY_SP);
-                    }
+                    let closure_body_span = self.tcx.hir().span(body_id.hir_id)
+                        .find_ancestor_inside(closure_span)
+                        .unwrap_or(DUMMY_SP);
 
                     if let Ok(s) = self.tcx.sess.source_map().span_to_snippet(closure_body_span) {
                         let mut lines = s.lines();
@@ -1896,31 +1899,20 @@ fn restrict_capture_precision<'tcx>(
     return (place, curr_mode);
 }
 
-/// Take ownership if data being accessed is owned by the variable used to access it
-/// (or if closure attempts to move data that it doesn’t own).
-/// Note: When taking ownership, only capture data found on the stack.
+/// Truncate deref of any reference.
 fn adjust_for_move_closure<'tcx>(
     mut place: Place<'tcx>,
     mut kind: ty::UpvarCapture<'tcx>,
 ) -> (Place<'tcx>, ty::UpvarCapture<'tcx>) {
-    let contains_deref_of_ref = place.deref_tys().any(|ty| ty.is_ref());
     let first_deref = place.projections.iter().position(|proj| proj.kind == ProjectionKind::Deref);
 
-    match kind {
-        ty::UpvarCapture::ByRef(..) if contains_deref_of_ref => (place, kind),
-
-        // If there's any Deref and the data needs to be moved into the closure body,
-        // or it's a Deref of a Box, truncate the path to the first deref
-        _ => {
-            if let Some(idx) = first_deref {
-                truncate_place_to_len_and_update_capture_kind(&mut place, &mut kind, idx);
-            }
-
-            // AMAN: I think we don't need the span inside the ByValue anymore
-            //       we have more detailed span in CaptureInfo
-            (place, ty::UpvarCapture::ByValue(None))
-        }
+    if let Some(idx) = first_deref {
+        truncate_place_to_len_and_update_capture_kind(&mut place, &mut kind, idx);
     }
+
+    // AMAN: I think we don't need the span inside the ByValue anymore
+    //       we have more detailed span in CaptureInfo
+    (place, ty::UpvarCapture::ByValue(None))
 }
 
 /// Adjust closure capture just that if taking ownership of data, only move data
