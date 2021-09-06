@@ -1231,7 +1231,9 @@ impl WherePredicate {
 
 #[derive(Clone, PartialEq, Eq, Debug, Hash)]
 crate enum GenericParamDefKind {
-    Lifetime,
+    Lifetime {
+        outlives: Vec<Lifetime>,
+    },
     Type {
         did: DefId,
         bounds: Vec<GenericBound>,
@@ -1257,7 +1259,7 @@ impl GenericParamDefKind {
         match self {
             GenericParamDefKind::Type { default, .. } => default.clone(),
             GenericParamDefKind::Const { ty, .. } => Some(ty.clone()),
-            GenericParamDefKind::Lifetime => None,
+            GenericParamDefKind::Lifetime { .. } => None,
         }
     }
 }
@@ -1271,7 +1273,7 @@ crate struct GenericParamDef {
 impl GenericParamDef {
     crate fn is_synthetic_type_param(&self) -> bool {
         match self.kind {
-            GenericParamDefKind::Lifetime | GenericParamDefKind::Const { .. } => false,
+            GenericParamDefKind::Lifetime { .. } | GenericParamDefKind::Const { .. } => false,
             GenericParamDefKind::Type { ref synthetic, .. } => synthetic.is_some(),
         }
     }
@@ -2012,21 +2014,36 @@ impl Path {
 crate enum GenericArg {
     Lifetime(Lifetime),
     Type(Type),
-    Const(Constant),
+    Const(Box<Constant>),
     Infer,
 }
+
+// `GenericArg` can occur many times in a single `Path`, so make sure it
+// doesn't increase in size unexpectedly.
+#[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
+rustc_data_structures::static_assert_size!(GenericArg, 80);
 
 #[derive(Clone, PartialEq, Eq, Debug, Hash)]
 crate enum GenericArgs {
     AngleBracketed { args: Vec<GenericArg>, bindings: Vec<TypeBinding> },
-    Parenthesized { inputs: Vec<Type>, output: Option<Type> },
+    Parenthesized { inputs: Vec<Type>, output: Option<Box<Type>> },
 }
+
+// `GenericArgs` is in every `PathSegment`, so its size can significantly
+// affect rustdoc's memory usage.
+#[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
+rustc_data_structures::static_assert_size!(GenericArgs, 56);
 
 #[derive(Clone, PartialEq, Eq, Debug, Hash)]
 crate struct PathSegment {
     crate name: Symbol,
     crate args: GenericArgs,
 }
+
+// `PathSegment` usually occurs multiple times in every `Path`, so its size can
+// significantly affect rustdoc's memory usage.
+#[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
+rustc_data_structures::static_assert_size!(PathSegment, 64);
 
 #[derive(Clone, Debug)]
 crate struct Typedef {
