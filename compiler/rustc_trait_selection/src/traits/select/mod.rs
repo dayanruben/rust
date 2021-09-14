@@ -34,8 +34,8 @@ use rustc_hir as hir;
 use rustc_hir::def_id::DefId;
 use rustc_infer::infer::LateBoundRegionConversionTime;
 use rustc_middle::dep_graph::{DepKind, DepNodeIndex};
-use rustc_middle::mir::abstract_const::NotConstEvaluatable;
 use rustc_middle::mir::interpret::ErrorHandled;
+use rustc_middle::thir::abstract_const::NotConstEvaluatable;
 use rustc_middle::ty::fast_reject;
 use rustc_middle::ty::print::with_no_trimmed_paths;
 use rustc_middle::ty::relate::TypeRelation;
@@ -2445,7 +2445,7 @@ impl<'tcx> ProvisionalEvaluationCache<'tcx> {
             "get_provisional = {:#?}",
             self.map.borrow().get(&fresh_trait_ref),
         );
-        Some(self.map.borrow().get(&fresh_trait_ref)?.clone())
+        Some(*self.map.borrow().get(&fresh_trait_ref)?)
     }
 
     /// Insert a provisional result into the cache. The result came

@@ -170,6 +170,9 @@ pub struct Session {
     /// Data about code being compiled, gathered during compilation.
     pub code_stats: CodeStats,
 
+    /// If `-zfuel=crate=n` is specified, `Some(crate)`.
+    optimization_fuel_crate: Option<String>,
+
     /// Tracks fuel info if `-zfuel=crate=n` is specified.
     optimization_fuel: Lock<OptimizationFuel>,
 
@@ -182,10 +185,6 @@ pub struct Session {
 
     /// Cap lint level specified by a driver specifically.
     pub driver_lint_caps: FxHashMap<lint::LintId, lint::Level>,
-
-    /// Mapping from ident span to path span for paths that don't exist as written, but that
-    /// exist under `std`. For example, wrote `str::from_utf8` instead of `std::str::from_utf8`.
-    pub confused_type_with_std_module: Lock<FxHashMap<Span, Span>>,
 
     /// Tracks the current behavior of the CTFE engine when an error occurs.
     /// Options range from returning the error without a backtrace to returning an error
@@ -887,7 +886,7 @@ impl Session {
     /// This expends fuel if applicable, and records fuel if applicable.
     pub fn consider_optimizing<T: Fn() -> String>(&self, crate_name: &str, msg: T) -> bool {
         let mut ret = true;
-        if let Some(c) = self.opts.debugging_opts.fuel.as_ref().map(|i| &i.0) {
+        if let Some(ref c) = self.optimization_fuel_crate {
             if c == crate_name {
                 assert_eq!(self.threads(), 1);
                 let mut fuel = self.optimization_fuel.lock();
@@ -1258,6 +1257,7 @@ pub fn build_session(
     let local_crate_source_file =
         local_crate_source_file.map(|path| file_path_mapping.map_prefix(path).0);
 
+    let optimization_fuel_crate = sopts.debugging_opts.fuel.as_ref().map(|i| i.0.clone());
     let optimization_fuel = Lock::new(OptimizationFuel {
         remaining: sopts.debugging_opts.fuel.as_ref().map_or(0, |i| i.1),
         out_of_fuel: false,
@@ -1309,11 +1309,11 @@ pub fn build_session(
             normalize_projection_ty: AtomicUsize::new(0),
         },
         code_stats: Default::default(),
+        optimization_fuel_crate,
         optimization_fuel,
         print_fuel,
         jobserver: jobserver::client(),
         driver_lint_caps,
-        confused_type_with_std_module: Lock::new(Default::default()),
         ctfe_backtrace,
         miri_unleashed_features: Lock::new(Default::default()),
         asm_arch,
