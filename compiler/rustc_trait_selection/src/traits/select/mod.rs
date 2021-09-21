@@ -14,18 +14,17 @@ use super::util;
 use super::util::{closure_trait_ref_and_return_type, predicate_for_trait_def};
 use super::wf;
 use super::DerivedObligationCause;
+use super::Normalized;
 use super::Obligation;
 use super::ObligationCauseCode;
 use super::Selection;
 use super::SelectionResult;
 use super::TraitQueryMode;
-use super::{Normalized, ProjectionCacheKey};
 use super::{ObligationCause, PredicateObligation, TraitObligation};
 use super::{Overflow, SelectionError, Unimplemented};
 
 use crate::infer::{InferCtxt, InferOk, TypeFreshener};
 use crate::traits::error_reporting::InferCtxtExt;
-use crate::traits::project::ProjectionCacheKeyExt;
 use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 use rustc_data_structures::stack::ensure_sufficient_stack;
 use rustc_data_structures::sync::Lrc;
@@ -574,14 +573,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
                     match project::poly_project_and_unify_type(self, &project_obligation) {
                         Ok(Ok(Some(mut subobligations))) => {
                             self.add_depth(subobligations.iter_mut(), obligation.recursion_depth);
-                            let result = self
-                                .evaluate_predicates_recursively(previous_stack, subobligations);
-                            if let Some(key) =
-                                ProjectionCacheKey::from_poly_projection_predicate(self, data)
-                            {
-                                self.infcx.inner.borrow_mut().projection_cache().complete(key);
-                            }
-                            result
+                            self.evaluate_predicates_recursively(previous_stack, subobligations)
                         }
                         Ok(Ok(None)) => Ok(EvaluatedToAmbig),
                         Ok(Err(project::InProgress)) => Ok(EvaluatedToRecur),
@@ -982,6 +974,14 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
         param_env: ty::ParamEnv<'tcx>,
         trait_ref: ty::ConstnessAnd<ty::PolyTraitRef<'tcx>>,
     ) -> Option<EvaluationResult> {
+        // Neither the global nor local cache is aware of intercrate
+        // mode, so don't do any caching. In particular, we might
+        // re-use the same `InferCtxt` with both an intercrate
+        // and non-intercrate `SelectionContext`
+        if self.intercrate {
+            return None;
+        }
+
         let tcx = self.tcx();
         if self.can_use_global_caches(param_env) {
             if let Some(res) = tcx.evaluation_cache.get(&param_env.and(trait_ref), tcx) {
@@ -1001,6 +1001,14 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
         // Avoid caching results that depend on more than just the trait-ref
         // - the stack can create recursion.
         if result.is_stack_dependent() {
+            return;
+        }
+
+        // Neither the global nor local cache is aware of intercrate
+        // mode, so don't do any caching. In particular, we might
+        // re-use the same `InferCtxt` with both an intercrate
+        // and non-intercrate `SelectionContext`
+        if self.intercrate {
             return;
         }
 
@@ -1060,6 +1068,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
     ///
     /// The weird return type of this function allows it to be used with the `try` (`?`)
     /// operator within certain functions.
+    #[inline(always)]
     fn check_recursion_limit<T: Display + TypeFoldable<'tcx>, V: Display + TypeFoldable<'tcx>>(
         &self,
         obligation: &Obligation<'tcx, T>,
@@ -2025,7 +2034,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
         let cause = ObligationCause::new(
             obligation.cause.span,
             obligation.cause.body_id,
-            ObligationCauseCode::MatchImpl(Lrc::new(obligation.cause.code.clone()), impl_def_id),
+            ObligationCauseCode::MatchImpl(obligation.cause.clone(), impl_def_id),
         );
 
         let InferOk { obligations, .. } = self
