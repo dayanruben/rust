@@ -14,6 +14,7 @@ use rustc_hir::def_id::LocalDefId;
 use rustc_hir::lang_items::LangItem;
 use rustc_index::vec::{Idx, IndexVec};
 use rustc_infer::infer::canonical::QueryRegionConstraints;
+use rustc_infer::infer::opaque_types::OpaqueTypeDecl;
 use rustc_infer::infer::outlives::env::RegionBoundPairs;
 use rustc_infer::infer::type_variable::{TypeVariableOrigin, TypeVariableOriginKind};
 use rustc_infer::infer::{
@@ -31,6 +32,7 @@ use rustc_middle::ty::{
     self, CanonicalUserTypeAnnotation, CanonicalUserTypeAnnotations, OpaqueTypeKey, RegionVid,
     ToPredicate, Ty, TyCtxt, UserType, UserTypeAnnotationIndex, WithConstness,
 };
+use rustc_span::def_id::CRATE_DEF_ID;
 use rustc_span::{Span, DUMMY_SP};
 use rustc_target::abi::VariantIdx;
 use rustc_trait_selection::infer::InferCtxtExt as _;
@@ -193,16 +195,17 @@ pub(crate) fn type_check<'mir, 'tcx>(
 
             opaque_type_values
                 .into_iter()
-                .filter_map(|(opaque_type_key, decl)| {
-                    let mut revealed_ty = infcx.resolve_vars_if_possible(decl.concrete_ty);
-                    if revealed_ty.has_infer_types_or_consts() {
+                .filter_map(|(opaque_type_key, mut decl)| {
+                    decl.concrete_ty = infcx.resolve_vars_if_possible(decl.concrete_ty);
+                    if decl.concrete_ty.has_infer_types_or_consts() {
                         infcx.tcx.sess.delay_span_bug(
                             body.span,
-                            &format!("could not resolve {:#?}", revealed_ty.kind()),
+                            &format!("could not resolve {:#?}", decl.concrete_ty.kind()),
                         );
-                        revealed_ty = infcx.tcx.ty_error();
+                        decl.concrete_ty = infcx.tcx.ty_error();
                     }
-                    let concrete_is_opaque = if let ty::Opaque(def_id, _) = revealed_ty.kind() {
+                    let concrete_is_opaque = if let ty::Opaque(def_id, _) = decl.concrete_ty.kind()
+                    {
                         *def_id == opaque_type_key.def_id
                     } else {
                         false
@@ -234,7 +237,7 @@ pub(crate) fn type_check<'mir, 'tcx>(
                         );
                         None
                     } else {
-                        Some((opaque_type_key, revealed_ty))
+                        Some((opaque_type_key, decl))
                     }
                 })
                 .collect()
@@ -447,6 +450,7 @@ impl<'a, 'b, 'tcx> Visitor<'tcx> for TypeVerifier<'a, 'b, 'tcx> {
             if let ty::FnDef(def_id, substs) = *constant.literal.ty().kind() {
                 let instantiated_predicates = tcx.predicates_of(def_id).instantiate(tcx, substs);
                 self.cx.normalize_and_prove_instantiated_predicates(
+                    def_id,
                     instantiated_predicates,
                     location.to_locations(),
                 );
@@ -890,7 +894,7 @@ struct BorrowCheckContext<'a, 'tcx> {
 crate struct MirTypeckResults<'tcx> {
     crate constraints: MirTypeckRegionConstraints<'tcx>,
     crate universal_region_relations: Frozen<UniversalRegionRelations<'tcx>>,
-    crate opaque_type_values: VecMap<OpaqueTypeKey<'tcx>, Ty<'tcx>>,
+    crate opaque_type_values: VecMap<OpaqueTypeKey<'tcx>, OpaqueTypeDecl<'tcx>>,
 }
 
 /// A collection of region constraints that must be satisfied for the
@@ -1078,7 +1082,8 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
                     }
 
                     self.prove_predicate(
-                        ty::PredicateKind::WellFormed(inferred_ty.into()).to_predicate(self.tcx()),
+                        ty::Binder::dummy(ty::PredicateKind::WellFormed(inferred_ty.into()))
+                            .to_predicate(self.tcx()),
                         Locations::All(span),
                         ConstraintCategory::TypeAnnotation,
                     );
@@ -1314,7 +1319,8 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
                     obligations.obligations.push(traits::Obligation::new(
                         ObligationCause::dummy(),
                         param_env,
-                        ty::PredicateKind::WellFormed(revealed_ty.into()).to_predicate(infcx.tcx),
+                        ty::Binder::dummy(ty::PredicateKind::WellFormed(revealed_ty.into()))
+                            .to_predicate(infcx.tcx),
                     ));
                     obligations.add(
                         infcx
@@ -1597,7 +1603,9 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
                 self.check_call_dest(body, term, &sig, destination, term_location);
 
                 self.prove_predicates(
-                    sig.inputs_and_output.iter().map(|ty| ty::PredicateKind::WellFormed(ty.into())),
+                    sig.inputs_and_output
+                        .iter()
+                        .map(|ty| ty::Binder::dummy(ty::PredicateKind::WellFormed(ty.into()))),
                     term_location.to_locations(),
                     ConstraintCategory::Boring,
                 );
@@ -2018,13 +2026,7 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
                 }
             }
 
-            Rvalue::NullaryOp(_, ty) => {
-                // Even with unsized locals cannot box an unsized value.
-                if self.unsized_feature_enabled() {
-                    let span = body.source_info(location).span;
-                    self.ensure_place_sized(ty, span);
-                }
-
+            Rvalue::NullaryOp(_, ty) | Rvalue::ShallowInitBox(_, ty) => {
                 let trait_ref = ty::TraitRef {
                     def_id: tcx.require_lang_item(LangItem::Sized, Some(self.last_span)),
                     substs: tcx.mk_substs_trait(ty, &[]),
@@ -2357,6 +2359,7 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
             | Rvalue::AddressOf(..)
             | Rvalue::Len(..)
             | Rvalue::Cast(..)
+            | Rvalue::ShallowInitBox(..)
             | Rvalue::BinaryOp(..)
             | Rvalue::CheckedBinaryOp(..)
             | Rvalue::NullaryOp(..)
@@ -2571,9 +2574,9 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
             aggregate_kind, location
         );
 
-        let instantiated_predicates = match aggregate_kind {
+        let (def_id, instantiated_predicates) = match aggregate_kind {
             AggregateKind::Adt(def, _, substs, _, _) => {
-                tcx.predicates_of(def.did).instantiate(tcx, substs)
+                (def.did, tcx.predicates_of(def.did).instantiate(tcx, substs))
             }
 
             // For closures, we have some **extra requirements** we
@@ -2598,13 +2601,16 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
             // clauses on the struct.
             AggregateKind::Closure(def_id, substs)
             | AggregateKind::Generator(def_id, substs, _) => {
-                self.prove_closure_bounds(tcx, def_id.expect_local(), substs, location)
+                (*def_id, self.prove_closure_bounds(tcx, def_id.expect_local(), substs, location))
             }
 
-            AggregateKind::Array(_) | AggregateKind::Tuple => ty::InstantiatedPredicates::empty(),
+            AggregateKind::Array(_) | AggregateKind::Tuple => {
+                (CRATE_DEF_ID.to_def_id(), ty::InstantiatedPredicates::empty())
+            }
         };
 
         self.normalize_and_prove_instantiated_predicates(
+            def_id,
             instantiated_predicates,
             location.to_locations(),
         );

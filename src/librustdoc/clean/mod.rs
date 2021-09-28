@@ -132,7 +132,7 @@ impl Clean<GenericBound> for hir::GenericBound<'_> {
             hir::GenericBound::LangItemTrait(lang_item, span, _, generic_args) => {
                 let def_id = cx.tcx.require_lang_item(lang_item, Some(span));
 
-                let trait_ref = ty::TraitRef::identity(cx.tcx, def_id);
+                let trait_ref = ty::TraitRef::identity(cx.tcx, def_id).skip_binder();
 
                 let generic_args = generic_args.clean(cx);
                 let bindings = match generic_args {
@@ -168,7 +168,7 @@ impl Clean<Type> for (ty::TraitRef<'_>, &[TypeBinding]) {
 
         debug!("ty::TraitRef\n  subst: {:?}\n", trait_ref.substs);
 
-        ResolvedPath { path, did: trait_ref.def_id, is_generic: false }
+        ResolvedPath { path, did: trait_ref.def_id }
     }
 }
 
@@ -1440,12 +1440,12 @@ impl<'tcx> Clean<Type> for Ty<'tcx> {
                 };
                 inline::record_extern_fqn(cx, did, kind);
                 let path = external_path(cx, did, false, vec![], substs);
-                ResolvedPath { path, did, is_generic: false }
+                ResolvedPath { path, did }
             }
             ty::Foreign(did) => {
                 inline::record_extern_fqn(cx, did, ItemType::ForeignType);
                 let path = external_path(cx, did, false, vec![], InternalSubsts::empty());
-                ResolvedPath { path, did, is_generic: false }
+                ResolvedPath { path, did }
             }
             ty::Dynamic(ref obj, ref reg) => {
                 // HACK: pick the first `did` as the `did` of the trait object. Someone
@@ -1471,7 +1471,7 @@ impl<'tcx> Clean<Type> for Ty<'tcx> {
                     let path = external_path(cx, did, false, vec![], empty);
                     inline::record_extern_fqn(cx, did, ItemType::Trait);
                     let bound = PolyTrait {
-                        trait_: ResolvedPath { path, did, is_generic: false },
+                        trait_: ResolvedPath { path, did },
                         generic_params: Vec::new(),
                     };
                     bounds.push(bound);
@@ -1488,10 +1488,7 @@ impl<'tcx> Clean<Type> for Ty<'tcx> {
                 let path = external_path(cx, did, false, bindings, substs);
                 bounds.insert(
                     0,
-                    PolyTrait {
-                        trait_: ResolvedPath { path, did, is_generic: false },
-                        generic_params: Vec::new(),
-                    },
+                    PolyTrait { trait_: ResolvedPath { path, did }, generic_params: Vec::new() },
                 );
 
                 DynTrait(bounds, lifetime)
