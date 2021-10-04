@@ -584,8 +584,14 @@ impl<'tcx> LateLintPass<'tcx> for MissingDoc {
         self.doc_hidden_stack.pop().expect("empty doc_hidden_stack");
     }
 
-    fn check_crate(&mut self, cx: &LateContext<'_>, krate: &hir::Crate<'_>) {
-        self.check_missing_docs_attrs(cx, CRATE_DEF_ID, krate.module().inner, "the", "crate");
+    fn check_crate(&mut self, cx: &LateContext<'_>) {
+        self.check_missing_docs_attrs(
+            cx,
+            CRATE_DEF_ID,
+            cx.tcx.def_span(CRATE_DEF_ID),
+            "the",
+            "crate",
+        );
     }
 
     fn check_item(&mut self, cx: &LateContext<'_>, it: &hir::Item<'_>) {
@@ -806,7 +812,7 @@ impl<'tcx> LateLintPass<'tcx> for MissingDebugImplementations {
             _ => return,
         }
 
-        let debug = match cx.tcx.get_diagnostic_item(sym::debug_trait) {
+        let debug = match cx.tcx.get_diagnostic_item(sym::Debug) {
             Some(debug) => debug,
             None => return,
         };
