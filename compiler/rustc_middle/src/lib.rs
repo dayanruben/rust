@@ -52,7 +52,6 @@
 #![feature(thread_local_const_init)]
 #![feature(trusted_step)]
 #![feature(try_blocks)]
-#![feature(try_reserve)]
 #![feature(try_reserve_kind)]
 #![feature(nonzero_ops)]
 #![recursion_limit = "512"]
@@ -82,7 +81,6 @@ pub mod arena;
 #[macro_use]
 pub mod dep_graph;
 pub mod hir;
-pub mod ich;
 pub mod infer;
 pub mod lint;
 pub mod middle;
