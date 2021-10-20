@@ -1294,7 +1294,8 @@ impl<'a: 'ast, 'ast> LateResolutionVisitor<'a, '_, 'ast> {
             // Walk backwards up the ribs in scope and collect candidates.
             for rib in self.ribs[ns].iter().rev() {
                 // Locals and type parameters
-                for (ident, &res) in &rib.bindings {
+                for (ident, binding) in &rib.bindings {
+                    let res = binding.res();
                     if filter_fn(res) {
                         names.push(TypoSuggestion::typo_from_res(ident.name, res));
                     }
@@ -1552,7 +1553,7 @@ impl<'a: 'ast, 'ast> LateResolutionVisitor<'a, '_, 'ast> {
             matches!(source, PathSource::TupleStruct(..)) || source.is_call();
         if suggest_only_tuple_variants {
             // Suggest only tuple variants regardless of whether they have fields and do not
-            // suggest path with added parenthesis.
+            // suggest path with added parentheses.
             let mut suggestable_variants = variants
                 .iter()
                 .filter(|(.., kind)| *kind == CtorKind::Fn)

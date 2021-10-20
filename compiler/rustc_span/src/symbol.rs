@@ -355,7 +355,6 @@ symbols! {
         await_macro,
         bang,
         begin_panic,
-        begin_panic_fmt,
         bench,
         bin,
         bind_by_move_pattern_guards,
@@ -1453,7 +1452,7 @@ impl Ident {
     }
 
     #[inline]
-    pub fn invalid() -> Ident {
+    pub fn empty() -> Ident {
         Ident::with_dummy_span(kw::Empty)
     }
 

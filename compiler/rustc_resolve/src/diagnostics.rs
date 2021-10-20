@@ -1327,7 +1327,7 @@ impl<'a, 'b> ImportResolver<'a, 'b> {
                 if fst.ident.span.rust_2018() && !fst.ident.is_path_segment_keyword() =>
             {
                 // Insert a placeholder that's later replaced by `self`/`super`/etc.
-                path.insert(0, Segment::from_ident(Ident::invalid()));
+                path.insert(0, Segment::from_ident(Ident::empty()));
             }
             _ => return None,
         }
@@ -1471,9 +1471,7 @@ impl<'a, 'b> ImportResolver<'a, 'b> {
         module: ModuleOrUniformRoot<'b>,
         ident: Ident,
     ) -> Option<(Option<Suggestion>, Vec<String>)> {
-        let mut crate_module = if let ModuleOrUniformRoot::Module(module) = module {
-            module
-        } else {
+        let ModuleOrUniformRoot::Module(mut crate_module) = module else {
             return None;
         };
 
@@ -1837,7 +1835,7 @@ crate fn show_candidates(
                 .skip(1)
                 .all(|(_, descr, _)| descr == descr_first)
             {
-                format!("{}", descr_first)
+                descr_first.to_string()
             } else {
                 "item".to_string()
             };

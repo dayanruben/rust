@@ -8,6 +8,7 @@
 #![feature(if_let_guard)]
 #![feature(format_args_capture)]
 #![feature(iter_zip)]
+#![feature(let_else)]
 #![feature(nll)]
 
 #[macro_use]
@@ -341,7 +342,7 @@ impl CodeSuggestion {
                     });
                     buf.push_str(&part.snippet);
                     let cur_hi = sm.lookup_char_pos(part.span.hi());
-                    if prev_hi.line == cur_lo.line {
+                    if prev_hi.line == cur_lo.line && cur_hi.line == cur_lo.line {
                         // Account for the difference between the width of the current code and the
                         // snippet being suggested, so that the *later* suggestions are correctly
                         // aligned on the screen.
