@@ -576,7 +576,7 @@ dependencies = [
 name = "clippy"
 version = "0.1.58"
 dependencies = [
- "cargo_metadata 0.12.0",
+ "cargo_metadata 0.14.0",
  "clippy_lints",
  "clippy_utils",
  "compiletest_rs",
@@ -588,7 +588,7 @@ dependencies = [
  "regex",
  "rustc-workspace-hack",
  "rustc_tools_util 0.2.0",
- "semver 0.11.0",
+ "semver 1.0.3",
  "serde",
  "syn",
  "tempfile",
@@ -613,7 +613,7 @@ dependencies = [
 name = "clippy_lints"
 version = "0.1.58"
 dependencies = [
- "cargo_metadata 0.12.0",
+ "cargo_metadata 0.14.0",
  "clippy_utils",
  "if_chain",
  "itertools 0.10.1",
@@ -621,7 +621,7 @@ dependencies = [
  "quine-mc_cluskey",
  "regex-syntax",
  "rustc-semver",
- "semver 0.11.0",
+ "semver 1.0.3",
  "serde",
  "serde_json",
  "toml",
@@ -710,9 +710,9 @@ dependencies = [
 
 [[package]]
 name = "compiletest_rs"
-version = "0.7.0"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64698e5e2435db061a85e6320af12c30c5fd88eb84b35d2c1e03ce4f143255ca"
+checksum = "29843cb8d351febf86557681d049d1e1652b81a086a190fa1173c07fd17fbf83"
 dependencies = [
  "diff",
  "filetime",
@@ -1900,9 +1900,9 @@ checksum = "830d08ce1d1d941e6b30645f1a0eb5643013d835ce3779a5fc208261dbe10f55"
 
 [[package]]
 name = "libc"
-version = "0.2.103"
+version = "0.2.106"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd8f7255a17a627354f321ef0055d63b898c6fb27eff628af4d1b66b7331edf6"
+checksum = "a60553f9a9e039a333b4e9b20573b9e9b9c0bb3a11e201ccc48ef4283456d673"
 dependencies = [
  "rustc-std-workspace-core",
 ]
@@ -2349,9 +2349,9 @@ dependencies = [
 
 [[package]]
 name = "odht"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2504d29fda40b3f2f9ef525392435ab660e407c188196cb664b116ebcca0142"
+checksum = "5a518809ac14b25b569624d0268eba1e88498f71615893dca57982bed7621abb"
 dependencies = [
  "cfg-if 1.0.0",
 ]
@@ -4259,6 +4259,7 @@ dependencies = [
  "rustc_span",
  "tracing",
  "unicode-normalization",
+ "unicode-width",
 ]
 
 [[package]]
@@ -4615,8 +4616,8 @@ dependencies = [
  "itertools 0.9.0",
  "minifier",
  "pulldown-cmark 0.8.0",
+ "rayon",
  "regex",
- "rustc-rayon",
  "rustdoc-json-types",
  "serde",
  "serde_json",

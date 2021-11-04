@@ -103,17 +103,14 @@ macro_rules! map {
     }}
 }
 
-#[macro_use]
-mod externalfiles;
-
 mod clean;
 mod config;
 mod core;
 mod docfs;
-mod doctree;
-#[macro_use]
-mod error;
 mod doctest;
+mod doctree;
+mod error;
+mod externalfiles;
 mod fold;
 mod formats;
 // used by the error-index generator, so it needs to be public
@@ -124,6 +121,7 @@ mod markdown;
 mod passes;
 mod scrape_examples;
 mod theme;
+mod visit;
 mod visit_ast;
 mod visit_lib;
 
