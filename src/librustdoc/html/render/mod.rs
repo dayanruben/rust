@@ -34,8 +34,8 @@ mod span_map;
 mod templates;
 mod write_shared;
 
-crate use context::*;
-crate use span_map::{collect_spans_and_sources, LinkFromSrc};
+crate use self::context::*;
+crate use self::span_map::{collect_spans_and_sources, LinkFromSrc};
 
 use std::collections::VecDeque;
 use std::default::Default;
@@ -54,6 +54,7 @@ use rustc_hir::def::CtorKind;
 use rustc_hir::def_id::DefId;
 use rustc_hir::Mutability;
 use rustc_middle::middle::stability;
+use rustc_middle::ty;
 use rustc_middle::ty::TyCtxt;
 use rustc_span::{
     symbol::{kw, sym, Symbol},
@@ -116,7 +117,7 @@ crate struct RenderType {
 #[derive(Debug)]
 crate struct IndexItemFunctionType {
     inputs: Vec<TypeWithKind>,
-    output: Option<Vec<TypeWithKind>>,
+    output: Vec<TypeWithKind>,
 }
 
 impl Serialize for IndexItemFunctionType {
@@ -125,21 +126,16 @@ impl Serialize for IndexItemFunctionType {
         S: Serializer,
     {
         // If we couldn't figure out a type, just write `null`.
-        let mut iter = self.inputs.iter();
-        if match self.output {
-            Some(ref output) => iter.chain(output.iter()).any(|i| i.ty.name.is_none()),
-            None => iter.any(|i| i.ty.name.is_none()),
-        } {
+        let has_missing = self.inputs.iter().chain(self.output.iter()).any(|i| i.ty.name.is_none());
+        if has_missing {
             serializer.serialize_none()
         } else {
             let mut seq = serializer.serialize_seq(None)?;
             seq.serialize_element(&self.inputs)?;
-            if let Some(output) = &self.output {
-                if output.len() > 1 {
-                    seq.serialize_element(&output)?;
-                } else {
-                    seq.serialize_element(&output[0])?;
-                }
+            match self.output.as_slice() {
+                [] => {}
+                [one] => seq.serialize_element(one)?,
+                all => seq.serialize_element(all)?,
             }
             seq.end()
         }
@@ -1147,9 +1143,9 @@ fn render_assoc_items_inner(
         }
 
         let (synthetic, concrete): (Vec<&&Impl>, Vec<&&Impl>) =
-            traits.iter().partition(|t| t.inner_impl().synthetic);
+            traits.iter().partition(|t| t.inner_impl().kind.is_auto());
         let (blanket_impl, concrete): (Vec<&&Impl>, _) =
-            concrete.into_iter().partition(|t| t.inner_impl().blanket_impl.is_some());
+            concrete.into_iter().partition(|t| t.inner_impl().kind.is_blanket());
 
         let mut impls = Buffer::empty_from(w);
         render_impls(cx, &mut impls, &concrete, containing_item);
@@ -2033,12 +2029,12 @@ fn sidebar_assoc_items(cx: &Context<'_>, out: &mut Buffer, it: &clean::Item) {
                             let i_display = format!("{:#}", i.print(cx));
                             let out = Escape(&i_display);
                             let encoded = small_url_encode(format!("{:#}", i.print(cx)));
-                            let generated = format!(
-                                "<a href=\"#impl-{}\">{}{}</a>",
-                                encoded,
-                                if it.inner_impl().negative_polarity { "!" } else { "" },
-                                out
-                            );
+                            let prefix = match it.inner_impl().polarity {
+                                ty::ImplPolarity::Positive | ty::ImplPolarity::Reservation => "",
+                                ty::ImplPolarity::Negative => "!",
+                            };
+                            let generated =
+                                format!("<a href=\"#impl-{}\">{}{}</a>", encoded, prefix, out);
                             if links.insert(generated.clone()) { Some(generated) } else { None }
                         } else {
                             None
@@ -2058,10 +2054,9 @@ fn sidebar_assoc_items(cx: &Context<'_>, out: &mut Buffer, it: &clean::Item) {
             };
 
             let (synthetic, concrete): (Vec<&Impl>, Vec<&Impl>) =
-                v.iter().partition::<Vec<_>, _>(|i| i.inner_impl().synthetic);
-            let (blanket_impl, concrete): (Vec<&Impl>, Vec<&Impl>) = concrete
-                .into_iter()
-                .partition::<Vec<_>, _>(|i| i.inner_impl().blanket_impl.is_some());
+                v.iter().partition::<Vec<_>, _>(|i| i.inner_impl().kind.is_auto());
+            let (blanket_impl, concrete): (Vec<&Impl>, Vec<&Impl>) =
+                concrete.into_iter().partition::<Vec<_>, _>(|i| i.inner_impl().kind.is_blanket());
 
             let concrete_format = format_impls(concrete);
             let synthetic_format = format_impls(synthetic);
@@ -2166,7 +2161,7 @@ fn sidebar_deref_methods(
         }
 
         // Recurse into any further impls that might exist for `target`
-        if let Some(target_did) = target.def_id_no_primitives() {
+        if let Some(target_did) = target.def_id(c) {
             if let Some(target_impls) = c.impls.get(&target_did) {
                 if let Some(target_deref_impl) = target_impls.iter().find(|i| {
                     i.inner_impl()
