@@ -41,14 +41,8 @@ use crate::visit_ast::Module as DocModule;
 
 use utils::*;
 
-crate use utils::{get_auto_trait_and_blanket_impls, krate, register_res};
-
-crate use self::types::FnRetTy::*;
-crate use self::types::ItemKind::*;
-crate use self::types::SelfTy::*;
-crate use self::types::Type::*;
-crate use self::types::Visibility::{Inherited, Public};
 crate use self::types::*;
+crate use self::utils::{get_auto_trait_and_blanket_impls, krate, register_res};
 
 crate trait Clean<T> {
     fn clean(&self, cx: &mut DocContext<'_>) -> T;
@@ -956,7 +950,7 @@ impl Clean<Item> for hir::ImplItem<'_> {
 
             let what_rustc_thinks =
                 Item::from_def_id_and_parts(local_did, Some(self.ident.name), inner, cx);
-            let parent_item = cx.tcx.hir().expect_item(cx.tcx.hir().get_parent_item(self.hir_id()));
+            let parent_item = cx.tcx.hir().expect_item(cx.tcx.hir().get_parent_did(self.hir_id()));
             if let hir::ItemKind::Impl(impl_) = &parent_item.kind {
                 if impl_.of_trait.is_some() {
                     // Trait impl items always inherit the impl's visibility --
@@ -1195,9 +1189,8 @@ fn maybe_expand_private_type_alias(cx: &mut DocContext<'_>, path: &hir::Path<'_>
     let Res::Def(DefKind::TyAlias, def_id) = path.res else { return None };
     // Substitute private type aliases
     let Some(def_id) = def_id.as_local() else { return None };
-    let hir_id = cx.tcx.hir().local_def_id_to_hir_id(def_id);
     let alias = if !cx.cache.access_levels.is_exported(def_id.to_def_id()) {
-        &cx.tcx.hir().expect_item(hir_id).kind
+        &cx.tcx.hir().expect_item(def_id).kind
     } else {
         return None;
     };
@@ -1411,12 +1404,12 @@ impl<'tcx> Clean<Type> for Ty<'tcx> {
                 };
                 inline::record_extern_fqn(cx, did, kind);
                 let path = external_path(cx, did, false, vec![], substs);
-                ResolvedPath { path }
+                Type::Path { path }
             }
             ty::Foreign(did) => {
                 inline::record_extern_fqn(cx, did, ItemType::ForeignType);
                 let path = external_path(cx, did, false, vec![], InternalSubsts::empty());
-                ResolvedPath { path }
+                Type::Path { path }
             }
             ty::Dynamic(obj, ref reg) => {
                 // HACK: pick the first `did` as the `did` of the trait object. Someone

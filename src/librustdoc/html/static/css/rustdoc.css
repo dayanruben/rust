@@ -828,6 +828,7 @@ h2.small-section-header > .anchor {
 	background-color: transparent;
 	background-size: 20px;
 	background-position: calc(100% - 1px) 56%;
+	background-image: /* AUTOREPLACE: */url("down-arrow.svg");
 }
 .search-container > .top-button {
 	position: absolute;
@@ -1129,13 +1130,15 @@ h3.variant {
 	margin-top: 3px;
 }
 
-.docblock > .section-header:first-child {
+.top-doc .docblock > .section-header:first-child {
 	margin-left: 15px;
-	margin-top: 0;
+}
+.top-doc .docblock > .section-header:first-child:hover > a:before {
+	left: -10px;
 }
 
-.docblock > .section-header:first-child:hover > a:before {
-	left: -10px;
+.docblock > .section-header:first-child {
+	margin-top: 0;
 }
 
 :target > code, :target > .code-header {
@@ -1606,6 +1609,16 @@ details.rustdoc-toggle {
 
 details.rustdoc-toggle[open] > summary.hideme > span {
 	display: none;
+}
+
+details.undocumented[open] > summary::before,
+details.rustdoc-toggle[open] > summary::before,
+details.rustdoc-toggle[open] > summary.hideme::before {
+	background-image: /* AUTOREPLACE: */url("toggle-minus.svg");
+}
+
+details.undocumented > summary::before, details.rustdoc-toggle > summary::before {
+	background-image: /* AUTOREPLACE: */url("toggle-plus.svg");
 }
 
 details.rustdoc-toggle[open] > summary::before,
