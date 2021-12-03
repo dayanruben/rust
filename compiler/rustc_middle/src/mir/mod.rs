@@ -7,7 +7,7 @@ use crate::mir::interpret::{Allocation, ConstValue, GlobalAlloc, Scalar};
 use crate::mir::visit::MirVisitable;
 use crate::ty::adjustment::PointerCast;
 use crate::ty::codec::{TyDecoder, TyEncoder};
-use crate::ty::fold::{TypeFoldable, TypeFolder, TypeVisitor};
+use crate::ty::fold::{FallibleTypeFolder, TypeFoldable, TypeVisitor};
 use crate::ty::print::{FmtPrinter, Printer};
 use crate::ty::subst::{Subst, SubstsRef};
 use crate::ty::{self, List, Ty, TyCtxt};
@@ -1803,6 +1803,16 @@ impl<V, T> ProjectionElem<V, T> {
             | Self::Downcast(_, _) => false,
         }
     }
+
+    /// Returns `true` if this is a `Downcast` projection with the given `VariantIdx`.
+    pub fn is_downcast_to(&self, v: VariantIdx) -> bool {
+        matches!(*self, Self::Downcast(_, x) if x == v)
+    }
+
+    /// Returns `true` if this is a `Field` projection with the given index.
+    pub fn is_field_to(&self, f: Field) -> bool {
+        matches!(*self, Self::Field(x, _) if x == f)
+    }
 }
 
 /// Alias for projections as they appear in places, where the base is a place
@@ -2760,10 +2770,13 @@ impl UserTypeProjection {
 TrivialTypeFoldableAndLiftImpls! { ProjectionKind, }
 
 impl<'tcx> TypeFoldable<'tcx> for UserTypeProjection {
-    fn super_fold_with<F: TypeFolder<'tcx>>(self, folder: &mut F) -> Result<Self, F::Error> {
+    fn try_super_fold_with<F: FallibleTypeFolder<'tcx>>(
+        self,
+        folder: &mut F,
+    ) -> Result<Self, F::Error> {
         Ok(UserTypeProjection {
-            base: self.base.fold_with(folder)?,
-            projs: self.projs.fold_with(folder)?,
+            base: self.base.try_fold_with(folder)?,
+            projs: self.projs.try_fold_with(folder)?,
         })
     }
 
