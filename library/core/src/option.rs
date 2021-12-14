@@ -1671,7 +1671,8 @@ impl<T, E> Option<Result<T, E>> {
 }
 
 // This is a separate function to reduce the code size of .expect() itself.
-#[inline(never)]
+#[cfg_attr(not(feature = "panic_immediate_abort"), inline(never))]
+#[cfg_attr(feature = "panic_immediate_abort", inline)]
 #[cold]
 #[track_caller]
 const fn expect_failed(msg: &str) -> ! {
@@ -2076,7 +2077,8 @@ impl<A, V: FromIterator<A>> FromIterator<Option<A>> for Option<V> {
 }
 
 #[unstable(feature = "try_trait_v2", issue = "84277")]
-impl<T> ops::Try for Option<T> {
+#[rustc_const_unstable(feature = "const_convert", issue = "88674")]
+impl<T> const ops::Try for Option<T> {
     type Output = T;
     type Residual = Option<convert::Infallible>;
 
@@ -2095,6 +2097,7 @@ impl<T> ops::Try for Option<T> {
 }
 
 #[unstable(feature = "try_trait_v2", issue = "84277")]
+#[rustc_const_unstable(feature = "const_convert", issue = "88674")]
 impl<T> const ops::FromResidual for Option<T> {
     #[inline]
     fn from_residual(residual: Option<convert::Infallible>) -> Self {
