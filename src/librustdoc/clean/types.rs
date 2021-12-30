@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::default::Default;
-use std::hash::{Hash, Hasher};
+use std::fmt::Write;
+use std::hash::Hash;
 use std::lazy::SyncOnceCell as OnceCell;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -38,8 +39,8 @@ use crate::clean::Clean;
 use crate::core::DocContext;
 use crate::formats::cache::Cache;
 use crate::formats::item_type::ItemType;
-use crate::html::render::cache::ExternalLocation;
 use crate::html::render::Context;
+use crate::passes::collect_intra_doc_links::UrlFragment;
 
 crate use self::FnRetTy::*;
 crate use self::ItemKind::*;
@@ -337,6 +338,16 @@ impl ExternalCrate {
     }
 }
 
+/// Indicates where an external crate can be found.
+crate enum ExternalLocation {
+    /// Remote URL root of the external crate
+    Remote(String),
+    /// This external crate can be found in the local doc/ folder
+    Local,
+    /// The external crate could not be found.
+    Unknown,
+}
+
 /// Anything with a source location and set of attributes and, optionally, a
 /// name. That is, anything that can be documented. This doesn't correspond
 /// directly to the AST's concept of an item; it's a strict superset.
@@ -485,8 +496,7 @@ impl Item {
                 if let Ok((mut href, ..)) = href(*did, cx) {
                     debug!(?href);
                     if let Some(ref fragment) = *fragment {
-                        href.push('#');
-                        href.push_str(fragment);
+                        write!(href, "{}", fragment).unwrap()
                     }
                     Some(RenderedLink {
                         original_text: s.clone(),
@@ -904,7 +914,7 @@ impl<I: Iterator<Item = ast::NestedMetaItem> + IntoIterator<Item = ast::NestedMe
 /// Included files are kept separate from inline doc comments so that proper line-number
 /// information can be given when a doctest fails. Sugared doc comments and "raw" doc comments are
 /// kept separate because of issue #42760.
-#[derive(Clone, PartialEq, Eq, Debug, Hash)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 crate struct DocFragment {
     crate span: rustc_span::Span,
     /// The module this doc-comment came from.
@@ -977,7 +987,7 @@ crate struct ItemLink {
     pub(crate) link_text: String,
     pub(crate) did: DefId,
     /// The url fragment to append to the link
-    pub(crate) fragment: Option<String>,
+    pub(crate) fragment: Option<UrlFragment>,
 }
 
 pub struct RenderedLink {
@@ -1139,15 +1149,6 @@ impl PartialEq for Attributes {
 }
 
 impl Eq for Attributes {}
-
-impl Hash for Attributes {
-    fn hash<H: Hasher>(&self, hasher: &mut H) {
-        self.doc_strings.hash(hasher);
-        for attr in &self.other_attrs {
-            attr.id.hash(hasher);
-        }
-    }
-}
 
 #[derive(Clone, PartialEq, Eq, Debug, Hash)]
 crate enum GenericBound {
