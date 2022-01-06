@@ -1116,7 +1116,9 @@ impl<'a> State<'a> {
         self.print_ident(ident);
         self.word_space(":");
         self.print_type(ty);
-        self.space();
+        if body.is_some() {
+            self.space();
+        }
         self.end(); // end the head-ibox
         if let Some(body) = body {
             self.word_space("=");
@@ -2239,7 +2241,6 @@ impl<'a> State<'a> {
             }
             ast::ExprKind::TryBlock(ref blk) => {
                 self.head("try");
-                self.space();
                 self.print_block_with_attrs(blk, attrs)
             }
             ast::ExprKind::Err => {
@@ -2460,7 +2461,11 @@ impl<'a> State<'a> {
                     self.print_path(path, true, 0);
                 }
                 self.nbsp();
-                self.word_space("{");
+                self.word("{");
+                let empty = fields.is_empty() && !etc;
+                if !empty {
+                    self.space();
+                }
                 self.commasep_cmnt(
                     Consistent,
                     &fields,
@@ -2481,7 +2486,9 @@ impl<'a> State<'a> {
                     }
                     self.word("..");
                 }
-                self.space();
+                if !empty {
+                    self.space();
+                }
                 self.word("}");
             }
             PatKind::Tuple(ref elts) => {
@@ -2515,7 +2522,6 @@ impl<'a> State<'a> {
             PatKind::Range(ref begin, ref end, Spanned { node: ref end_kind, .. }) => {
                 if let Some(e) = begin {
                     self.print_expr(e);
-                    self.space();
                 }
                 match *end_kind {
                     RangeEnd::Included(RangeSyntax::DotDotDot) => self.word("..."),

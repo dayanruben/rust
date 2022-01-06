@@ -889,20 +889,25 @@ impl AttributesExt for [ast::Attribute] {
 }
 
 crate trait NestedAttributesExt {
-    /// Returns `true` if the attribute list contains a specific `Word`
-    fn has_word(self, word: Symbol) -> bool;
+    /// Returns `true` if the attribute list contains a specific `word`
+    fn has_word(self, word: Symbol) -> bool
+    where
+        Self: std::marker::Sized,
+    {
+        <Self as NestedAttributesExt>::get_word_attr(self, word).is_some()
+    }
+
+    /// Returns `Some(attr)` if the attribute list contains 'attr'
+    /// corresponding to a specific `word`
     fn get_word_attr(self, word: Symbol) -> Option<ast::NestedMetaItem>;
 }
 
-impl<I: Iterator<Item = ast::NestedMetaItem> + IntoIterator<Item = ast::NestedMetaItem>>
-    NestedAttributesExt for I
+impl<I> NestedAttributesExt for I
+where
+    I: IntoIterator<Item = ast::NestedMetaItem>,
 {
-    fn has_word(self, word: Symbol) -> bool {
-        self.into_iter().any(|attr| attr.is_word() && attr.has_name(word))
-    }
-
-    fn get_word_attr(mut self, word: Symbol) -> Option<ast::NestedMetaItem> {
-        self.find(|attr| attr.is_word() && attr.has_name(word))
+    fn get_word_attr(self, word: Symbol) -> Option<ast::NestedMetaItem> {
+        self.into_iter().find(|attr| attr.is_word() && attr.has_name(word))
     }
 }
 
@@ -2060,14 +2065,14 @@ rustc_data_structures::static_assert_size!(GenericArg, 80);
 
 #[derive(Clone, PartialEq, Eq, Debug, Hash)]
 crate enum GenericArgs {
-    AngleBracketed { args: Vec<GenericArg>, bindings: Vec<TypeBinding> },
+    AngleBracketed { args: Vec<GenericArg>, bindings: ThinVec<TypeBinding> },
     Parenthesized { inputs: Vec<Type>, output: Option<Box<Type>> },
 }
 
 // `GenericArgs` is in every `PathSegment`, so its size can significantly
 // affect rustdoc's memory usage.
 #[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
-rustc_data_structures::static_assert_size!(GenericArgs, 56);
+rustc_data_structures::static_assert_size!(GenericArgs, 40);
 
 #[derive(Clone, PartialEq, Eq, Debug, Hash)]
 crate struct PathSegment {
@@ -2078,7 +2083,7 @@ crate struct PathSegment {
 // `PathSegment` usually occurs multiple times in every `Path`, so its size can
 // significantly affect rustdoc's memory usage.
 #[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
-rustc_data_structures::static_assert_size!(PathSegment, 64);
+rustc_data_structures::static_assert_size!(PathSegment, 48);
 
 #[derive(Clone, Debug)]
 crate struct Typedef {
