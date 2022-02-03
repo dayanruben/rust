@@ -9,6 +9,7 @@
 #![feature(trusted_step)]
 #![feature(try_blocks)]
 #![recursion_limit = "256"]
+#![cfg_attr(not(bootstrap), allow(rustc::potential_query_instability))]
 
 #[macro_use]
 extern crate rustc_middle;
@@ -1426,9 +1427,8 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
                             bug!("temporary should be initialized exactly once")
                         };
 
-                        let loc = match init.location {
-                            InitLocation::Statement(stmt) => stmt,
-                            _ => bug!("temporary initialized in arguments"),
+                        let InitLocation::Statement(loc) = init.location else {
+                            bug!("temporary initialized in arguments")
                         };
 
                         let body = self.body;
