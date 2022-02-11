@@ -262,7 +262,7 @@ impl<'a, 'tcx> InferCtxtExt<'tcx> for InferCtxt<'a, 'tcx> {
                         .tcx
                         .diagnostic_hir_wf_check((tcx.erase_regions(obligation.predicate), *wf_loc))
                     {
-                        obligation.cause = cause;
+                        obligation.cause = cause.clone();
                         span = obligation.cause.span;
                     }
                 }
@@ -775,10 +775,6 @@ impl<'a, 'tcx> InferCtxtExt<'tcx> for InferCtxt<'a, 'tcx> {
                         span,
                         "TypeWellFormedFromEnv predicate should only exist in the environment"
                     ),
-
-                    ty::PredicateKind::OpaqueType(..) => {
-                        todo!("{:#?}", obligation);
-                    }
                 }
             }
 
