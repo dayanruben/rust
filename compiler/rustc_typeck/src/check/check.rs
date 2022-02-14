@@ -522,7 +522,12 @@ pub(super) fn check_opaque_for_inheriting_lifetimes<'tcx>(
         fn visit_ty(&mut self, arg: &'tcx hir::Ty<'tcx>) {
             match arg.kind {
                 hir::TyKind::Path(hir::QPath::Resolved(None, path)) => match &path.segments {
-                    [PathSegment { res: Some(Res::SelfTy(_, impl_ref)), .. }] => {
+                    [
+                        PathSegment {
+                            res: Some(Res::SelfTy { trait_: _, alias_to: impl_ref }),
+                            ..
+                        },
+                    ] => {
                         let impl_ty_name =
                             impl_ref.map(|(def_id, _)| self.tcx.def_path_str(def_id));
                         self.selftys.push((path.span, impl_ty_name));
@@ -535,10 +540,8 @@ pub(super) fn check_opaque_for_inheriting_lifetimes<'tcx>(
         }
     }
 
-    if let ItemKind::OpaqueTy(hir::OpaqueTy {
-        origin: hir::OpaqueTyOrigin::AsyncFn(..) | hir::OpaqueTyOrigin::FnReturn(..),
-        ..
-    }) = item.kind
+    if let ItemKind::OpaqueTy(hir::OpaqueTy { origin: hir::OpaqueTyOrigin::FnReturn(..), .. }) =
+        item.kind
     {
         let mut visitor = ProhibitOpaqueVisitor {
             opaque_identity_ty: tcx.mk_opaque(
@@ -560,20 +563,13 @@ pub(super) fn check_opaque_for_inheriting_lifetimes<'tcx>(
 
         if let Some(ty) = prohibit_opaque.break_value() {
             visitor.visit_item(&item);
-            let is_async = match item.kind {
-                ItemKind::OpaqueTy(hir::OpaqueTy { origin, .. }) => {
-                    matches!(origin, hir::OpaqueTyOrigin::AsyncFn(..))
-                }
-                _ => unreachable!(),
-            };
 
             let mut err = struct_span_err!(
                 tcx.sess,
                 span,
                 E0760,
-                "`{}` return type cannot contain a projection or `Self` that references lifetimes from \
+                "`impl Trait` return type cannot contain a projection or `Self` that references lifetimes from \
                  a parent scope",
-                if is_async { "async fn" } else { "impl Trait" },
             );
 
             for (span, name) in visitor.selftys {
