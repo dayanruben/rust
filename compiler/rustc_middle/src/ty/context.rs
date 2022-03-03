@@ -24,6 +24,7 @@ use crate::ty::{
     RegionKind, ReprOptions, TraitObjectVisitor, Ty, TyKind, TyS, TyVar, TyVid, TypeAndMut, UintTy,
 };
 use rustc_ast as ast;
+use rustc_data_structures::fingerprint::Fingerprint;
 use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 use rustc_data_structures::intern::Interned;
 use rustc_data_structures::memmap::Mmap;
@@ -32,7 +33,7 @@ use rustc_data_structures::sharded::{IntoPointer, ShardedHashMap};
 use rustc_data_structures::stable_hasher::{HashStable, StableHasher};
 use rustc_data_structures::steal::Steal;
 use rustc_data_structures::sync::{self, Lock, Lrc, WorkerLocal};
-use rustc_errors::ErrorReported;
+use rustc_errors::ErrorGuaranteed;
 use rustc_hir as hir;
 use rustc_hir::def::{DefKind, Res};
 use rustc_hir::def_id::{CrateNum, DefId, DefIdMap, LocalDefId, LOCAL_CRATE};
@@ -58,6 +59,7 @@ use rustc_span::{Span, DUMMY_SP};
 use rustc_target::abi::{Layout, TargetDataLayout, VariantIdx};
 use rustc_target::spec::abi;
 
+use rustc_type_ir::TypeFlags;
 use smallvec::SmallVec;
 use std::any::Any;
 use std::borrow::Borrow;
@@ -140,16 +142,39 @@ impl<'tcx> CtxtInterners<'tcx> {
     /// Interns a type.
     #[allow(rustc::usage_of_ty_tykind)]
     #[inline(never)]
-    fn intern_ty(&self, kind: TyKind<'tcx>) -> Ty<'tcx> {
+    fn intern_ty(
+        &self,
+        kind: TyKind<'tcx>,
+        sess: &Session,
+        resolutions: &ty::ResolverOutputs,
+    ) -> Ty<'tcx> {
         Ty(Interned::new_unchecked(
             self.type_
                 .intern(kind, |kind| {
                     let flags = super::flags::FlagComputation::for_kind(&kind);
 
+                    // It's impossible to hash inference regions (and will ICE), so we don't need to try to cache them.
+                    // Without incremental, we rarely stable-hash types, so let's not do it proactively.
+                    let stable_hash = if flags.flags.intersects(TypeFlags::HAS_RE_INFER)
+                        || sess.opts.incremental.is_none()
+                    {
+                        Fingerprint::ZERO
+                    } else {
+                        let mut hasher = StableHasher::new();
+                        let mut hcx = StableHashingContext::ignore_spans(
+                            sess,
+                            &resolutions.definitions,
+                            &*resolutions.cstore,
+                        );
+                        kind.hash_stable(&mut hcx, &mut hasher);
+                        hasher.finish()
+                    };
+
                     let ty_struct = TyS {
                         kind,
                         flags: flags.flags,
                         outer_exclusive_binder: flags.outer_exclusive_binder,
+                        stable_hash,
                     };
 
                     InternedInSet(self.arena.alloc(ty_struct))
@@ -344,7 +369,7 @@ pub struct TypeckResults<'tcx> {
 
     /// Resolved definitions for `<T>::X` associated paths and
     /// method calls, including those of overloaded operators.
-    type_dependent_defs: ItemLocalMap<Result<(DefKind, DefId), ErrorReported>>,
+    type_dependent_defs: ItemLocalMap<Result<(DefKind, DefId), ErrorGuaranteed>>,
 
     /// Resolved field indices for field accesses in expressions (`S { field }`, `obj.field`)
     /// or patterns (`S { field }`). The index is often useful by itself, but to learn more
@@ -454,8 +479,8 @@ pub struct TypeckResults<'tcx> {
     pub used_trait_imports: Lrc<FxHashSet<LocalDefId>>,
 
     /// If any errors occurred while type-checking this body,
-    /// this field will be set to `Some(ErrorReported)`.
-    pub tainted_by_errors: Option<ErrorReported>,
+    /// this field will be set to `Some(ErrorGuaranteed)`.
+    pub tainted_by_errors: Option<ErrorGuaranteed>,
 
     /// All the opaque types that are restricted to concrete types
     /// by this function.
@@ -544,7 +569,7 @@ impl<'tcx> TypeckResults<'tcx> {
 
     pub fn type_dependent_defs(
         &self,
-    ) -> LocalTableInContext<'_, Result<(DefKind, DefId), ErrorReported>> {
+    ) -> LocalTableInContext<'_, Result<(DefKind, DefId), ErrorGuaranteed>> {
         LocalTableInContext { hir_owner: self.hir_owner, data: &self.type_dependent_defs }
     }
 
@@ -559,7 +584,7 @@ impl<'tcx> TypeckResults<'tcx> {
 
     pub fn type_dependent_defs_mut(
         &mut self,
-    ) -> LocalTableInContextMut<'_, Result<(DefKind, DefId), ErrorReported>> {
+    ) -> LocalTableInContextMut<'_, Result<(DefKind, DefId), ErrorGuaranteed>> {
         LocalTableInContextMut { hir_owner: self.hir_owner, data: &mut self.type_dependent_defs }
     }
 
@@ -887,8 +912,12 @@ pub enum UserType<'tcx> {
 }
 
 impl<'tcx> CommonTypes<'tcx> {
-    fn new(interners: &CtxtInterners<'tcx>) -> CommonTypes<'tcx> {
-        let mk = |ty| interners.intern_ty(ty);
+    fn new(
+        interners: &CtxtInterners<'tcx>,
+        sess: &Session,
+        resolutions: &ty::ResolverOutputs,
+    ) -> CommonTypes<'tcx> {
+        let mk = |ty| interners.intern_ty(ty, sess, resolutions);
 
         CommonTypes {
             unit: mk(Tuple(List::empty())),
@@ -1162,7 +1191,7 @@ impl<'tcx> TyCtxt<'tcx> {
             s.fatal(&err);
         });
         let interners = CtxtInterners::new(arena);
-        let common_types = CommonTypes::new(&interners);
+        let common_types = CommonTypes::new(&interners, s, &resolutions);
         let common_lifetimes = CommonLifetimes::new(&interners);
         let common_consts = CommonConsts::new(&interners, &common_types);
 
@@ -2276,7 +2305,7 @@ impl<'tcx> TyCtxt<'tcx> {
     #[allow(rustc::usage_of_ty_tykind)]
     #[inline]
     pub fn mk_ty(self, st: TyKind<'tcx>) -> Ty<'tcx> {
-        self.interners.intern_ty(st)
+        self.interners.intern_ty(st, self.sess, &self.gcx.untracked_resolutions)
     }
 
     #[inline]

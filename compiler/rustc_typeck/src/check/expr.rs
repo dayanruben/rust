@@ -26,7 +26,7 @@ use rustc_ast as ast;
 use rustc_data_structures::fx::FxHashMap;
 use rustc_data_structures::stack::ensure_sufficient_stack;
 use rustc_errors::Diagnostic;
-use rustc_errors::ErrorReported;
+use rustc_errors::ErrorGuaranteed;
 use rustc_errors::{pluralize, struct_span_err, Applicability, DiagnosticBuilder, DiagnosticId};
 use rustc_hir as hir;
 use rustc_hir::def::{CtorKind, DefKind, Res};
@@ -1188,7 +1188,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     deferred_cast_checks.push(cast_check);
                     t_cast
                 }
-                Err(ErrorReported) => self.tcx.ty_error(),
+                Err(ErrorGuaranteed) => self.tcx.ty_error(),
             }
         }
     }
@@ -1517,7 +1517,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 }
             } else {
                 self.check_expr_has_type_or_error(base_expr, adt_ty, |_| {
-                    let base_ty = self.typeck_results.borrow().node_type(base_expr.hir_id);
+                    let base_ty = self.typeck_results.borrow().expr_ty(*base_expr);
                     let same_adt = match (adt_ty.kind(), base_ty.kind()) {
                         (ty::Adt(adt, _), ty::Adt(base_adt, _)) if adt == base_adt => true,
                         _ => false,
@@ -2225,7 +2225,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         field: Ident,
         expr_t: Ty<'tcx>,
         id: HirId,
-    ) -> DiagnosticBuilder<'_, ErrorReported> {
+    ) -> DiagnosticBuilder<'_, ErrorGuaranteed> {
         let span = field.span;
         debug!("no_such_field_err(span: {:?}, field: {:?}, expr_t: {:?})", span, field, expr_t);
 

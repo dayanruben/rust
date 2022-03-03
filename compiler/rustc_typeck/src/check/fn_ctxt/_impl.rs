@@ -8,7 +8,7 @@ use crate::check::{BreakableCtxt, Diverges, Expectation, FnCtxt, LocalTy};
 
 use rustc_data_structures::captures::Captures;
 use rustc_data_structures::fx::FxHashSet;
-use rustc_errors::{Applicability, Diagnostic, ErrorReported};
+use rustc_errors::{Applicability, Diagnostic, ErrorGuaranteed};
 use rustc_hir as hir;
 use rustc_hir::def::{CtorOf, DefKind, Res};
 use rustc_hir::def_id::DefId;
@@ -158,7 +158,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
     pub(in super::super) fn write_resolution(
         &self,
         hir_id: hir::HirId,
-        r: Result<(DefKind, DefId), ErrorReported>,
+        r: Result<(DefKind, DefId), ErrorGuaranteed>,
     ) {
         self.typeck_results.borrow_mut().type_dependent_defs_mut().insert(hir_id, r);
     }
@@ -312,15 +312,6 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                         ],
                     ) => {
                         // A reborrow has no effect before a dereference.
-                    }
-                    // Catch cases which have Deref(None)
-                    // having them slip to bug! causes ICE
-                    // see #94291 for more info
-                    (&[Adjustment { kind: Adjust::Deref(None), .. }], _) => {
-                        self.tcx.sess.delay_span_bug(
-                            DUMMY_SP,
-                            &format!("Can't compose Deref(None) expressions"),
-                        )
                     }
                     // FIXME: currently we never try to compose autoderefs
                     // and ReifyFnPointer/UnsafeFnPointer, but we could.
@@ -909,7 +900,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             .or_else(|error| {
                 let result = match error {
                     method::MethodError::PrivateMatch(kind, def_id, _) => Ok((kind, def_id)),
-                    _ => Err(ErrorReported),
+                    _ => Err(ErrorGuaranteed),
                 };
 
                 // If we have a path like `MyTrait::missing_method`, then don't register
