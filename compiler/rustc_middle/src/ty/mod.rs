@@ -25,6 +25,7 @@ use crate::middle::privacy::AccessLevels;
 use crate::mir::{Body, GeneratorLayout};
 use crate::traits::{self, Reveal};
 use crate::ty;
+use crate::ty::fast_reject::SimplifiedType;
 use crate::ty::subst::{GenericArg, InternalSubsts, Subst, SubstsRef};
 use crate::ty::util::Discr;
 use rustc_ast as ast;
@@ -1057,10 +1058,53 @@ impl<'tcx> InstantiatedPredicates<'tcx> {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, HashStable, TyEncodable, TyDecodable, TypeFoldable)]
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    HashStable,
+    TyEncodable,
+    TyDecodable,
+    TypeFoldable,
+    Lift
+)]
 pub struct OpaqueTypeKey<'tcx> {
     pub def_id: DefId,
     pub substs: SubstsRef<'tcx>,
+}
+
+#[derive(Copy, Clone, Debug, TypeFoldable, HashStable, TyEncodable, TyDecodable)]
+pub struct OpaqueHiddenType<'tcx> {
+    /// The span of this particular definition of the opaque type. So
+    /// for example:
+    ///
+    /// ```ignore (incomplete snippet)
+    /// type Foo = impl Baz;
+    /// fn bar() -> Foo {
+    /// //          ^^^ This is the span we are looking for!
+    /// }
+    /// ```
+    ///
+    /// In cases where the fn returns `(impl Trait, impl Trait)` or
+    /// other such combinations, the result is currently
+    /// over-approximated, but better than nothing.
+    pub span: Span,
+
+    /// The type variable that represents the value of the opaque type
+    /// that we require. In other words, after we compile this function,
+    /// we will be created a constraint like:
+    ///
+    ///     Foo<'a, T> = ?C
+    ///
+    /// where `?C` is the value of this type variable. =) It may
+    /// naturally refer to the type and lifetime parameters in scope
+    /// in this function, though ultimately it should only reference
+    /// those that are arguments to `Foo` in the constraint above. (In
+    /// other words, `?C` should not include `'b`, even though it's a
+    /// lifetime parameter on `foo`.)
+    pub ty: Ty<'tcx>,
 }
 
 rustc_index::newtype_index! {
@@ -2103,7 +2147,7 @@ impl<'tcx> TyCtxt<'tcx> {
         match instance {
             ty::InstanceDef::Item(def) => match self.def_kind(def.did) {
                 DefKind::Const
-                | DefKind::Static
+                | DefKind::Static(..)
                 | DefKind::AssocConst
                 | DefKind::Ctor(..)
                 | DefKind::AnonConst
@@ -2292,6 +2336,7 @@ pub fn provide(providers: &mut ty::query::Providers) {
     super::middle::provide(providers);
     *providers = ty::query::Providers {
         trait_impls_of: trait_def::trait_impls_of_provider,
+        incoherent_impls: trait_def::incoherent_impls_provider,
         type_uninhabited_from: inhabitedness::type_uninhabited_from,
         const_param_default: consts::const_param_default,
         vtable_allocation: vtable::vtable_allocation_provider,
@@ -2307,6 +2352,7 @@ pub fn provide(providers: &mut ty::query::Providers) {
 #[derive(Clone, Debug, Default, HashStable)]
 pub struct CrateInherentImpls {
     pub inherent_impls: LocalDefIdMap<Vec<DefId>>,
+    pub incoherent_impls: FxHashMap<SimplifiedType, Vec<LocalDefId>>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, TyEncodable, HashStable)]
