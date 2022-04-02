@@ -1218,8 +1218,6 @@ fn trait_def(tcx: TyCtxt<'_>, def_id: DefId) -> ty::TraitDef {
     } else {
         ty::trait_def::TraitSpecializationKind::None
     };
-    let def_path_hash = tcx.def_path_hash(def_id);
-
     let must_implement_one_of = tcx
         .get_attrs(def_id)
         .iter()
@@ -1326,7 +1324,6 @@ fn trait_def(tcx: TyCtxt<'_>, def_id: DefId) -> ty::TraitDef {
         is_marker,
         skip_array_during_method_dispatch,
         spec_kind,
-        def_path_hash,
         must_implement_one_of,
     )
 }
@@ -2913,7 +2910,7 @@ fn codegen_fn_attrs(tcx: TyCtxt<'_>, id: DefId) -> CodegenFnAttrs {
                     // The `#[target_feature]` attribute is allowed on
                     // WebAssembly targets on all functions, including safe
                     // ones. Other targets require that `#[target_feature]` is
-                    // only applied to unsafe funtions (pending the
+                    // only applied to unsafe functions (pending the
                     // `target_feature_11` feature) because on most targets
                     // execution of instructions that are not supported is
                     // considered undefined behavior. For WebAssembly which is a
