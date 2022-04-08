@@ -110,7 +110,6 @@ enum Direction {
     Back,
 }
 
-#[cfg_attr(bootstrap, lang = "slice")]
 #[cfg(not(test))]
 impl<T> [T] {
     /// Returns the number of elements in the slice.
@@ -814,7 +813,7 @@ impl<T> [T] {
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn chunks(&self, chunk_size: usize) -> Chunks<'_, T> {
-        assert_ne!(chunk_size, 0);
+        assert_ne!(chunk_size, 0, "chunks cannot have a size of zero");
         Chunks::new(self, chunk_size)
     }
 
@@ -852,7 +851,7 @@ impl<T> [T] {
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn chunks_mut(&mut self, chunk_size: usize) -> ChunksMut<'_, T> {
-        assert_ne!(chunk_size, 0);
+        assert_ne!(chunk_size, 0, "chunks cannot have a size of zero");
         ChunksMut::new(self, chunk_size)
     }
 
@@ -3990,6 +3989,88 @@ impl<T> [T] {
         let (last, rem) = mem::take(self).split_last_mut()?;
         *self = rem;
         Some(last)
+    }
+}
+
+#[cfg(not(bootstrap))]
+impl<T, const N: usize> [[T; N]] {
+    /// Takes a `&[[T; N]]`, and flattens it to a `&[T]`.
+    ///
+    /// # Panics
+    ///
+    /// This panics if the length of the resulting slice would overflow a `usize`.
+    ///
+    /// This is only possible when flattening a slice of arrays of zero-sized
+    /// types, and thus tends to be irrelevant in practice. If
+    /// `size_of::<T>() > 0`, this will never panic.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(slice_flatten)]
+    ///
+    /// assert_eq!([[1, 2, 3], [4, 5, 6]].flatten(), &[1, 2, 3, 4, 5, 6]);
+    ///
+    /// assert_eq!(
+    ///     [[1, 2, 3], [4, 5, 6]].flatten(),
+    ///     [[1, 2], [3, 4], [5, 6]].flatten(),
+    /// );
+    ///
+    /// let slice_of_empty_arrays: &[[i32; 0]] = &[[], [], [], [], []];
+    /// assert!(slice_of_empty_arrays.flatten().is_empty());
+    ///
+    /// let empty_slice_of_arrays: &[[u32; 10]] = &[];
+    /// assert!(empty_slice_of_arrays.flatten().is_empty());
+    /// ```
+    #[unstable(feature = "slice_flatten", issue = "95629")]
+    pub fn flatten(&self) -> &[T] {
+        let len = if crate::mem::size_of::<T>() == 0 {
+            self.len().checked_mul(N).expect("slice len overflow")
+        } else {
+            // SAFETY: `self.len() * N` cannot overflow because `self` is
+            // already in the address space.
+            unsafe { self.len().unchecked_mul(N) }
+        };
+        // SAFETY: `[T]` is layout-identical to `[T; N]`
+        unsafe { from_raw_parts(self.as_ptr().cast(), len) }
+    }
+
+    /// Takes a `&mut [[T; N]]`, and flattens it to a `&mut [T]`.
+    ///
+    /// # Panics
+    ///
+    /// This panics if the length of the resulting slice would overflow a `usize`.
+    ///
+    /// This is only possible when flattening a slice of arrays of zero-sized
+    /// types, and thus tends to be irrelevant in practice. If
+    /// `size_of::<T>() > 0`, this will never panic.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(slice_flatten)]
+    ///
+    /// fn add_5_to_all(slice: &mut [i32]) {
+    ///     for i in slice {
+    ///         *i += 5;
+    ///     }
+    /// }
+    ///
+    /// let mut array = [[1, 2, 3], [4, 5, 6], [7, 8, 9]];
+    /// add_5_to_all(array.flatten_mut());
+    /// assert_eq!(array, [[6, 7, 8], [9, 10, 11], [12, 13, 14]]);
+    /// ```
+    #[unstable(feature = "slice_flatten", issue = "95629")]
+    pub fn flatten_mut(&mut self) -> &mut [T] {
+        let len = if crate::mem::size_of::<T>() == 0 {
+            self.len().checked_mul(N).expect("slice len overflow")
+        } else {
+            // SAFETY: `self.len() * N` cannot overflow because `self` is
+            // already in the address space.
+            unsafe { self.len().unchecked_mul(N) }
+        };
+        // SAFETY: `[T]` is layout-identical to `[T; N]`
+        unsafe { from_raw_parts_mut(self.as_mut_ptr().cast(), len) }
     }
 }
 

@@ -131,6 +131,7 @@
 #![feature(trusted_len)]
 #![feature(trusted_random_access)]
 #![feature(try_trait_v2)]
+#![feature(unchecked_math)]
 #![feature(unicode_internals)]
 #![feature(unsize)]
 //
@@ -141,7 +142,6 @@
 #![feature(box_syntax)]
 #![feature(cfg_sanitize)]
 #![feature(const_deref)]
-#![cfg_attr(bootstrap, feature(const_fn_trait_bound))]
 #![feature(const_mut_refs)]
 #![feature(const_ptr_write)]
 #![feature(const_precise_live_drops)]
