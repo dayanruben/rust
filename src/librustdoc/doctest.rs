@@ -537,8 +537,8 @@ crate fn make_test(
             // Any errors in parsing should also appear when the doctest is compiled for real, so just
             // send all the errors that librustc_ast emits directly into a `Sink` instead of stderr.
             let sm = Lrc::new(SourceMap::new(FilePathMapping::empty()));
-            let fallback_bundle = rustc_errors::fallback_fluent_bundle(false)
-                .expect("failed to load fallback fluent bundle");
+            let fallback_bundle =
+                rustc_errors::fallback_fluent_bundle(rustc_errors::DEFAULT_LOCALE_RESOURCES, false);
             supports_color = EmitterWriter::stderr(
                 ColorConfig::Auto,
                 None,
@@ -1069,13 +1069,7 @@ impl Tester for Collector {
                             }
                         }
                         TestFailure::ExecutionFailure(out) => {
-                            let reason = if let Some(code) = out.status.code() {
-                                format!("exit code {code}")
-                            } else {
-                                String::from("terminated by signal")
-                            };
-
-                            eprintln!("Test executable failed ({reason}).");
+                            eprintln!("Test executable failed ({reason}).", reason = out.status);
 
                             // FIXME(#12309): An unfortunate side-effect of capturing the test
                             // executable's output is that the relative ordering between the test's
