@@ -1,6 +1,6 @@
 // Decoding metadata from a single crate's metadata
 
-use crate::creader::CrateMetadataRef;
+use crate::creader::{CStore, CrateMetadataRef};
 use crate::rmeta::table::{FixedSizeEncoding, Table};
 use crate::rmeta::*;
 
@@ -1089,63 +1089,32 @@ impl<'a, 'tcx> CrateMetadataRef<'a> {
         // Iterate over all children.
         if let Some(children) = self.root.tables.children.get(self, id) {
             for child_index in children.decode((self, sess)) {
-                if let Some(ident) = self.opt_item_ident(child_index, sess) {
-                    let kind = self.def_kind(child_index);
-                    let def_id = self.local_def_id(child_index);
-                    let res = Res::Def(kind, def_id);
-                    let vis = self.get_visibility(child_index);
-                    let span = self.get_span(child_index, sess);
-                    let macro_rules = match kind {
-                        DefKind::Macro(..) => match self.kind(child_index) {
-                            EntryKind::MacroDef(_, macro_rules) => macro_rules,
-                            _ => unreachable!(),
-                        },
-                        _ => false,
-                    };
+                let ident = self.item_ident(child_index, sess);
+                let kind = self.def_kind(child_index);
+                let def_id = self.local_def_id(child_index);
+                let res = Res::Def(kind, def_id);
+                let vis = self.get_visibility(child_index);
+                let span = self.get_span(child_index, sess);
+                let macro_rules = match kind {
+                    DefKind::Macro(..) => match self.kind(child_index) {
+                        EntryKind::MacroDef(_, macro_rules) => macro_rules,
+                        _ => unreachable!(),
+                    },
+                    _ => false,
+                };
 
-                    callback(ModChild { ident, res, vis, span, macro_rules });
+                callback(ModChild { ident, res, vis, span, macro_rules });
 
-                    // For non-re-export structs and variants add their constructors to children.
-                    // Re-export lists automatically contain constructors when necessary.
-                    match kind {
-                        DefKind::Struct => {
-                            if let Some((ctor_def_id, ctor_kind)) =
-                                self.get_ctor_def_id_and_kind(child_index)
-                            {
-                                let ctor_res =
-                                    Res::Def(DefKind::Ctor(CtorOf::Struct, ctor_kind), ctor_def_id);
-                                let vis = self.get_visibility(ctor_def_id.index);
-                                callback(ModChild {
-                                    ident,
-                                    res: ctor_res,
-                                    vis,
-                                    span,
-                                    macro_rules: false,
-                                });
-                            }
-                        }
-                        DefKind::Variant => {
-                            // Braced variants, unlike structs, generate unusable names in
-                            // value namespace, they are reserved for possible future use.
-                            // It's ok to use the variant's id as a ctor id since an
-                            // error will be reported on any use of such resolution anyway.
-                            let (ctor_def_id, ctor_kind) = self
-                                .get_ctor_def_id_and_kind(child_index)
-                                .unwrap_or((def_id, CtorKind::Fictive));
+                // For non-re-export structs and variants add their constructors to children.
+                // Re-export lists automatically contain constructors when necessary.
+                match kind {
+                    DefKind::Struct => {
+                        if let Some((ctor_def_id, ctor_kind)) =
+                            self.get_ctor_def_id_and_kind(child_index)
+                        {
                             let ctor_res =
-                                Res::Def(DefKind::Ctor(CtorOf::Variant, ctor_kind), ctor_def_id);
-                            let mut vis = self.get_visibility(ctor_def_id.index);
-                            if ctor_def_id == def_id && vis.is_public() {
-                                // For non-exhaustive variants lower the constructor visibility to
-                                // within the crate. We only need this for fictive constructors,
-                                // for other constructors correct visibilities
-                                // were already encoded in metadata.
-                                let mut attrs = self.get_item_attrs(def_id.index, sess);
-                                if attrs.any(|item| item.has_name(sym::non_exhaustive)) {
-                                    let crate_def_id = self.local_def_id(CRATE_DEF_INDEX);
-                                    vis = ty::Visibility::Restricted(crate_def_id);
-                                }
-                            }
+                                Res::Def(DefKind::Ctor(CtorOf::Struct, ctor_kind), ctor_def_id);
+                            let vis = self.get_visibility(ctor_def_id.index);
                             callback(ModChild {
                                 ident,
                                 res: ctor_res,
@@ -1154,8 +1123,32 @@ impl<'a, 'tcx> CrateMetadataRef<'a> {
                                 macro_rules: false,
                             });
                         }
-                        _ => {}
                     }
+                    DefKind::Variant => {
+                        // Braced variants, unlike structs, generate unusable names in
+                        // value namespace, they are reserved for possible future use.
+                        // It's ok to use the variant's id as a ctor id since an
+                        // error will be reported on any use of such resolution anyway.
+                        let (ctor_def_id, ctor_kind) = self
+                            .get_ctor_def_id_and_kind(child_index)
+                            .unwrap_or((def_id, CtorKind::Fictive));
+                        let ctor_res =
+                            Res::Def(DefKind::Ctor(CtorOf::Variant, ctor_kind), ctor_def_id);
+                        let mut vis = self.get_visibility(ctor_def_id.index);
+                        if ctor_def_id == def_id && vis.is_public() {
+                            // For non-exhaustive variants lower the constructor visibility to
+                            // within the crate. We only need this for fictive constructors,
+                            // for other constructors correct visibilities
+                            // were already encoded in metadata.
+                            let mut attrs = self.get_item_attrs(def_id.index, sess);
+                            if attrs.any(|item| item.has_name(sym::non_exhaustive)) {
+                                let crate_def_id = self.local_def_id(CRATE_DEF_INDEX);
+                                vis = ty::Visibility::Restricted(crate_def_id);
+                            }
+                        }
+                        callback(ModChild { ident, res: ctor_res, vis, span, macro_rules: false });
+                    }
+                    _ => {}
                 }
             }
         }
@@ -1737,6 +1730,7 @@ impl<'a, 'tcx> CrateMetadataRef<'a> {
 impl CrateMetadata {
     crate fn new(
         sess: &Session,
+        cstore: &CStore,
         blob: MetadataBlob,
         root: CrateRoot<'static>,
         raw_proc_macros: Option<&'static [ProcMacro]>,
@@ -1752,11 +1746,6 @@ impl CrateMetadata {
             .decode((&blob, sess))
             .map(|trait_impls| (trait_impls.trait_id, trait_impls.impls))
             .collect();
-        let incoherent_impls = root
-            .incoherent_impls
-            .decode((&blob, sess))
-            .map(|incoherent_impls| (incoherent_impls.self_ty, incoherent_impls.impls))
-            .collect();
         let alloc_decoding_state =
             AllocDecodingState::new(root.interpret_alloc_index.decode(&blob).collect());
         let dependencies = Lock::new(cnum_map.iter().cloned().collect());
@@ -1765,11 +1754,11 @@ impl CrateMetadata {
         // that does not copy any data. It just does some data verification.
         let def_path_hash_map = root.def_path_hash_map.decode(&blob);
 
-        CrateMetadata {
+        let mut cdata = CrateMetadata {
             blob,
             root,
             trait_impls,
-            incoherent_impls,
+            incoherent_impls: Default::default(),
             raw_proc_macros,
             source_map_import_info: OnceCell::new(),
             def_path_hash_map,
@@ -1786,7 +1775,17 @@ impl CrateMetadata {
             hygiene_context: Default::default(),
             def_key_cache: Default::default(),
             def_path_hash_cache: Default::default(),
-        }
+        };
+
+        // Need `CrateMetadataRef` to decode `DefId`s in simplified types.
+        cdata.incoherent_impls = cdata
+            .root
+            .incoherent_impls
+            .decode(CrateMetadataRef { cdata: &cdata, cstore })
+            .map(|incoherent_impls| (incoherent_impls.self_ty, incoherent_impls.impls))
+            .collect();
+
+        cdata
     }
 
     crate fn dependencies(&self) -> LockGuard<'_, Vec<CrateNum>> {

@@ -95,7 +95,7 @@ pub enum LifetimeName {
     /// User wrote nothing (e.g., the lifetime in `&u32`).
     ///
     /// The bool indicates whether the user should have written something.
-    Implicit(bool),
+    Implicit,
 
     /// Implicit lifetime in a context like `dyn Foo`. This is
     /// distinguished from implicit lifetimes elsewhere because the
@@ -125,7 +125,7 @@ impl LifetimeName {
     pub fn ident(&self) -> Ident {
         match *self {
             LifetimeName::ImplicitObjectLifetimeDefault
-            | LifetimeName::Implicit(_)
+            | LifetimeName::Implicit
             | LifetimeName::Error => Ident::empty(),
             LifetimeName::Underscore => Ident::with_dummy_span(kw::UnderscoreLifetime),
             LifetimeName::Static => Ident::with_dummy_span(kw::StaticLifetime),
@@ -136,7 +136,7 @@ impl LifetimeName {
     pub fn is_elided(&self) -> bool {
         match self {
             LifetimeName::ImplicitObjectLifetimeDefault
-            | LifetimeName::Implicit(_)
+            | LifetimeName::Implicit
             | LifetimeName::Underscore => true,
 
             // It might seem surprising that `Fresh(_)` counts as
@@ -2425,8 +2425,12 @@ pub enum InlineAsmOperand<'hir> {
     Const {
         anon_const: AnonConst,
     },
-    Sym {
-        expr: Expr<'hir>,
+    SymFn {
+        anon_const: AnonConst,
+    },
+    SymStatic {
+        path: QPath<'hir>,
+        def_id: DefId,
     },
 }
 
@@ -2437,7 +2441,7 @@ impl<'hir> InlineAsmOperand<'hir> {
             | Self::Out { reg, .. }
             | Self::InOut { reg, .. }
             | Self::SplitInOut { reg, .. } => Some(reg),
-            Self::Const { .. } | Self::Sym { .. } => None,
+            Self::Const { .. } | Self::SymFn { .. } | Self::SymStatic { .. } => None,
         }
     }
 
@@ -2557,11 +2561,17 @@ impl FnRetTy<'_> {
 
 #[derive(Encodable, Debug, HashStable_Generic)]
 pub struct Mod<'hir> {
+    pub spans: ModSpans,
+    pub item_ids: &'hir [ItemId],
+}
+
+#[derive(Copy, Clone, Debug, HashStable_Generic, Encodable)]
+pub struct ModSpans {
     /// A span from the first token past `{` to the last token until `}`.
     /// For `mod foo;`, the inner span ranges from the first token
     /// to the last token in the external file.
-    pub inner: Span,
-    pub item_ids: &'hir [ItemId],
+    pub inner_span: Span,
+    pub inject_use_span: Span,
 }
 
 #[derive(Debug, HashStable_Generic)]
@@ -3059,8 +3069,8 @@ impl<'hir> OwnerNode<'hir> {
             OwnerNode::Item(Item { span, .. })
             | OwnerNode::ForeignItem(ForeignItem { span, .. })
             | OwnerNode::ImplItem(ImplItem { span, .. })
-            | OwnerNode::TraitItem(TraitItem { span, .. })
-            | OwnerNode::Crate(Mod { inner: span, .. }) => *span,
+            | OwnerNode::TraitItem(TraitItem { span, .. }) => *span,
+            OwnerNode::Crate(Mod { spans: ModSpans { inner_span, .. }, .. }) => *inner_span,
         }
     }
 
