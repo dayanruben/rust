@@ -199,6 +199,16 @@ enum LifetimeRibKind {
     /// This rib declares generic parameters.
     Generics { parent: NodeId, span: Span, kind: LifetimeBinderKind },
 
+    /// FIXME(const_generics): This patches over an ICE caused by non-'static lifetimes in const
+    /// generics. We are disallowing this until we can decide on how we want to handle non-'static
+    /// lifetimes in const generics. See issue #74052 for discussion.
+    ConstGeneric,
+
+    /// Non-static lifetimes are prohibited in anonymous constants under `min_const_generics`.
+    /// This function will emit an error if `generic_const_exprs` is not enabled, the body identified by
+    /// `body_id` is an anonymous constant and `lifetime_ref` is non-static.
+    AnonConst,
+
     /// For **Modern** cases, create a new anonymous region parameter
     /// and reference that.
     ///
@@ -527,7 +537,9 @@ impl<'a: 'ast, 'ast> Visitor<'ast> for LateResolutionVisitor<'a, '_, 'ast> {
     }
     fn visit_anon_const(&mut self, constant: &'ast AnonConst) {
         // We deal with repeat expressions explicitly in `resolve_expr`.
-        self.resolve_anon_const(constant, IsRepeatExpr::No);
+        self.with_lifetime_rib(LifetimeRibKind::AnonConst, |this| {
+            this.resolve_anon_const(constant, IsRepeatExpr::No);
+        })
     }
     fn visit_expr(&mut self, expr: &'ast Expr) {
         self.resolve_expr(expr, None);
@@ -566,7 +578,7 @@ impl<'a: 'ast, 'ast> Visitor<'ast> for LateResolutionVisitor<'a, '_, 'ast> {
                     .resolve_ident_in_lexical_scope(
                         self_ty,
                         TypeNS,
-                        Finalize::SimplePath(ty.id, ty.span),
+                        Some(Finalize::new(ty.id, ty.span)),
                         None,
                     )
                     .map_or(Res::Err, |d| d.res());
@@ -946,7 +958,7 @@ impl<'a: 'ast, 'b, 'ast> LateResolutionVisitor<'a, 'b, 'ast> {
             ident,
             ns,
             &self.parent_scope,
-            Finalize::No,
+            None,
             &self.ribs[ns],
             None,
         )
@@ -956,8 +968,8 @@ impl<'a: 'ast, 'b, 'ast> LateResolutionVisitor<'a, 'b, 'ast> {
         &mut self,
         ident: Ident,
         ns: Namespace,
-        finalize: Finalize,
-        unusable_binding: Option<&'a NameBinding<'a>>,
+        finalize: Option<Finalize>,
+        ignore_binding: Option<&'a NameBinding<'a>>,
     ) -> Option<LexicalScopeBinding<'a>> {
         self.r.resolve_ident_in_lexical_scope(
             ident,
@@ -965,7 +977,7 @@ impl<'a: 'ast, 'b, 'ast> LateResolutionVisitor<'a, 'b, 'ast> {
             &self.parent_scope,
             finalize,
             &self.ribs[ns],
-            unusable_binding,
+            ignore_binding,
         )
     }
 
@@ -973,7 +985,7 @@ impl<'a: 'ast, 'b, 'ast> LateResolutionVisitor<'a, 'b, 'ast> {
         &mut self,
         path: &[Segment],
         opt_ns: Option<Namespace>, // `None` indicates a module path in import
-        finalize: Finalize,
+        finalize: Option<Finalize>,
     ) -> PathResult<'a> {
         self.r.resolve_path_with_ribs(
             path,
@@ -1102,14 +1114,18 @@ impl<'a: 'ast, 'b, 'ast> LateResolutionVisitor<'a, 'b, 'ast> {
 
                         this.ribs[TypeNS].push(Rib::new(ConstParamTyRibKind));
                         this.ribs[ValueNS].push(Rib::new(ConstParamTyRibKind));
-                        this.visit_ty(ty);
+                        this.with_lifetime_rib(LifetimeRibKind::ConstGeneric, |this| {
+                            this.visit_ty(ty)
+                        });
                         this.ribs[TypeNS].pop().unwrap();
                         this.ribs[ValueNS].pop().unwrap();
 
                         if let Some(ref expr) = default {
                             this.ribs[TypeNS].push(forward_ty_ban_rib);
                             this.ribs[ValueNS].push(forward_const_ban_rib);
-                            this.visit_anon_const(expr);
+                            this.with_lifetime_rib(LifetimeRibKind::ConstGeneric, |this| {
+                                this.resolve_anon_const(expr, IsRepeatExpr::No)
+                            });
                             forward_const_ban_rib = this.ribs[ValueNS].pop().unwrap();
                             forward_ty_ban_rib = this.ribs[TypeNS].pop().unwrap();
                         }
@@ -1158,8 +1174,19 @@ impl<'a: 'ast, 'b, 'ast> LateResolutionVisitor<'a, 'b, 'ast> {
                 return;
             }
 
-            if let LifetimeRibKind::Item = rib.kind {
-                break;
+            match rib.kind {
+                LifetimeRibKind::Item => break,
+                LifetimeRibKind::ConstGeneric => {
+                    self.emit_non_static_lt_in_const_generic_error(lifetime);
+                    self.r.lifetimes_res_map.insert(lifetime.id, LifetimeRes::Error);
+                    return;
+                }
+                LifetimeRibKind::AnonConst => {
+                    self.maybe_emit_forbidden_non_static_lifetime_error(lifetime);
+                    self.r.lifetimes_res_map.insert(lifetime.id, LifetimeRes::Error);
+                    return;
+                }
+                _ => {}
             }
         }
 
@@ -1272,11 +1299,8 @@ impl<'a: 'ast, 'b, 'ast> LateResolutionVisitor<'a, 'b, 'ast> {
         partial_res: PartialRes,
         path: &[Segment],
         source: PathSource<'_>,
-        finalize: Finalize,
+        path_span: Span,
     ) {
-        let Some(path_span) = finalize.path_span() else {
-            return;
-        };
         let proj_start = path.len() - partial_res.unresolved_segments();
         for (i, segment) in path.iter().enumerate() {
             if segment.has_lifetime_args {
@@ -1422,7 +1446,7 @@ impl<'a: 'ast, 'b, 'ast> LateResolutionVisitor<'a, 'b, 'ast> {
 
     /// Searches the current set of local scopes for labels. Returns the `NodeId` of the resolved
     /// label and reports an error if the label is not found or is unreachable.
-    fn resolve_label(&self, mut label: Ident) -> Option<NodeId> {
+    fn resolve_label(&mut self, mut label: Ident) -> Option<NodeId> {
         let mut suggestion = None;
 
         // Preserve the original span so that errors contain "in this macro invocation"
@@ -1442,6 +1466,7 @@ impl<'a: 'ast, 'b, 'ast> LateResolutionVisitor<'a, 'b, 'ast> {
 
             let ident = label.normalize_to_macro_rules();
             if let Some((ident, id)) = rib.bindings.get_key_value(&ident) {
+                let definition_span = ident.span;
                 return if self.is_label_valid_from_rib(i) {
                     Some(*id)
                 } else {
@@ -1449,7 +1474,7 @@ impl<'a: 'ast, 'b, 'ast> LateResolutionVisitor<'a, 'b, 'ast> {
                         original_span,
                         ResolutionError::UnreachableLabel {
                             name: label.name,
-                            definition_span: ident.span,
+                            definition_span,
                             suggestion,
                         },
                     );
@@ -1548,8 +1573,8 @@ impl<'a: 'ast, 'b, 'ast> LateResolutionVisitor<'a, 'b, 'ast> {
                         report_error(self, ns);
                     }
                     Some(LexicalScopeBinding::Item(binding)) => {
-                        if let Some(LexicalScopeBinding::Res(..)) = self
-                            .resolve_ident_in_lexical_scope(ident, ns, Finalize::No, Some(binding))
+                        if let Some(LexicalScopeBinding::Res(..)) =
+                            self.resolve_ident_in_lexical_scope(ident, ns, None, Some(binding))
                         {
                             report_error(self, ns);
                         }
@@ -1951,7 +1976,7 @@ impl<'a: 'ast, 'b, 'ast> LateResolutionVisitor<'a, 'b, 'ast> {
                 None,
                 &path,
                 PathSource::Trait(AliasPossibility::No),
-                Finalize::SimplePath(trait_ref.ref_id, trait_ref.path.span),
+                Finalize::new(trait_ref.ref_id, trait_ref.path.span),
             );
             if let Some(def_id) = res.base_res().opt_def_id() {
                 new_id = Some(def_id);
@@ -2135,7 +2160,7 @@ impl<'a: 'ast, 'b, 'ast> LateResolutionVisitor<'a, 'b, 'ast> {
         span: Span,
         err: F,
     ) where
-        F: FnOnce(Ident, &str, Option<Symbol>) -> ResolutionError<'_>,
+        F: FnOnce(Ident, String, Option<Symbol>) -> ResolutionError<'a>,
     {
         // If there is a TraitRef in scope for an impl, then the method must be in the trait.
         let Some((module, _)) = &self.current_trait_ref else { return; };
@@ -2159,7 +2184,8 @@ impl<'a: 'ast, 'b, 'ast> LateResolutionVisitor<'a, 'b, 'ast> {
             // We could not find the method: report an error.
             let candidate = self.find_similarly_named_assoc_item(ident.name, kind);
             let path = &self.current_trait_ref.as_ref().unwrap().1.path;
-            self.report_error(span, err(ident, &path_names_to_string(path), candidate));
+            let path_names = path_names_to_string(path);
+            self.report_error(span, err(ident, path_names, candidate));
             return;
         };
 
@@ -2183,13 +2209,14 @@ impl<'a: 'ast, 'b, 'ast> LateResolutionVisitor<'a, 'b, 'ast> {
             AssocItemKind::TyAlias(..) => (rustc_errors::error_code!(E0325), "type"),
             AssocItemKind::MacCall(..) => span_bug!(span, "unexpanded macro"),
         };
+        let trait_path = path_names_to_string(path);
         self.report_error(
             span,
             ResolutionError::TraitImplMismatch {
                 name: ident.name,
                 kind,
                 code,
-                trait_path: path_names_to_string(path),
+                trait_path,
                 trait_item_span: binding.span,
             },
         );
@@ -2304,16 +2331,16 @@ impl<'a: 'ast, 'b, 'ast> LateResolutionVisitor<'a, 'b, 'ast> {
         }
 
         // 3) Report all missing variables we found.
-        let mut missing_vars = missing_vars.iter_mut().collect::<Vec<_>>();
-        missing_vars.sort_by_key(|(sym, _err)| sym.as_str());
+        let mut missing_vars = missing_vars.into_iter().collect::<Vec<_>>();
+        missing_vars.sort_by_key(|&(sym, ref _err)| sym);
 
-        for (name, mut v) in missing_vars {
-            if inconsistent_vars.contains_key(name) {
+        for (name, mut v) in missing_vars.into_iter() {
+            if inconsistent_vars.contains_key(&name) {
                 v.could_be_path = false;
             }
             self.report_error(
                 *v.origin.iter().next().unwrap(),
-                ResolutionError::VariableNotBoundInPattern(v),
+                ResolutionError::VariableNotBoundInPattern(v, self.parent_scope),
             );
         }
 
@@ -2623,7 +2650,7 @@ impl<'a: 'ast, 'b, 'ast> LateResolutionVisitor<'a, 'b, 'ast> {
             qself,
             &Segment::from_path(path),
             source,
-            Finalize::SimplePath(id, path.span),
+            Finalize::new(id, path.span),
         );
     }
 
@@ -2642,8 +2669,7 @@ impl<'a: 'ast, 'b, 'ast> LateResolutionVisitor<'a, 'b, 'ast> {
         );
         let ns = source.namespace();
 
-        let (id, path_span) =
-            finalize.node_id_and_path_span().expect("unexpected speculative resolution");
+        let Finalize { node_id, path_span, .. } = finalize;
         let report_errors = |this: &mut Self, res: Option<Res>| {
             if this.should_report_errs() {
                 let (err, candidates) =
@@ -2757,7 +2783,7 @@ impl<'a: 'ast, 'b, 'ast> LateResolutionVisitor<'a, 'b, 'ast> {
                 if ns == ValueNS {
                     let item_name = path.last().unwrap().ident;
                     let traits = self.traits_in_scope(item_name, ns);
-                    self.r.trait_map.insert(id, traits);
+                    self.r.trait_map.insert(node_id, traits);
                 }
 
                 if PrimTy::from_name(path[0].ident.name).is_some() {
@@ -2766,7 +2792,7 @@ impl<'a: 'ast, 'b, 'ast> LateResolutionVisitor<'a, 'b, 'ast> {
                     std_path.push(Segment::from_ident(Ident::with_dummy_span(sym::std)));
                     std_path.extend(path);
                     if let PathResult::Module(_) | PathResult::NonModule(_) =
-                        self.resolve_path(&std_path, Some(ns), Finalize::No)
+                        self.resolve_path(&std_path, Some(ns), None)
                     {
                         // Check if we wrote `str::from_utf8` instead of `std::str::from_utf8`
                         let item_span =
@@ -2793,8 +2819,8 @@ impl<'a: 'ast, 'b, 'ast> LateResolutionVisitor<'a, 'b, 'ast> {
 
         if !matches!(source, PathSource::TraitItem(..)) {
             // Avoid recording definition of `A::B` in `<T as A>::B::C`.
-            self.r.record_partial_res(id, partial_res);
-            self.resolve_elided_lifetimes_in_path(id, partial_res, path, source, finalize);
+            self.r.record_partial_res(node_id, partial_res);
+            self.resolve_elided_lifetimes_in_path(node_id, partial_res, path, source, path_span);
         }
 
         partial_res
@@ -2815,7 +2841,7 @@ impl<'a: 'ast, 'b, 'ast> LateResolutionVisitor<'a, 'b, 'ast> {
     /// A wrapper around [`Resolver::report_error`].
     ///
     /// This doesn't emit errors for function bodies if this is rustdoc.
-    fn report_error(&self, span: Span, resolution_error: ResolutionError<'_>) {
+    fn report_error(&mut self, span: Span, resolution_error: ResolutionError<'a>) {
         if self.should_report_errs() {
             self.r.report_error(span, resolution_error);
         }
@@ -2902,21 +2928,12 @@ impl<'a: 'ast, 'b, 'ast> LateResolutionVisitor<'a, 'b, 'ast> {
             // the trait (the slice upto and including
             // `qself.position`). And then we recursively resolve that,
             // but with `qself` set to `None`.
-            //
-            // However, setting `qself` to none (but not changing the
-            // span) loses the information about where this path
-            // *actually* appears, so for the purposes of the crate
-            // lint we pass along information that this is the trait
-            // name from a fully qualified path, and this also
-            // contains the full span (the `Finalize::QPathTrait`).
             let ns = if qself.position + 1 == path.len() { ns } else { TypeNS };
             let partial_res = self.smart_resolve_path_fragment(
                 None,
                 &path[..=qself.position],
                 PathSource::TraitItem(ns),
-                finalize.node_id_and_path_span().map_or(Finalize::No, |(qpath_id, path_span)| {
-                    Finalize::QPathTrait { qpath_id, qpath_span: qself.path_span, path_span }
-                }),
+                Finalize::with_root_span(finalize.node_id, finalize.path_span, qself.path_span),
             );
 
             // The remaining segments (the `C` in our example) will
@@ -2928,7 +2945,7 @@ impl<'a: 'ast, 'b, 'ast> LateResolutionVisitor<'a, 'b, 'ast> {
             )));
         }
 
-        let result = match self.resolve_path(&path, Some(ns), finalize) {
+        let result = match self.resolve_path(&path, Some(ns), Some(finalize)) {
             PathResult::NonModule(path_res) => path_res,
             PathResult::Module(ModuleOrUniformRoot::Module(module)) if !module.is_normal() => {
                 PartialRes::new(module.res().unwrap())
@@ -2966,10 +2983,9 @@ impl<'a: 'ast, 'b, 'ast> LateResolutionVisitor<'a, 'b, 'ast> {
             && result.base_res() != Res::Err
             && path[0].ident.name != kw::PathRoot
             && path[0].ident.name != kw::DollarCrate
-            && let Some((id, path_span)) = finalize.node_id_and_path_span()
         {
             let unqualified_result = {
-                match self.resolve_path(&[*path.last().unwrap()], Some(ns), Finalize::No) {
+                match self.resolve_path(&[*path.last().unwrap()], Some(ns), None) {
                     PathResult::NonModule(path_res) => path_res.base_res(),
                     PathResult::Module(ModuleOrUniformRoot::Module(module)) => {
                         module.res().unwrap()
@@ -2979,7 +2995,12 @@ impl<'a: 'ast, 'b, 'ast> LateResolutionVisitor<'a, 'b, 'ast> {
             };
             if result.base_res() == unqualified_result {
                 let lint = lint::builtin::UNUSED_QUALIFICATIONS;
-                self.r.lint_buffer.buffer_lint(lint, id, path_span, "unnecessary qualification")
+                self.r.lint_buffer.buffer_lint(
+                    lint,
+                    finalize.node_id,
+                    finalize.path_span,
+                    "unnecessary qualification",
+                )
             }
         }
 
@@ -3062,9 +3083,7 @@ impl<'a: 'ast, 'b, 'ast> LateResolutionVisitor<'a, 'b, 'ast> {
             is_repeat,
             constant.value.is_potential_trivial_const_param(),
             None,
-            |this| {
-                visit::walk_anon_const(this, constant);
-            },
+            |this| visit::walk_anon_const(this, constant),
         );
     }
 
@@ -3215,7 +3234,12 @@ impl<'a: 'ast, 'b, 'ast> LateResolutionVisitor<'a, 'b, 'ast> {
             }
             ExprKind::Repeat(ref elem, ref ct) => {
                 self.visit_expr(elem);
-                self.resolve_anon_const(ct, IsRepeatExpr::Yes);
+                self.with_lifetime_rib(LifetimeRibKind::AnonConst, |this| {
+                    this.resolve_anon_const(ct, IsRepeatExpr::Yes)
+                });
+            }
+            ExprKind::ConstBlock(ref ct) => {
+                self.resolve_anon_const(ct, IsRepeatExpr::No);
             }
             ExprKind::Index(ref elem, ref idx) => {
                 self.resolve_expr(elem, Some(expr));

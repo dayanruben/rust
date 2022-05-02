@@ -123,7 +123,7 @@ impl<'a> Resolver<'a> {
             let (span, found_use) = if let Some(def_id) = def_id.as_local() {
                 UsePlacementFinder::check(krate, self.def_id_to_node_id[def_id])
             } else {
-                (None, false)
+                (None, FoundUse::No)
             };
             if !candidates.is_empty() {
                 show_candidates(
@@ -132,8 +132,9 @@ impl<'a> Resolver<'a> {
                     &mut err,
                     span,
                     &candidates,
-                    instead,
+                    if instead { Instead::Yes } else { Instead::No },
                     found_use,
+                    IsPattern::No,
                 );
             } else if let Some((span, msg, sugg, appl)) = suggestion {
                 err.span_suggestion(span, msg, sugg, appl);
@@ -416,15 +417,12 @@ impl<'a> Resolver<'a> {
 
     crate fn lint_if_path_starts_with_module(
         &mut self,
-        finalize: Finalize,
+        finalize: Option<Finalize>,
         path: &[Segment],
         second_binding: Option<&NameBinding<'_>>,
     ) {
-        let (diag_id, diag_span) = match finalize {
-            Finalize::No => return,
-            Finalize::SimplePath(id, path_span) => (id, path_span),
-            Finalize::UsePath { root_id, root_span, .. } => (root_id, root_span),
-            Finalize::QPathTrait { qpath_id, qpath_span, .. } => (qpath_id, qpath_span),
+        let Some(Finalize { node_id, root_span, .. }) = finalize else {
+            return;
         };
 
         let first_name = match path.get(0) {
@@ -462,11 +460,11 @@ impl<'a> Resolver<'a> {
             }
         }
 
-        let diag = BuiltinLintDiagnostics::AbsPathWithModule(diag_span);
+        let diag = BuiltinLintDiagnostics::AbsPathWithModule(root_span);
         self.lint_buffer.buffer_lint_with_diagnostic(
             ABSOLUTE_PATHS_NOT_STARTING_WITH_CRATE,
-            diag_id,
-            diag_span,
+            node_id,
+            root_span,
             "absolute paths must start with `self`, `super`, \
              `crate`, or an external crate name in the 2018 edition",
             diag,
@@ -493,14 +491,14 @@ impl<'a> Resolver<'a> {
     ///
     /// This takes the error provided, combines it with the span and any additional spans inside the
     /// error and emits it.
-    crate fn report_error(&self, span: Span, resolution_error: ResolutionError<'_>) {
+    crate fn report_error(&mut self, span: Span, resolution_error: ResolutionError<'a>) {
         self.into_struct_error(span, resolution_error).emit();
     }
 
     crate fn into_struct_error(
-        &self,
+        &mut self,
         span: Span,
-        resolution_error: ResolutionError<'_>,
+        resolution_error: ResolutionError<'a>,
     ) -> DiagnosticBuilder<'_, ErrorGuaranteed> {
         match resolution_error {
             ResolutionError::GenericParamsFromOuterFunction(outer_res, has_generic_params) => {
@@ -650,7 +648,7 @@ impl<'a> Resolver<'a> {
                 }
                 err
             }
-            ResolutionError::VariableNotBoundInPattern(binding_error) => {
+            ResolutionError::VariableNotBoundInPattern(binding_error, parent_scope) => {
                 let BindingError { name, target, origin, could_be_path } = binding_error;
 
                 let target_sp = target.iter().copied().collect::<Vec<_>>();
@@ -670,13 +668,41 @@ impl<'a> Resolver<'a> {
                 for sp in origin_sp {
                     err.span_label(sp, "variable not in all patterns");
                 }
-                if *could_be_path {
-                    let help_msg = format!(
-                        "if you meant to match on a variant or a `const` item, consider \
-                         making the path in the pattern qualified: `?::{}`",
-                        name,
+                if could_be_path {
+                    let import_suggestions = self.lookup_import_candidates(
+                        Ident::with_dummy_span(name),
+                        Namespace::ValueNS,
+                        &parent_scope,
+                        &|res: Res| match res {
+                            Res::Def(
+                                DefKind::Ctor(CtorOf::Variant, CtorKind::Const)
+                                | DefKind::Ctor(CtorOf::Struct, CtorKind::Const)
+                                | DefKind::Const
+                                | DefKind::AssocConst,
+                                _,
+                            ) => true,
+                            _ => false,
+                        },
                     );
-                    err.span_help(span, &help_msg);
+
+                    if import_suggestions.is_empty() {
+                        let help_msg = format!(
+                            "if you meant to match on a variant or a `const` item, consider \
+                             making the path in the pattern qualified: `path::to::ModOrType::{}`",
+                            name,
+                        );
+                        err.span_help(span, &help_msg);
+                    }
+                    show_candidates(
+                        &self.definitions,
+                        self.session,
+                        &mut err,
+                        Some(span),
+                        &import_suggestions,
+                        Instead::No,
+                        FoundUse::Yes,
+                        IsPattern::Yes,
+                    );
                 }
                 err
             }
@@ -1022,7 +1048,7 @@ impl<'a> Resolver<'a> {
     }
 
     crate fn report_vis_error(
-        &self,
+        &mut self,
         vis_resolution_error: VisResolutionError<'_>,
     ) -> ErrorGuaranteed {
         match vis_resolution_error {
@@ -1453,8 +1479,9 @@ impl<'a> Resolver<'a> {
             err,
             None,
             &import_suggestions,
-            false,
-            true,
+            Instead::No,
+            FoundUse::Yes,
+            IsPattern::No,
         );
 
         if macro_kind == MacroKind::Derive && (ident.name == sym::Send || ident.name == sym::Sync) {
@@ -1472,7 +1499,6 @@ impl<'a> Resolver<'a> {
                 ScopeSet::All(ns, false),
                 &parent_scope,
                 None,
-                false,
                 false,
                 None,
             ) {
@@ -1781,7 +1807,7 @@ impl<'a> Resolver<'a> {
         opt_ns: Option<Namespace>, // `None` indicates a module path in import
         parent_scope: &ParentScope<'a>,
         ribs: Option<&PerNS<Vec<Rib<'a>>>>,
-        unusable_binding: Option<&'a NameBinding<'a>>,
+        ignore_binding: Option<&'a NameBinding<'a>>,
         module: Option<ModuleOrUniformRoot<'a>>,
         i: usize,
         ident: Ident,
@@ -1833,8 +1859,7 @@ impl<'a> Resolver<'a> {
                         ns_to_try,
                         parent_scope,
                         None,
-                        false,
-                        unusable_binding,
+                        ignore_binding,
                     ).ok()
                 } else if let Some(ribs) = ribs
                     && let Some(TypeNS | ValueNS) = opt_ns
@@ -1843,9 +1868,9 @@ impl<'a> Resolver<'a> {
                         ident,
                         ns_to_try,
                         parent_scope,
-                        Finalize::No,
+                        None,
                         &ribs[ns_to_try],
-                        unusable_binding,
+                        ignore_binding,
                     ) {
                         // we found a locally-imported or available item/module
                         Some(LexicalScopeBinding::Item(binding)) => Some(binding),
@@ -1859,8 +1884,7 @@ impl<'a> Resolver<'a> {
                         parent_scope,
                         None,
                         false,
-                        false,
-                        unusable_binding,
+                        ignore_binding,
                     ).ok()
                 };
                 if let Some(binding) = binding {
@@ -1891,9 +1915,9 @@ impl<'a> Resolver<'a> {
                     ident,
                     ValueNS,
                     parent_scope,
-                    Finalize::No,
+                    None,
                     &ribs[ValueNS],
-                    unusable_binding,
+                    ignore_binding,
                 )
             } else {
                 None
@@ -2390,6 +2414,27 @@ fn find_span_immediately_after_crate_name(
     (next_left_bracket == after_second_colon, from_second_colon)
 }
 
+/// A suggestion has already been emitted, change the wording slightly to clarify that both are
+/// independent options.
+enum Instead {
+    Yes,
+    No,
+}
+
+/// Whether an existing place with an `use` item was found.
+enum FoundUse {
+    Yes,
+    No,
+}
+
+/// Whether a binding is part of a pattern or an expression. Used for diagnostics.
+enum IsPattern {
+    /// The binding is part of a pattern
+    Yes,
+    /// The binding is part of an expression
+    No,
+}
+
 /// When an entity with a given name is not available in scope, we search for
 /// entities with that name in all crates. This method allows outputting the
 /// results of this search in a programmer-friendly way
@@ -2400,8 +2445,9 @@ fn show_candidates(
     // This is `None` if all placement locations are inside expansions
     use_placement_span: Option<Span>,
     candidates: &[ImportSuggestion],
-    instead: bool,
-    found_use: bool,
+    instead: Instead,
+    found_use: FoundUse,
+    is_pattern: IsPattern,
 ) {
     if candidates.is_empty() {
         return;
@@ -2428,24 +2474,38 @@ fn show_candidates(
     }
 
     if !accessible_path_strings.is_empty() {
-        let (determiner, kind) = if accessible_path_strings.len() == 1 {
-            ("this", accessible_path_strings[0].1)
+        let (determiner, kind, name) = if accessible_path_strings.len() == 1 {
+            ("this", accessible_path_strings[0].1, format!(" `{}`", accessible_path_strings[0].0))
         } else {
-            ("one of these", "items")
+            ("one of these", "items", String::new())
         };
 
-        let instead = if instead { " instead" } else { "" };
-        let mut msg = format!("consider importing {} {}{}", determiner, kind, instead);
+        let instead = if let Instead::Yes = instead { " instead" } else { "" };
+        let mut msg = if let IsPattern::Yes = is_pattern {
+            format!(
+                "if you meant to match on {}{}{}, use the full path in the pattern",
+                kind, instead, name
+            )
+        } else {
+            format!("consider importing {} {}{}", determiner, kind, instead)
+        };
 
         for note in accessible_path_strings.iter().flat_map(|cand| cand.3.as_ref()) {
             err.note(note);
         }
 
-        if let Some(span) = use_placement_span {
+        if let (IsPattern::Yes, Some(span)) = (is_pattern, use_placement_span) {
+            err.span_suggestions(
+                span,
+                &msg,
+                accessible_path_strings.into_iter().map(|a| a.0),
+                Applicability::MaybeIncorrect,
+            );
+        } else if let Some(span) = use_placement_span {
             for candidate in &mut accessible_path_strings {
                 // produce an additional newline to separate the new use statement
                 // from the directly following item.
-                let additional_newline = if found_use { "" } else { "\n" };
+                let additional_newline = if let FoundUse::Yes = found_use { "" } else { "\n" };
                 candidate.0 = format!("use {};\n{}", &candidate.0, additional_newline);
             }
 
@@ -2453,7 +2513,7 @@ fn show_candidates(
                 span,
                 &msg,
                 accessible_path_strings.into_iter().map(|a| a.0),
-                Applicability::Unspecified,
+                Applicability::MaybeIncorrect,
             );
         } else {
             msg.push(':');
@@ -2468,9 +2528,17 @@ fn show_candidates(
     } else {
         assert!(!inaccessible_path_strings.is_empty());
 
+        let prefix =
+            if let IsPattern::Yes = is_pattern { "you might have meant to match on " } else { "" };
         if inaccessible_path_strings.len() == 1 {
             let (name, descr, def_id, note) = &inaccessible_path_strings[0];
-            let msg = format!("{} `{}` exists but is inaccessible", descr, name);
+            let msg = format!(
+                "{}{} `{}`{} exists but is inaccessible",
+                prefix,
+                descr,
+                name,
+                if let IsPattern::Yes = is_pattern { ", which" } else { "" }
+            );
 
             if let Some(local_def_id) = def_id.and_then(|did| did.as_local()) {
                 let span = definitions.def_span(local_def_id);
@@ -2496,7 +2564,7 @@ fn show_candidates(
                 "item".to_string()
             };
 
-            let mut msg = format!("these {}s exist but are inaccessible", descr);
+            let mut msg = format!("{}these {}s exist but are inaccessible", prefix, descr);
             let mut has_colon = false;
 
             let mut spans = Vec::new();
@@ -2537,14 +2605,14 @@ struct UsePlacementFinder {
 }
 
 impl UsePlacementFinder {
-    fn check(krate: &Crate, target_module: NodeId) -> (Option<Span>, bool) {
+    fn check(krate: &Crate, target_module: NodeId) -> (Option<Span>, FoundUse) {
         let mut finder =
             UsePlacementFinder { target_module, first_legal_span: None, first_use_span: None };
         finder.visit_crate(krate);
         if let Some(use_span) = finder.first_use_span {
-            (Some(use_span), true)
+            (Some(use_span), FoundUse::Yes)
         } else {
-            (finder.first_legal_span, false)
+            (finder.first_legal_span, FoundUse::No)
         }
     }
 }
