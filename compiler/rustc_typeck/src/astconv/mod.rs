@@ -294,9 +294,9 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
     ///
     /// Example:
     ///
-    /// ```
-    /// T: std::ops::Index<usize, Output = u32>
-    /// ^1 ^^^^^^^^^^^^^^2 ^^^^3  ^^^^^^^^^^^4
+    /// ```ignore (illustrative)
+    ///    T: std::ops::Index<usize, Output = u32>
+    /// // ^1 ^^^^^^^^^^^^^^2 ^^^^3  ^^^^^^^^^^^4
     /// ```
     ///
     /// 1. The `self_ty` here would refer to the type `T`.
@@ -310,7 +310,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
     ///
     /// For (generic) associated types
     ///
-    /// ```
+    /// ```ignore (illustrative)
     /// <Vec<u8> as Iterable<u8>>::Iter::<'a>
     /// ```
     ///
@@ -523,11 +523,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                                 self.astconv
                                     .normalize_ty(
                                         self.span,
-                                        tcx.at(self.span).type_of(param.def_id).subst_spanned(
-                                            tcx,
-                                            substs,
-                                            Some(self.span),
-                                        ),
+                                        tcx.at(self.span).type_of(param.def_id).subst(tcx, substs),
                                     )
                                     .into()
                             }
@@ -547,9 +543,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                     GenericParamDefKind::Const { has_default } => {
                         let ty = tcx.at(self.span).type_of(param.def_id);
                         if !infer_args && has_default {
-                            tcx.const_param_default(param.def_id)
-                                .subst_spanned(tcx, substs.unwrap(), Some(self.span))
-                                .into()
+                            tcx.const_param_default(param.def_id).subst(tcx, substs.unwrap()).into()
                         } else {
                             if infer_args {
                                 self.astconv.ct_infer(ty, Some(param), self.span).into()
@@ -756,7 +750,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
     ///
     /// Example:
     ///
-    /// ```
+    /// ```ignore (illustrative)
     /// poly_trait_ref = Iterator<Item = u32>
     /// self_ty = Foo
     /// ```
@@ -1021,10 +1015,10 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
     ///
     /// Example:
     ///
-    /// ```
+    /// ```ignore (illustrative)
     /// fn foo<T: Bar + Baz>() { }
-    ///        ^  ^^^^^^^^^ ast_bounds
-    ///        param_ty
+    /// //     ^  ^^^^^^^^^ ast_bounds
+    /// //     param_ty
     /// ```
     ///
     /// The `sized_by_default` parameter indicates if, in this context, the `param_ty` should be

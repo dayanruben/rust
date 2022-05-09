@@ -8,11 +8,13 @@ use rustc_data_structures::unhash::UnhashMap;
 use rustc_errors::Applicability;
 use rustc_hir::def::Res;
 use rustc_hir::{
-    GenericBound, Generics, Item, ItemKind, Node, Path, PathSegment, QPath, TraitItem, Ty, TyKind, WherePredicate,
+    GenericBound, Generics, Item, ItemKind, Node, Path, PathSegment, PredicateOrigin, QPath, TraitItem, Ty, TyKind,
+    WherePredicate,
 };
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_session::{declare_tool_lint, impl_lint_pass};
 use rustc_span::Span;
+use std::fmt::Write as _;
 
 declare_clippy_lint! {
     /// ### What it does
@@ -94,6 +96,7 @@ impl<'tcx> LateLintPass<'tcx> for TraitBounds {
         for predicate in item.generics.predicates {
             if_chain! {
                 if let WherePredicate::BoundPredicate(ref bound_predicate) = predicate;
+                if bound_predicate.origin != PredicateOrigin::ImplTrait;
                 if !bound_predicate.span.from_expansion();
                 if let TyKind::Path(QPath::Resolved(_, Path { segments, .. })) = bound_predicate.bounded_ty.kind;
                 if let Some(PathSegment {
@@ -167,6 +170,7 @@ impl TraitBounds {
         for bound in gen.predicates {
             if_chain! {
                 if let WherePredicate::BoundPredicate(ref p) = bound;
+                if p.origin != PredicateOrigin::ImplTrait;
                 if p.bounds.len() as u64 <= self.max_trait_bounds;
                 if !p.span.from_expansion();
                 if let Some(ref v) = map.insert(
@@ -182,19 +186,19 @@ impl TraitBounds {
                     for b in v.iter() {
                         if let GenericBound::Trait(ref poly_trait_ref, _) = b {
                             let path = &poly_trait_ref.trait_ref.path;
-                            hint_string.push_str(&format!(
+                            let _ = write!(hint_string,
                                 " {} +",
                                 snippet_with_applicability(cx, path.span, "..", &mut applicability)
-                            ));
+                            );
                         }
                     }
                     for b in p.bounds.iter() {
                         if let GenericBound::Trait(ref poly_trait_ref, _) = b {
                             let path = &poly_trait_ref.trait_ref.path;
-                            hint_string.push_str(&format!(
+                            let _ = write!(hint_string,
                                 " {} +",
                                 snippet_with_applicability(cx, path.span, "..", &mut applicability)
-                            ));
+                            );
                         }
                     }
                     hint_string.truncate(hint_string.len() - 2);
@@ -222,6 +226,7 @@ fn check_trait_bound_duplication(cx: &LateContext<'_>, gen: &'_ Generics<'_>) {
     for predicate in gen.predicates {
         if_chain! {
             if let WherePredicate::BoundPredicate(ref bound_predicate) = predicate;
+            if bound_predicate.origin != PredicateOrigin::ImplTrait;
             if !bound_predicate.span.from_expansion();
             if let TyKind::Path(QPath::Resolved(_, Path { segments, .. })) = bound_predicate.bounded_ty.kind;
             if let Some(segment) = segments.first();
@@ -241,7 +246,7 @@ fn check_trait_bound_duplication(cx: &LateContext<'_>, gen: &'_ Generics<'_>) {
                         );
                     }
                     else {
-                        trait_resolutions_direct.push((res_where, span_where))
+                        trait_resolutions_direct.push((res_where, span_where));
                     }
                 }
             }

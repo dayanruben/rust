@@ -1,8 +1,7 @@
-/* eslint-env es6 */
-/* eslint no-var: "error" */
-/* eslint prefer-const: "error" */
 /* global addClass, getNakedUrl, getSettingValue, hasOwnPropertyRustdoc, initSearch, onEach */
 /* global onEachLazy, removeClass, searchState, browserSupportsHistoryApi */
+
+"use strict";
 
 (function() {
 // This mapping table should match the discriminants of
@@ -42,26 +41,33 @@ const TY_KEYWORD = itemTypes.indexOf("keyword");
 
 // In the search display, allows to switch between tabs.
 function printTab(nb) {
-    if (nb === 0 || nb === 1 || nb === 2) {
-        searchState.currentTab = nb;
-    }
-    let nb_copy = nb;
-    onEachLazy(document.getElementById("titles").childNodes, function(elem) {
-        if (nb_copy === 0) {
+    let iter = 0;
+    let foundCurrentTab = false;
+    let foundCurrentResultSet = false;
+    onEachLazy(document.getElementById("titles").childNodes, elem => {
+        if (nb === iter) {
             addClass(elem, "selected");
+            foundCurrentTab = true;
         } else {
             removeClass(elem, "selected");
         }
-        nb_copy -= 1;
+        iter += 1;
     });
-    onEachLazy(document.getElementById("results").childNodes, function(elem) {
-        if (nb === 0) {
+    iter = 0;
+    onEachLazy(document.getElementById("results").childNodes, elem => {
+        if (nb === iter) {
             addClass(elem, "active");
+            foundCurrentResultSet = true;
         } else {
             removeClass(elem, "active");
         }
-        nb -= 1;
+        iter += 1;
     });
+    if (foundCurrentTab && foundCurrentResultSet) {
+        searchState.currentTab = nb;
+    } else if (nb != 0) {
+        printTab(0);
+    }
 }
 
 /**
@@ -100,7 +106,7 @@ function levenshtein(s1, s2) {
     return s1_len + s2_len;
 }
 
-window.initSearch = function(rawSearchIndex) {
+window.initSearch = rawSearchIndex => {
     const MAX_LEV_DISTANCE = 3;
     const MAX_RESULTS = 200;
     const GENERICS_DATA = 2;
@@ -198,7 +204,7 @@ window.initSearch = function(rawSearchIndex) {
      * @return {boolean}
      */
     function isPathStart(parserState) {
-        return parserState.userQuery.slice(parserState.pos, parserState.pos + 2) == '::';
+        return parserState.userQuery.slice(parserState.pos, parserState.pos + 2) == "::";
     }
 
     /**
@@ -209,7 +215,7 @@ window.initSearch = function(rawSearchIndex) {
      * @return {boolean}
      */
     function isReturnArrow(parserState) {
-        return parserState.userQuery.slice(parserState.pos, parserState.pos + 2) == '->';
+        return parserState.userQuery.slice(parserState.pos, parserState.pos + 2) == "->";
     }
 
     /**
@@ -221,10 +227,10 @@ window.initSearch = function(rawSearchIndex) {
      */
     function isIdentCharacter(c) {
         return (
-            c === '_' ||
-            (c >= '0' && c <= '9') ||
-            (c >= 'a' && c <= 'z') ||
-            (c >= 'A' && c <= 'Z'));
+            c === "_" ||
+            (c >= "0" && c <= "9") ||
+            (c >= "a" && c <= "z") ||
+            (c >= "A" && c <= "Z"));
     }
 
     /**
@@ -258,7 +264,7 @@ window.initSearch = function(rawSearchIndex) {
      * @return {QueryElement}                - The newly created `QueryElement`.
      */
     function createQueryElement(query, parserState, name, generics, isInGenerics) {
-        if (name === '*' || (name.length === 0 && generics.length === 0)) {
+        if (name === "*" || (name.length === 0 && generics.length === 0)) {
             return;
         }
         if (query.literalSearch && parserState.totalElems - parserState.genericsElems > 0) {
@@ -774,7 +780,7 @@ window.initSearch = function(rawSearchIndex) {
                 return [];
             }
 
-            results.sort(function(aaa, bbb) {
+            results.sort((aaa, bbb) => {
                 let a, b;
 
                 // sort by exact match with regard to the last word (mismatch goes later)
@@ -978,9 +984,8 @@ window.initSearch = function(rawSearchIndex) {
                     if (elem.generics.length === 0) {
                         const checkGeneric = (row.length > GENERICS_DATA &&
                             row[GENERICS_DATA].length > 0);
-                        if (checkGeneric && row[GENERICS_DATA].findIndex(function(tmp_elem) {
-                            return tmp_elem[NAME] === elem.name;
-                        }) !== -1) {
+                        if (checkGeneric && row[GENERICS_DATA]
+                            .findIndex(tmp_elem => tmp_elem[NAME] === elem.name) !== -1) {
                             return 0;
                         }
                     }
@@ -1084,7 +1089,7 @@ window.initSearch = function(rawSearchIndex) {
             return parsedQuery.literalSearch ? MAX_LEV_DISTANCE + 1 : lev;
         }
 
-        function checkPath(contains, lastElem, ty) {
+        function checkPath(contains, ty) {
             if (contains.length === 0) {
                 return 0;
             }
@@ -1169,7 +1174,7 @@ window.initSearch = function(rawSearchIndex) {
                     }
                 }
             } else {
-                Object.keys(ALIASES).forEach(function(crate) {
+                Object.keys(ALIASES).forEach(crate => {
                     if (ALIASES[crate][lowerQuery]) {
                         const pushTo = crate === window.currentCrate ? crateAliases : aliases;
                         const query_aliases = ALIASES[crate][lowerQuery];
@@ -1180,7 +1185,7 @@ window.initSearch = function(rawSearchIndex) {
                 });
             }
 
-            const sortFunc = function(aaa, bbb) {
+            const sortFunc = (aaa, bbb) => {
                 if (aaa.path < bbb.path) {
                     return 1;
                 } else if (aaa.path === bbb.path) {
@@ -1191,7 +1196,7 @@ window.initSearch = function(rawSearchIndex) {
             crateAliases.sort(sortFunc);
             aliases.sort(sortFunc);
 
-            const pushFunc = function(alias) {
+            const pushFunc = alias => {
                 alias.alias = query;
                 const res = buildHrefAndPath(alias);
                 alias.displayPath = pathSplitter(res[0]);
@@ -1301,7 +1306,7 @@ window.initSearch = function(rawSearchIndex) {
             }
 
             if (elem.fullPath.length > 1) {
-                lev = checkPath(elem.pathWithoutLast, elem.pathLast, row);
+                lev = checkPath(elem.pathWithoutLast, row);
                 if (lev > MAX_LEV_DISTANCE || (parsedQuery.literalSearch && lev !== 0)) {
                     return;
                 } else if (lev > 0) {
@@ -1407,18 +1412,12 @@ window.initSearch = function(rawSearchIndex) {
                     for (i = 0, nSearchWords = searchWords.length; i < nSearchWords; ++i) {
                         row = searchIndex[i];
                         in_returned = checkReturned(row, elem, parsedQuery.typeFilter);
-                        addIntoResults(results_returned, row.id, i, -1, in_returned);
+                        addIntoResults(results_others, row.id, i, -1, in_returned);
                     }
                 }
             } else if (parsedQuery.foundElems > 0) {
-                let container = results_others;
-                // In the special case where only a "returned" information is available, we want to
-                // put the information into the "results_returned" dict.
-                if (parsedQuery.returned.length !== 0 && parsedQuery.elems.length === 0) {
-                    container = results_returned;
-                }
                 for (i = 0, nSearchWords = searchWords.length; i < nSearchWords; ++i) {
-                    handleArgs(searchIndex[i], i, container);
+                    handleArgs(searchIndex[i], i, results_others);
                 }
             }
         }
@@ -1507,6 +1506,9 @@ window.initSearch = function(rawSearchIndex) {
             displayPath = path + "::";
             href = window.rootPath + path.replace(/::/g, "/") + "/" +
                    name + "/index.html";
+        } else if (type === "import") {
+            displayPath = item.path + "::";
+            href = window.rootPath + item.path.replace(/::/g, "/") + "/index.html#reexport." + name;
         } else if (type === "primitive" || type === "keyword") {
             displayPath = "";
             href = window.rootPath + path.replace(/::/g, "/") +
@@ -1579,7 +1581,7 @@ window.initSearch = function(rawSearchIndex) {
         if (array.length > 0) {
             output.className = "search-results " + extraClass;
 
-            array.forEach(function(item) {
+            array.forEach(item => {
                 const name = item.name;
                 const type = itemTypes[item.ty];
 
@@ -1706,11 +1708,12 @@ window.initSearch = function(rawSearchIndex) {
 
         let crates = "";
         if (window.ALL_CRATES.length > 1) {
-            crates = ` in <select id="crate-search"><option value="All crates">All crates</option>`;
+            crates = " in <select id=\"crate-search\"><option value=\"All crates\">" +
+                "All crates</option>";
             for (const c of window.ALL_CRATES) {
                 crates += `<option value="${c}" ${c == filterCrates && "selected"}>${c}</option>`;
             }
-            crates += `</select>`;
+            crates += "</select>";
         }
 
         let typeFilter = "";
@@ -1718,17 +1721,31 @@ window.initSearch = function(rawSearchIndex) {
             typeFilter = " (type: " + escape(itemTypes[results.query.typeFilter]) + ")";
         }
 
-        let output = `<div id="search-settings">` +
+        let output = "<div id=\"search-settings\">" +
             `<h1 class="search-results-title">Results for ${escape(results.query.userQuery)}` +
             `${typeFilter}</h1> in ${crates} </div>`;
         if (results.query.error !== null) {
             output += `<h3>Query parser error: "${results.query.error}".</h3>`;
+            output += "<div id=\"titles\">" +
+                makeTabHeader(0, "In Names", ret_others[1]) +
+                "</div>";
+            currentTab = 0;
+        } else if (results.query.foundElems <= 1 && results.query.returned.length === 0) {
+            output += "<div id=\"titles\">" +
+                makeTabHeader(0, "In Names", ret_others[1]) +
+                makeTabHeader(1, "In Parameters", ret_in_args[1]) +
+                makeTabHeader(2, "In Return Types", ret_returned[1]) +
+                "</div>";
+        } else {
+            const signatureTabTitle =
+                results.query.elems.length === 0 ? "In Function Return Types" :
+                results.query.returned.length === 0 ? "In Function Parameters" :
+                "In Function Signatures";
+            output += "<div id=\"titles\">" +
+                makeTabHeader(0, signatureTabTitle, ret_others[1]) +
+                "</div>";
+            currentTab = 0;
         }
-        output += `<div id="titles">` +
-            makeTabHeader(0, "In Names", ret_others[1]) +
-            makeTabHeader(1, "In Parameters", ret_in_args[1]) +
-            makeTabHeader(2, "In Return Types", ret_returned[1]) +
-            "</div>";
 
         const resultsElem = document.createElement("div");
         resultsElem.id = "results";
@@ -1743,12 +1760,16 @@ window.initSearch = function(rawSearchIndex) {
         }
         search.appendChild(resultsElem);
         // Reset focused elements.
-        searchState.focusedByTab = [null, null, null];
         searchState.showResults(search);
         const elems = document.getElementById("titles").childNodes;
-        elems[0].onclick = function() { printTab(0); };
-        elems[1].onclick = function() { printTab(1); };
-        elems[2].onclick = function() { printTab(2); };
+        searchState.focusedByTab = [];
+        let i = 0;
+        for (const elem of elems) {
+            const j = i;
+            elem.onclick = () => { printTab(j); };
+            searchState.focusedByTab.push(null);
+            i += 1;
+        }
         printTab(currentTab);
     }
 
@@ -1977,7 +1998,7 @@ window.initSearch = function(rawSearchIndex) {
     }
 
     function registerSearchEvents() {
-        const searchAfter500ms = function() {
+        const searchAfter500ms = () => {
             searchState.clearInputTimeout();
             if (searchState.input.value.length === 0) {
                 if (browserSupportsHistoryApi()) {
@@ -1992,7 +2013,7 @@ window.initSearch = function(rawSearchIndex) {
         searchState.input.onkeyup = searchAfter500ms;
         searchState.input.oninput = searchAfter500ms;
         document.getElementsByClassName("search-form")[0].onsubmit = onSearchSubmit;
-        searchState.input.onchange = function(e) {
+        searchState.input.onchange = e => {
             if (e.target !== document.activeElement) {
                 // To prevent doing anything when it's from a blur event.
                 return;
@@ -2006,7 +2027,7 @@ window.initSearch = function(rawSearchIndex) {
         };
         searchState.input.onpaste = searchState.input.onchange;
 
-        searchState.outputElement().addEventListener("keydown", function(e) {
+        searchState.outputElement().addEventListener("keydown", e => {
             // We only handle unmodified keystrokes here. We don't want to interfere with,
             // for instance, alt-left and alt-right for history navigation.
             if (e.altKey || e.ctrlKey || e.shiftKey || e.metaKey) {
@@ -2041,18 +2062,18 @@ window.initSearch = function(rawSearchIndex) {
             }
         });
 
-        searchState.input.addEventListener("keydown", function(e) {
+        searchState.input.addEventListener("keydown", e => {
             if (e.which === 40) { // down
                 focusSearchResult();
                 e.preventDefault();
             }
         });
 
-        searchState.input.addEventListener("focus", function() {
+        searchState.input.addEventListener("focus", () => {
             putBackSearch();
         });
 
-        searchState.input.addEventListener("blur", function() {
+        searchState.input.addEventListener("blur", () => {
             searchState.input.placeholder = searchState.input.origPlaceholder;
         });
 
@@ -2062,7 +2083,7 @@ window.initSearch = function(rawSearchIndex) {
             // Store the previous <title> so we can revert back to it later.
             const previousTitle = document.title;
 
-            window.addEventListener("popstate", function(e) {
+            window.addEventListener("popstate", e => {
                 const params = searchState.getQueryStringParams();
                 // Revert to the previous title manually since the History
                 // API ignores the title parameter.
@@ -2098,7 +2119,7 @@ window.initSearch = function(rawSearchIndex) {
         // This was an interaction between the back-forward cache and our handlers
         // that try to sync state between the URL and the search input. To work around it,
         // do a small amount of re-init on page show.
-        window.onpageshow = function(){
+        window.onpageshow = () => {
             const qSearch = searchState.getQueryStringParams().search;
             if (searchState.input.value === "" && qSearch) {
                 searchState.input.value = qSearch;

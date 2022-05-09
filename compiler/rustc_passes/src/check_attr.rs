@@ -4,7 +4,8 @@
 //! conflicts between multiple such attributes attached to the same
 //! item.
 
-use rustc_ast::{ast, AttrStyle, Attribute, Lit, LitKind, MetaItemKind, NestedMetaItem};
+use rustc_ast::tokenstream::DelimSpan;
+use rustc_ast::{ast, AttrStyle, Attribute, Lit, LitKind, MacArgs, MetaItemKind, NestedMetaItem};
 use rustc_data_structures::fx::FxHashMap;
 use rustc_errors::{pluralize, struct_span_err, Applicability, MultiSpan};
 use rustc_feature::{AttributeDuplicates, AttributeType, BuiltinAttribute, BUILTIN_ATTRIBUTE_MAP};
@@ -100,6 +101,7 @@ impl CheckAttrVisitor<'_> {
                 sym::allow_internal_unstable => {
                     self.check_allow_internal_unstable(hir_id, &attr, span, target, &attrs)
                 }
+                sym::debugger_visualizer => self.check_debugger_visualizer(&attr, target),
                 sym::rustc_allow_const_fn_unstable => {
                     self.check_rustc_allow_const_fn_unstable(hir_id, &attr, span, target)
                 }
@@ -123,6 +125,9 @@ impl CheckAttrVisitor<'_> {
                 sym::rustc_pass_by_value => self.check_pass_by_value(&attr, span, target),
                 sym::rustc_allow_incoherent_impl => {
                     self.check_allow_incoherent_impl(&attr, span, target)
+                }
+                sym::rustc_has_incoherent_inherent_impls => {
+                    self.check_has_incoherent_inherent_impls(&attr, span, target)
                 }
                 sym::rustc_const_unstable
                 | sym::rustc_const_stable
@@ -806,6 +811,68 @@ impl CheckAttrVisitor<'_> {
         }
     }
 
+    /// Checks `#[doc(hidden)]` attributes. Returns `true` if valid.
+    fn check_doc_hidden(
+        &self,
+        attr: &Attribute,
+        meta_index: usize,
+        meta: &NestedMetaItem,
+        hir_id: HirId,
+        target: Target,
+    ) -> bool {
+        if let Target::AssocConst
+        | Target::AssocTy
+        | Target::Method(MethodKind::Trait { body: true }) = target
+        {
+            let parent_hir_id = self.tcx.hir().get_parent_item(hir_id);
+            let containing_item = self.tcx.hir().expect_item(parent_hir_id);
+
+            if Target::from_item(containing_item) == Target::Impl {
+                let meta_items = attr.meta_item_list().unwrap();
+
+                let (span, replacement_span) = if meta_items.len() == 1 {
+                    (attr.span, attr.span)
+                } else {
+                    let meta_span = meta.span();
+                    (
+                        meta_span,
+                        meta_span.until(match meta_items.get(meta_index + 1) {
+                            Some(next_item) => next_item.span(),
+                            None => match attr.get_normal_item().args {
+                                MacArgs::Delimited(DelimSpan { close, .. }, ..) => close,
+                                _ => unreachable!(),
+                            },
+                        }),
+                    )
+                };
+
+                // FIXME: #[doc(hidden)] was previously erroneously allowed on trait impl items,
+                // so for backward compatibility only emit a warning and do not mark it as invalid.
+                self.tcx.struct_span_lint_hir(UNUSED_ATTRIBUTES, hir_id, span, |lint| {
+                    lint.build("`#[doc(hidden)]` is ignored on trait impl items")
+                        .warn(
+                            "this was previously accepted by the compiler but is \
+                             being phased out; it will become a hard error in \
+                             a future release!",
+                        )
+                        .note(
+                            "whether the impl item is `doc(hidden)` or not \
+                             entirely depends on the corresponding trait item",
+                        )
+                        .span_suggestion(
+                            replacement_span,
+                            "remove this attribute",
+                            String::new(),
+                            Applicability::MachineApplicable,
+                        )
+                        .emit();
+                });
+            }
+        }
+
+        true
+    }
+
     /// Checks that an attribute is *not* used at the crate level. Returns `true` if valid.
     fn check_attr_not_crate_level(
         &self,
@@ -924,7 +991,7 @@ impl CheckAttrVisitor<'_> {
         let mut is_valid = true;
 
         if let Some(mi) = attr.meta() && let Some(list) = mi.meta_item_list() {
-            for meta in list {
+            for (meta_index, meta) in list.into_iter().enumerate() {
                 if let Some(i_meta) = meta.meta_item() {
                     match i_meta.name_or_empty() {
                         sym::alias
@@ -962,6 +1029,15 @@ impl CheckAttrVisitor<'_> {
                                 specified_inline,
                             ) =>
                         {
+                            is_valid = false;
+                        }
+
+                        sym::hidden if !self.check_doc_hidden(attr,
+                            meta_index,
+                            meta,
+                            hir_id,
+                            target,
+                            ) => {
                             is_valid = false;
                         }
 
@@ -1095,7 +1171,6 @@ impl CheckAttrVisitor<'_> {
         }
     }
 
-    /// Warns against some misuses of `#[pass_by_value]`
     fn check_allow_incoherent_impl(&self, attr: &Attribute, span: Span, target: Target) -> bool {
         match target {
             Target::Method(MethodKind::Inherent) => true,
@@ -1107,6 +1182,30 @@ impl CheckAttrVisitor<'_> {
                         "`rustc_allow_incoherent_impl` attribute should be applied to impl items.",
                     )
                     .span_label(span, "the only currently supported targets are inherent methods")
+                    .emit();
+                false
+            }
+        }
+    }
+
+    fn check_has_incoherent_inherent_impls(
+        &self,
+        attr: &Attribute,
+        span: Span,
+        target: Target,
+    ) -> bool {
+        match target {
+            Target::Trait | Target::Struct | Target::Enum | Target::Union | Target::ForeignTy => {
+                true
+            }
+            _ => {
+                self.tcx
+                    .sess
+                    .struct_span_err(
+                        attr.span,
+                        "`rustc_has_incoherent_inherent_impls` attribute should be applied to types or traits.",
+                    )
+                    .span_label(span, "only adts, extern types and traits are supported")
                     .emit();
                 false
             }
@@ -1858,6 +1957,65 @@ impl CheckAttrVisitor<'_> {
                 false
             }
         }
+    }
+
+    /// Checks if the items on the `#[debugger_visualizer]` attribute are valid.
+    fn check_debugger_visualizer(&self, attr: &Attribute, target: Target) -> bool {
+        match target {
+            Target::Mod => {}
+            _ => {
+                self.tcx
+                    .sess
+                    .struct_span_err(attr.span, "attribute should be applied to a module")
+                    .emit();
+                return false;
+            }
+        }
+
+        let hints = match attr.meta_item_list() {
+            Some(meta_item_list) => meta_item_list,
+            None => {
+                self.emit_debugger_visualizer_err(attr);
+                return false;
+            }
+        };
+
+        let hint = match hints.len() {
+            1 => &hints[0],
+            _ => {
+                self.emit_debugger_visualizer_err(attr);
+                return false;
+            }
+        };
+
+        if !hint.has_name(sym::natvis_file) {
+            self.emit_debugger_visualizer_err(attr);
+            return false;
+        }
+
+        let meta_item = match hint.meta_item() {
+            Some(meta_item) => meta_item,
+            None => {
+                self.emit_debugger_visualizer_err(attr);
+                return false;
+            }
+        };
+
+        match (meta_item.name_or_empty(), meta_item.value_str()) {
+            (sym::natvis_file, Some(_)) => true,
+            (_, _) => {
+                self.emit_debugger_visualizer_err(attr);
+                false
+            }
+        }
+    }
+
+    fn emit_debugger_visualizer_err(&self, attr: &Attribute) {
+        self.tcx
+            .sess
+            .struct_span_err(attr.span, "invalid argument")
+            .note(r#"expected: `natvis_file = "..."`"#)
+            .emit();
     }
 
     /// Outputs an error for `#[allow_internal_unstable]` which can only be applied to macros.

@@ -244,7 +244,6 @@ declare_features! (
 
     // Unstable `#[target_feature]` directives.
     (active, aarch64_ver_target_feature, "1.27.0", Some(44839), None),
-    (active, adx_target_feature, "1.32.0", Some(44839), None),
     (active, arm_target_feature, "1.27.0", Some(44839), None),
     (active, avx512_target_feature, "1.27.0", Some(44839), None),
     (active, bpf_target_feature, "1.54.0", Some(44839), None),
@@ -358,6 +357,8 @@ declare_features! (
     (active, custom_inner_attributes, "1.30.0", Some(54726), None),
     /// Allows custom test frameworks with `#![test_runner]` and `#[test_case]`.
     (active, custom_test_frameworks, "1.30.0", Some(50297), None),
+    /// Allows using `#[debugger_visualizer]`.
+    (active, debugger_visualizer, "1.62.0", Some(95939), None),
     /// Allows declarative macros 2.0 (`macro`).
     (active, decl_macro, "1.17.0", Some(39412), None),
     /// Allows rustc to inject a default alloc_error_handler

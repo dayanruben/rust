@@ -486,6 +486,9 @@ struct DiagnosticMetadata<'ast> {
     current_where_predicate: Option<&'ast WherePredicate>,
 
     current_type_path: Option<&'ast Ty>,
+
+    /// The current impl items (used to suggest).
+    current_impl_items: Option<&'ast [P<AssocItem>]>,
 }
 
 struct LateResolutionVisitor<'a, 'b, 'ast> {
@@ -1637,7 +1640,9 @@ impl<'a: 'ast, 'b, 'ast> LateResolutionVisitor<'a, 'b, 'ast> {
                 items: ref impl_items,
                 ..
             }) => {
+                self.diagnostic_metadata.current_impl_items = Some(impl_items);
                 self.resolve_implementation(generics, of_trait, &self_ty, item.id, impl_items);
+                self.diagnostic_metadata.current_impl_items = None;
             }
 
             ItemKind::Trait(box Trait { ref generics, ref bounds, ref items, .. }) => {
@@ -3100,6 +3105,13 @@ impl<'a: 'ast, 'b, 'ast> LateResolutionVisitor<'a, 'b, 'ast> {
         );
     }
 
+    fn resolve_inline_const(&mut self, constant: &'ast AnonConst) {
+        debug!("resolve_anon_const {constant:?}");
+        self.with_constant_rib(IsRepeatExpr::No, HasGenericParams::Yes, None, |this| {
+            visit::walk_anon_const(this, constant);
+        });
+    }
+
     fn resolve_expr(&mut self, expr: &'ast Expr, parent: Option<&'ast Expr>) {
         // First, record candidate traits for this expression if it could
         // result in the invocation of a method call.
@@ -3256,7 +3268,7 @@ impl<'a: 'ast, 'b, 'ast> LateResolutionVisitor<'a, 'b, 'ast> {
                 });
             }
             ExprKind::ConstBlock(ref ct) => {
-                self.resolve_anon_const(ct, IsRepeatExpr::No);
+                self.resolve_inline_const(ct);
             }
             ExprKind::Index(ref elem, ref idx) => {
                 self.resolve_expr(elem, Some(expr));

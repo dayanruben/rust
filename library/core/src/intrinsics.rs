@@ -63,10 +63,7 @@ use crate::mem;
 use crate::sync::atomic::{self, AtomicBool, AtomicI32, AtomicIsize, AtomicU32, Ordering};
 
 #[stable(feature = "drop_in_place", since = "1.8.0")]
-#[rustc_deprecated(
-    reason = "no longer an intrinsic - use `ptr::drop_in_place` directly",
-    since = "1.52.0"
-)]
+#[deprecated(note = "no longer an intrinsic - use `ptr::drop_in_place` directly", since = "1.52.0")]
 #[inline]
 pub unsafe fn drop_in_place<T: ?Sized>(to_drop: *mut T) {
     // SAFETY: see `ptr::drop_in_place`
@@ -981,7 +978,7 @@ extern "rust-intrinsic" {
     ///
     /// Turning a pointer into a `usize`:
     ///
-    /// ```
+    /// ```no_run
     /// let ptr = &0;
     /// let ptr_num_transmute = unsafe {
     ///     std::mem::transmute::<&i32, usize>(ptr)

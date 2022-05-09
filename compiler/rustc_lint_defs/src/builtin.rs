@@ -1109,7 +1109,8 @@ declare_lint! {
     ///
     /// ### Example
     ///
-    /// ```rust,compile_fail
+    /// ```compile_fail
+    /// #![deny(unaligned_references)]
     /// #[repr(packed)]
     /// pub struct Foo {
     ///     field1: u64,
@@ -2200,13 +2201,12 @@ declare_lint! {
     /// used by user code.
     ///
     /// This lint is only enabled in the standard library. It works with the
-    /// use of `#[rustc_deprecated]` with a `since` field of a version in the
-    /// future. This allows something to be marked as deprecated in a future
-    /// version, and then this lint will ensure that the item is no longer
-    /// used in the standard library. See the [stability documentation] for
-    /// more details.
+    /// use of `#[deprecated]` with a `since` field of a version in the future.
+    /// This allows something to be marked as deprecated in a future version,
+    /// and then this lint will ensure that the item is no longer used in the
+    /// standard library. See the [stability documentation] for more details.
     ///
-    /// [stability documentation]: https://rustc-dev-guide.rust-lang.org/stability.html#rustc_deprecated
+    /// [stability documentation]: https://rustc-dev-guide.rust-lang.org/stability.html#deprecated
     pub DEPRECATED_IN_FUTURE,
     Allow,
     "detects use of items that will be deprecated in a future version",
@@ -2342,40 +2342,6 @@ declare_lint! {
     "ambiguous associated items",
     @future_incompatible = FutureIncompatibleInfo {
         reference: "issue #57644 <https://github.com/rust-lang/rust/issues/57644>",
-    };
-}
-
-declare_lint! {
-    /// The `mutable_borrow_reservation_conflict` lint detects the reservation
-    /// of a two-phased borrow that conflicts with other shared borrows.
-    ///
-    /// ### Example
-    ///
-    /// ```rust
-    /// let mut v = vec![0, 1, 2];
-    /// let shared = &v;
-    /// v.push(shared.len());
-    /// ```
-    ///
-    /// {{produces}}
-    ///
-    /// ### Explanation
-    ///
-    /// This is a [future-incompatible] lint to transition this to a hard error
-    /// in the future. See [issue #59159] for a complete description of the
-    /// problem, and some possible solutions.
-    ///
-    /// [issue #59159]: https://github.com/rust-lang/rust/issues/59159
-    /// [future-incompatible]: ../index.md#future-incompatible-lints
-    pub MUTABLE_BORROW_RESERVATION_CONFLICT,
-    Warn,
-    "reservation of a two-phased borrow conflicts with other shared borrows",
-    @future_incompatible = FutureIncompatibleInfo {
-        reason: FutureIncompatibilityReason::Custom(
-            "this borrowing pattern was not meant to be accepted, \
-            and may become a hard error in the future"
-        ),
-        reference: "issue #59159 <https://github.com/rust-lang/rust/issues/59159>",
     };
 }
 
@@ -3179,7 +3145,6 @@ declare_lint_pass! {
         META_VARIABLE_MISUSE,
         DEPRECATED_IN_FUTURE,
         AMBIGUOUS_ASSOCIATED_ITEMS,
-        MUTABLE_BORROW_RESERVATION_CONFLICT,
         INDIRECT_STRUCTURAL_MATCH,
         POINTER_STRUCTURAL_MATCH,
         NONTRIVIAL_STRUCTURAL_MATCH,

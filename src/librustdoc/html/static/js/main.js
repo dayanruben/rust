@@ -1,10 +1,9 @@
-/* eslint-env es6 */
-/* eslint no-var: "error" */
-/* eslint prefer-const: "error" */
 // Local js definitions:
 /* global addClass, getSettingValue, hasClass, searchState */
 /* global onEach, onEachLazy, removeClass */
 /* global switchTheme, useSystemTheme */
+
+"use strict";
 
 if (!String.prototype.startsWith) {
     String.prototype.startsWith = function(searchString, position) {
@@ -152,7 +151,7 @@ function hideThemeButtonState() {
     themePicker.style.borderBottomLeftRadius = "3px";
 }
 
-window.hideSettings = function() {
+window.hideSettings = () => {
     // Does nothing by default.
 };
 
@@ -190,10 +189,10 @@ window.hideSettings = function() {
 
     themePicker.onclick = switchThemeButtonState;
     themePicker.onblur = handleThemeButtonsBlur;
-    availableThemes.forEach(function(item) {
+    availableThemes.forEach(item => {
         const but = document.createElement("button");
         but.textContent = item;
-        but.onclick = function() {
+        but.onclick = () => {
             switchTheme(window.currentTheme, window.mainTheme, item, true);
             useSystemTheme(false);
         };
@@ -291,24 +290,25 @@ function loadCss(cssFileName) {
 }
 
 (function() {
-    "use strict";
-
     function loadScript(url) {
-        const script = document.createElement('script');
+        const script = document.createElement("script");
         script.src = url;
         document.head.append(script);
     }
 
-
-    getSettingsButton().onclick = function(event) {
+    getSettingsButton().onclick = event => {
+        addClass(getSettingsButton(), "rotate");
         event.preventDefault();
+        // Sending request for the CSS and the JS files at the same time so it will
+        // hopefully be loaded when the JS will generate the settings content.
+        loadCss("settings");
         loadScript(window.settingsJS);
     };
 
     window.searchState = {
         loadingText: "Loading search results...",
         input: document.getElementsByClassName("search-input")[0],
-        outputElement: function() {
+        outputElement: () => {
             let el = document.getElementById("search");
             if (!el) {
                 el = document.createElement("section");
@@ -328,32 +328,30 @@ function loadCss(cssFileName) {
         currentTab: 0,
         // tab and back preserves the element that was focused.
         focusedByTab: [null, null, null],
-        clearInputTimeout: function() {
+        clearInputTimeout: () => {
             if (searchState.timeout !== null) {
                 clearTimeout(searchState.timeout);
                 searchState.timeout = null;
             }
         },
-        isDisplayed: function() {
-            return searchState.outputElement().parentElement.id === ALTERNATIVE_DISPLAY_ID;
-        },
+        isDisplayed: () => searchState.outputElement().parentElement.id === ALTERNATIVE_DISPLAY_ID,
         // Sets the focus on the search bar at the top of the page
-        focus: function() {
+        focus: () => {
             searchState.input.focus();
         },
         // Removes the focus from the search bar.
-        defocus: function() {
+        defocus: () => {
             searchState.input.blur();
         },
-        showResults: function(search) {
-            if (search === null || typeof search === 'undefined') {
+        showResults: search => {
+            if (search === null || typeof search === "undefined") {
                 search = searchState.outputElement();
             }
             switchDisplayedElement(search);
             searchState.mouseMovedAfterSearch = false;
             document.title = searchState.title;
         },
-        hideResults: function() {
+        hideResults: () => {
             switchDisplayedElement(null);
             document.title = searchState.titleBeforeSearch;
             // We also remove the query parameter from the URL.
@@ -362,17 +360,17 @@ function loadCss(cssFileName) {
                     getNakedUrl() + window.location.hash);
             }
         },
-        getQueryStringParams: function() {
+        getQueryStringParams: () => {
             const params = {};
             window.location.search.substring(1).split("&").
-                map(function(s) {
+                map(s => {
                     const pair = s.split("=");
                     params[decodeURIComponent(pair[0])] =
                         typeof pair[1] === "undefined" ? null : decodeURIComponent(pair[1]);
                 });
             return params;
         },
-        setup: function() {
+        setup: () => {
             const search_input = searchState.input;
             if (!searchState.input) {
                 return;
@@ -386,13 +384,13 @@ function loadCss(cssFileName) {
                 }
             }
 
-            search_input.addEventListener("focus", function() {
+            search_input.addEventListener("focus", () => {
                 search_input.origPlaceholder = search_input.placeholder;
                 search_input.placeholder = "Type your search here.";
                 loadSearch();
             });
 
-            if (search_input.value != '') {
+            if (search_input.value !== "") {
                 loadSearch();
             }
 
@@ -620,7 +618,7 @@ function loadCss(cssFileName) {
     document.addEventListener("keydown", handleShortcut);
 
     // delayed sidebar rendering.
-    window.initSidebarItems = function(items) {
+    window.initSidebarItems = items => {
         const sidebar = document.getElementsByClassName("sidebar-elems")[0];
         let others;
         const current = window.sidebarCurrent;
@@ -731,7 +729,7 @@ function loadCss(cssFileName) {
         }
     };
 
-    window.register_implementors = function(imp) {
+    window.register_implementors = imp => {
         const implementors = document.getElementById("implementors-list");
         const synthetic_implementors = document.getElementById("synthetic-implementors-list");
         const inlined_types = new Set();
@@ -742,12 +740,12 @@ function loadCss(cssFileName) {
             //
             // By the way, this is only used by and useful for traits implemented automatically
             // (like "Send" and "Sync").
-            onEachLazy(synthetic_implementors.getElementsByClassName("impl"), function(el) {
+            onEachLazy(synthetic_implementors.getElementsByClassName("impl"), el => {
                 const aliases = el.getAttribute("data-aliases");
                 if (!aliases) {
                     return;
                 }
-                aliases.split(",").forEach(function(alias) {
+                aliases.split(",").forEach(alias => {
                     inlined_types.add(alias);
                 });
             });
@@ -757,8 +755,14 @@ function loadCss(cssFileName) {
         const traitName = document.querySelector("h1.fqn > .in-band > .trait").textContent;
         const baseIdName = "impl-" + traitName + "-";
         const libs = Object.getOwnPropertyNames(imp);
+        // We don't want to include impls from this JS file, when the HTML already has them.
+        // The current crate should always be ignored. Other crates that should also be
+        // ignored are included in the attribute `data-ignore-extern-crates`.
+        const ignoreExternCrates = document
+            .querySelector("script[data-ignore-extern-crates]")
+            .getAttribute("data-ignore-extern-crates");
         for (const lib of libs) {
-            if (lib === window.currentCrate) {
+            if (lib === window.currentCrate || ignoreExternCrates.indexOf(lib) !== -1) {
                 continue;
             }
             const structs = imp[lib];
@@ -781,7 +785,7 @@ function loadCss(cssFileName) {
                 addClass(code, "code-header");
                 addClass(code, "in-band");
 
-                onEachLazy(code.getElementsByTagName("a"), function(elem) {
+                onEachLazy(code.getElementsByTagName("a"), elem => {
                     const href = elem.getAttribute("href");
 
                     if (href && href.indexOf("http") !== 0) {
@@ -826,7 +830,7 @@ function loadCss(cssFileName) {
         let sectionIsCollapsed = false;
         if (hasClass(innerToggle, "will-expand")) {
             removeClass(innerToggle, "will-expand");
-            onEachLazy(document.getElementsByClassName("rustdoc-toggle"), function(e) {
+            onEachLazy(document.getElementsByClassName("rustdoc-toggle"), e => {
                 if (!hasClass(e, "type-contents-toggle")) {
                     e.open = true;
                 }
@@ -834,7 +838,7 @@ function loadCss(cssFileName) {
             innerToggle.title = "collapse all docs";
         } else {
             addClass(innerToggle, "will-expand");
-            onEachLazy(document.getElementsByClassName("rustdoc-toggle"), function(e) {
+            onEachLazy(document.getElementsByClassName("rustdoc-toggle"), e => {
                 if (e.parentNode.id !== "implementations-list" ||
                     (!hasClass(e, "implementors-toggle") &&
                      !hasClass(e, "type-contents-toggle")))
@@ -861,7 +865,7 @@ function loadCss(cssFileName) {
         function setImplementorsTogglesOpen(id, open) {
             const list = document.getElementById(id);
             if (list !== null) {
-                onEachLazy(list.getElementsByClassName("implementors-toggle"), function(e) {
+                onEachLazy(list.getElementsByClassName("implementors-toggle"), e => {
                     e.open = open;
                 });
             }
@@ -872,7 +876,7 @@ function loadCss(cssFileName) {
             setImplementorsTogglesOpen("blanket-implementations-list", false);
         }
 
-        onEachLazy(document.getElementsByClassName("rustdoc-toggle"), function (e) {
+        onEachLazy(document.getElementsByClassName("rustdoc-toggle"), e => {
             if (!hideLargeItemContents && hasClass(e, "type-contents-toggle")) {
                 e.open = true;
             }
@@ -890,9 +894,9 @@ function loadCss(cssFileName) {
 
     (function() {
         // To avoid checking on "rustdoc-line-numbers" value on every loop...
-        let lineNumbersFunc = function() {};
+        let lineNumbersFunc = () => {};
         if (getSettingValue("line-numbers") === "true") {
-            lineNumbersFunc = function(x) {
+            lineNumbersFunc = x => {
                 const count = x.textContent.split("\n").length;
                 const elems = [];
                 for (let i = 0; i < count; ++i) {
@@ -904,7 +908,7 @@ function loadCss(cssFileName) {
                 x.parentNode.insertBefore(node, x);
             };
         }
-        onEachLazy(document.getElementsByClassName("rust-example-rendered"), function(e) {
+        onEachLazy(document.getElementsByClassName("rust-example-rendered"), e => {
             if (hasClass(e, "compile_fail")) {
                 e.addEventListener("mouseover", function() {
                     this.parentElement.previousElementSibling.childNodes[0].style.color = "#f00";
@@ -935,43 +939,43 @@ function loadCss(cssFileName) {
             elem.addEventListener("click", f);
         }
     }
-    handleClick("help-button", function(ev) {
+    handleClick("help-button", ev => {
         displayHelp(true, ev);
     });
-    handleClick(MAIN_ID, function() {
+    handleClick(MAIN_ID, () => {
         hideSidebar();
     });
 
-    onEachLazy(document.getElementsByTagName("a"), function(el) {
+    onEachLazy(document.getElementsByTagName("a"), el => {
         // For clicks on internal links (<A> tags with a hash property), we expand the section we're
         // jumping to *before* jumping there. We can't do this in onHashChange, because it changes
         // the height of the document so we wind up scrolled to the wrong place.
         if (el.hash) {
-            el.addEventListener("click", function() {
+            el.addEventListener("click", () => {
                 expandSection(el.hash.slice(1));
                 hideSidebar();
             });
         }
     });
 
-    onEachLazy(document.querySelectorAll(".rustdoc-toggle > summary:not(.hideme)"), function(el) {
-        el.addEventListener("click", function(e) {
-            if (e.target.tagName != "SUMMARY" && e.target.tagName != "A") {
+    onEachLazy(document.querySelectorAll(".rustdoc-toggle > summary:not(.hideme)"), el => {
+        el.addEventListener("click", e => {
+            if (e.target.tagName !== "SUMMARY" && e.target.tagName !== "A") {
                 e.preventDefault();
             }
         });
     });
 
-    onEachLazy(document.getElementsByClassName("notable-traits"), function(e) {
+    onEachLazy(document.getElementsByClassName("notable-traits"), e => {
         e.onclick = function() {
-            this.getElementsByClassName('notable-traits-tooltiptext')[0]
+            this.getElementsByClassName("notable-traits-tooltiptext")[0]
                 .classList.toggle("force-tooltip");
         };
     });
 
     const sidebar_menu_toggle = document.getElementsByClassName("sidebar-menu-toggle")[0];
     if (sidebar_menu_toggle) {
-        sidebar_menu_toggle.addEventListener("click", function() {
+        sidebar_menu_toggle.addEventListener("click", () => {
             const sidebar = document.getElementsByClassName("sidebar")[0];
             if (!hasClass(sidebar, "shown")) {
                 addClass(sidebar, "shown");
@@ -981,12 +985,12 @@ function loadCss(cssFileName) {
         });
     }
 
-    let buildHelperPopup = function() {
+    let buildHelperPopup = () => {
         const popup = document.createElement("aside");
         addClass(popup, "hidden");
         popup.id = "help";
 
-        popup.addEventListener("click", function(ev) {
+        popup.addEventListener("click", ev => {
             if (ev.target === popup) {
                 // Clicked the blurred zone outside the help popup; dismiss help.
                 displayHelp(false, ev);
@@ -1009,14 +1013,10 @@ function loadCss(cssFileName) {
             ["&#9166;", "Go to active search result"],
             ["+", "Expand all sections"],
             ["-", "Collapse all sections"],
-        ].map(function(x) {
-            return "<dt>" +
-                x[0].split(" ")
-                    .map(function(y, index) {
-                        return (index & 1) === 0 ? "<kbd>" + y + "</kbd>" : " " + y + " ";
-                    })
-                    .join("") + "</dt><dd>" + x[1] + "</dd>";
-        }).join("");
+        ].map(x => "<dt>" +
+            x[0].split(" ")
+                .map((y, index) => (index & 1) === 0 ? "<kbd>" + y + "</kbd>" : " " + y + " ")
+                .join("") + "</dt><dd>" + x[1] + "</dd>").join("");
         const div_shortcuts = document.createElement("div");
         addClass(div_shortcuts, "shortcuts");
         div_shortcuts.innerHTML = "<h2>Keyboard Shortcuts</h2><dl>" + shortcuts + "</dl></div>";
@@ -1034,9 +1034,7 @@ function loadCss(cssFileName) {
             "You can look for items with an exact name by putting double quotes around \
              your request: <code>\"string\"</code>",
             "Look for items inside another one by searching for a path: <code>vec::Vec</code>",
-        ].map(function(x) {
-            return "<p>" + x + "</p>";
-        }).join("");
+        ].map(x => "<p>" + x + "</p>").join("");
         const div_infos = document.createElement("div");
         addClass(div_infos, "infos");
         div_infos.innerHTML = "<h2>Search Tricks</h2>" + infos;
@@ -1056,7 +1054,7 @@ function loadCss(cssFileName) {
         popup.appendChild(container);
         insertAfter(popup, document.querySelector("main"));
         // So that it's only built once and then it'll do nothing when called!
-        buildHelperPopup = function() {};
+        buildHelperPopup = () => {};
     };
 
     onHashChange(null);
@@ -1067,43 +1065,43 @@ function loadCss(cssFileName) {
 (function () {
     let reset_button_timeout = null;
 
-    window.copy_path = function(but) {
+    window.copy_path = but => {
         const parent = but.parentElement;
         const path = [];
 
-        onEach(parent.childNodes, function(child) {
-            if (child.tagName === 'A') {
+        onEach(parent.childNodes, child => {
+            if (child.tagName === "A") {
                 path.push(child.textContent);
             }
         });
 
-        const el = document.createElement('textarea');
-        el.value = path.join('::');
-        el.setAttribute('readonly', '');
+        const el = document.createElement("textarea");
+        el.value = path.join("::");
+        el.setAttribute("readonly", "");
         // To not make it appear on the screen.
-        el.style.position = 'absolute';
-        el.style.left = '-9999px';
+        el.style.position = "absolute";
+        el.style.left = "-9999px";
 
         document.body.appendChild(el);
         el.select();
-        document.execCommand('copy');
+        document.execCommand("copy");
         document.body.removeChild(el);
 
         // There is always one children, but multiple childNodes.
-        but.children[0].style.display = 'none';
+        but.children[0].style.display = "none";
 
         let tmp;
         if (but.childNodes.length < 2) {
-            tmp = document.createTextNode('✓');
+            tmp = document.createTextNode("✓");
             but.appendChild(tmp);
         } else {
-            onEachLazy(but.childNodes, function(e) {
+            onEachLazy(but.childNodes, e => {
                 if (e.nodeType === Node.TEXT_NODE) {
                     tmp = e;
                     return true;
                 }
             });
-            tmp.textContent = '✓';
+            tmp.textContent = "✓";
         }
 
         if (reset_button_timeout !== null) {
@@ -1111,7 +1109,7 @@ function loadCss(cssFileName) {
         }
 
         function reset_button() {
-            tmp.textContent = '';
+            tmp.textContent = "";
             reset_button_timeout = null;
             but.children[0].style.display = "";
         }

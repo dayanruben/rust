@@ -49,15 +49,15 @@ pub enum ParamName {
     /// Synthetic name generated when user elided a lifetime in an impl header.
     ///
     /// E.g., the lifetimes in cases like these:
-    ///
-    ///     impl Foo for &u32
-    ///     impl Foo<'_> for u32
-    ///
+    /// ```ignore (fragment)
+    /// impl Foo for &u32
+    /// impl Foo<'_> for u32
+    /// ```
     /// in that case, we rewrite to
-    ///
-    ///     impl<'f> Foo for &'f u32
-    ///     impl<'f> Foo<'f> for u32
-    ///
+    /// ```ignore (fragment)
+    /// impl<'f> Foo for &'f u32
+    /// impl<'f> Foo<'f> for u32
+    /// ```
     /// where `'f` is something like `Fresh(0)`. The indices are
     /// unique per impl, but not necessarily continuous.
     Fresh(LocalDefId),
@@ -706,7 +706,7 @@ impl<'hir> WherePredicate<'hir> {
 
     pub fn in_where_clause(&self) -> bool {
         match self {
-            WherePredicate::BoundPredicate(p) => p.in_where_clause,
+            WherePredicate::BoundPredicate(p) => p.origin == PredicateOrigin::WhereClause,
             WherePredicate::RegionPredicate(p) => p.in_where_clause,
             WherePredicate::EqPredicate(_) => false,
         }
@@ -721,11 +721,19 @@ impl<'hir> WherePredicate<'hir> {
     }
 }
 
+#[derive(Debug, HashStable_Generic, PartialEq, Eq)]
+pub enum PredicateOrigin {
+    WhereClause,
+    GenericParam,
+    ImplTrait,
+}
+
 /// A type bound (e.g., `for<'c> Foo: Send + Clone + 'c`).
 #[derive(Debug, HashStable_Generic)]
 pub struct WhereBoundPredicate<'hir> {
     pub span: Span,
-    pub in_where_clause: bool,
+    /// Origin of the predicate.
+    pub origin: PredicateOrigin,
     /// Any generics from a `for` binding.
     pub bound_generic_params: &'hir [GenericParam<'hir>],
     /// The type being bounded.
@@ -1082,7 +1090,7 @@ pub enum PatKind<'hir> {
     /// If `slice` exists, then `after` can be non-empty.
     ///
     /// The representation for e.g., `[a, b, .., c, d]` is:
-    /// ```
+    /// ```ignore (illustrative)
     /// PatKind::Slice([Binding(a), Binding(b)], Some(Wild), [Binding(c), Binding(d)])
     /// ```
     Slice(&'hir [Pat<'hir>], Option<&'hir Pat<'hir>>, &'hir [Pat<'hir>]),
@@ -1441,7 +1449,7 @@ pub enum AsyncGeneratorKind {
     /// An explicit `async` block written by the user.
     Block,
 
-    /// An explicit `async` block written by the user.
+    /// An explicit `async` closure written by the user.
     Closure,
 
     /// The `async` block generated as the body of an async function.
@@ -2078,10 +2086,7 @@ pub enum YieldSource {
 
 impl YieldSource {
     pub fn is_await(&self) -> bool {
-        match self {
-            YieldSource::Await { .. } => true,
-            YieldSource::Yield => false,
-        }
+        matches!(self, YieldSource::Await { .. })
     }
 }
 
@@ -2247,7 +2252,7 @@ pub const FN_OUTPUT_NAME: Symbol = sym::Output;
 /// wouldn't it be better to make the `ty` field an enum like the
 /// following?
 ///
-/// ```
+/// ```ignore (pseudo-rust)
 /// enum TypeBindingKind {
 ///    Equals(...),
 ///    Binding(...),

@@ -1,10 +1,9 @@
-/* eslint-env es6 */
-/* eslint no-var: "error" */
-/* eslint prefer-const: "error" */
 // Local js definitions:
-/* global getSettingValue, getVirtualKey, updateLocalStorage, updateSystemTheme, loadCss */
+/* global getSettingValue, getVirtualKey, updateLocalStorage, updateSystemTheme */
 /* global addClass, removeClass, onEach, onEachLazy, NOT_DISPLAYED_ID */
 /* global MAIN_ID, getVar, getSettingsButton, switchDisplayedElement, getNotDisplayedElem */
+
+"use strict";
 
 (function () {
     const isSettingsPage = window.location.pathname.endsWith("/settings.html");
@@ -60,7 +59,7 @@
 
     function setEvents(settingsElement) {
         updateLightAndDark();
-        onEachLazy(settingsElement.getElementsByClassName("slider"), function(elem) {
+        onEachLazy(settingsElement.getElementsByClassName("slider"), elem => {
             const toggle = elem.previousElementSibling;
             const settingId = toggle.id;
             const settingValue = getSettingValue(settingId);
@@ -73,7 +72,7 @@
             toggle.onkeyup = handleKey;
             toggle.onkeyrelease = handleKey;
         });
-        onEachLazy(settingsElement.getElementsByClassName("select-wrapper"), function(elem) {
+        onEachLazy(settingsElement.getElementsByClassName("select-wrapper"), elem => {
             const select = elem.getElementsByTagName("select")[0];
             const settingId = select.id;
             const settingValue = getSettingValue(settingId);
@@ -84,13 +83,13 @@
                 changeSetting(this.id, this.value);
             };
         });
-        onEachLazy(settingsElement.querySelectorAll("input[type=\"radio\"]"), function(elem) {
+        onEachLazy(settingsElement.querySelectorAll("input[type=\"radio\"]"), elem => {
             const settingId = elem.name;
             const settingValue = getSettingValue(settingId);
             if (settingValue !== null && settingValue !== "null") {
                 elem.checked = settingValue === elem.value;
             }
-            elem.addEventListener("change", function(ev) {
+            elem.addEventListener("change", ev => {
                 changeSetting(ev.target.name, ev.target.value);
             });
         });
@@ -109,7 +108,7 @@
         let output = "";
 
         for (const setting of settings) {
-            output += `<div class="setting-line">`;
+            output += "<div class=\"setting-line\">";
             const js_data_name = setting["js_name"];
             const setting_name = setting["name"];
 
@@ -118,7 +117,7 @@
                 output += `<div class="radio-line" id="${js_data_name}">\
                         <span class="setting-name">${setting_name}</span>\
                         <div class="choices">`;
-                onEach(setting["options"], function(option) {
+                onEach(setting["options"], option => {
                     const checked = option === setting["default"] ? " checked" : "";
 
                     output += `<label for="${js_data_name}-${option}" class="choice">\
@@ -206,9 +205,6 @@
             },
         ];
 
-        // First, we add the settings.css file.
-        loadCss("settings");
-
         // Then we build the DOM.
         const el = document.createElement("section");
         el.id = "settings";
@@ -221,11 +217,10 @@
 
         if (isSettingsPage) {
             innerHTML +=
-                `<a id="back" href="javascript:void(0)" onclick="history.back();">Back</a>`;
+                "<a id=\"back\" href=\"javascript:void(0)\" onclick=\"history.back();\">Back</a>";
         } else {
-            innerHTML +=
-                `<a id="back" href="javascript:void(0)" onclick="switchDisplayedElement(null);">\
-                    Back</a>`;
+            innerHTML += "<a id=\"back\" href=\"javascript:void(0)\" " +
+                "onclick=\"switchDisplayedElement(null);\">Back</a>";
         }
         innerHTML += `</span>
             </div>
@@ -265,11 +260,12 @@
     }
 
     // We now wait a bit for the web browser to end re-computing the DOM...
-    setTimeout(function() {
+    setTimeout(() => {
         setEvents(settingsMenu);
         // The setting menu is already displayed if we're on the settings page.
         if (!isSettingsPage) {
             switchDisplayedElement(settingsMenu);
         }
+        removeClass(getSettingsButton(), "rotate");
     }, 0);
 })();
