@@ -119,7 +119,7 @@ window.initSearch = rawSearchIndex => {
      */
     let searchIndex;
     let currentResults;
-    const ALIASES = {};
+    const ALIASES = Object.create(null);
     const params = searchState.getQueryStringParams();
 
     // Populate search bar with query string search term when provided,
@@ -1323,7 +1323,6 @@ window.initSearch = rawSearchIndex => {
                 }
             }
             lev = levenshtein(searchWord, elem.pathLast);
-            lev += lev_add;
             if (lev > 0 && elem.pathLast.length > 2 && searchWord.indexOf(elem.pathLast) > -1)
             {
                 if (elem.pathLast.length < 6) {
@@ -1332,6 +1331,7 @@ window.initSearch = rawSearchIndex => {
                     lev = 0;
                 }
             }
+            lev += lev_add;
             if (lev > MAX_LEV_DISTANCE) {
                 return;
             } else if (index !== -1 && elem.fullPath.length < 2) {
@@ -1953,7 +1953,7 @@ window.initSearch = rawSearchIndex => {
             }
 
             if (aliases) {
-                ALIASES[crate] = {};
+                ALIASES[crate] = Object.create(null);
                 for (const alias_name in aliases) {
                     if (!hasOwnPropertyRustdoc(aliases, alias_name)) {
                         continue;

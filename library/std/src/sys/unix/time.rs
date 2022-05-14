@@ -2,7 +2,6 @@ use crate::fmt;
 use crate::time::Duration;
 
 pub use self::inner::Instant;
-use crate::convert::TryInto;
 
 const NSEC_PER_SEC: u64 = 1_000_000_000;
 pub const UNIX_EPOCH: SystemTime = SystemTime { t: Timespec::zero() };
@@ -52,7 +51,7 @@ impl fmt::Debug for SystemTime {
 }
 
 impl Timespec {
-    const fn zero() -> Timespec {
+    pub const fn zero() -> Timespec {
         Timespec { tv_sec: 0, tv_nsec: 0 }
     }
 
@@ -126,8 +125,8 @@ impl Timespec {
         Some(Timespec::new(secs, nsec as i64))
     }
 
+    #[allow(dead_code)]
     pub fn to_timespec(&self) -> Option<libc::timespec> {
-        use crate::convert::TryInto;
         Some(libc::timespec {
             tv_sec: self.tv_sec.try_into().ok()?,
             tv_nsec: self.tv_nsec.try_into().ok()?,
