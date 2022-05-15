@@ -18,7 +18,7 @@ use rustc_middle::mir::{
 use rustc_middle::ty::layout::{LayoutError, LayoutOf, LayoutOfHelpers, TyAndLayout};
 use rustc_middle::ty::subst::{InternalSubsts, Subst};
 use rustc_middle::ty::{
-    self, ConstInt, ConstKind, Instance, ParamEnv, ScalarInt, Ty, TyCtxt, TypeFoldable,
+    self, ConstInt, ConstKind, EarlyBinder, Instance, ParamEnv, ScalarInt, Ty, TyCtxt, TypeFoldable,
 };
 use rustc_session::lint;
 use rustc_span::{def_id::DefId, Span};
@@ -30,8 +30,8 @@ use crate::MirLint;
 use rustc_const_eval::const_eval::ConstEvalErr;
 use rustc_const_eval::interpret::{
     self, compile_time_machine, AllocId, ConstAllocation, Frame, ImmTy, InterpCx, InterpResult,
-    LocalState, LocalValue, MemPlace, MemoryKind, OpTy, Operand as InterpOperand, PlaceTy, Scalar,
-    ScalarMaybeUninit, StackPopCleanup, StackPopUnwind,
+    LocalState, LocalValue, MemPlace, MemoryKind, OpTy, Operand as InterpOperand, PlaceTy, Pointer,
+    Scalar, ScalarMaybeUninit, StackPopCleanup, StackPopUnwind,
 };
 
 /// The maximum number of bytes that we'll allocate space for a local or the return value.
@@ -281,6 +281,14 @@ impl<'mir, 'tcx> interpret::Machine<'mir, 'tcx> for ConstPropMachine<'mir, 'tcx>
     }
 
     #[inline(always)]
+    fn expose_ptr(
+        _ecx: &mut InterpCx<'mir, 'tcx, Self>,
+        _ptr: Pointer<AllocId>,
+    ) -> InterpResult<'tcx> {
+        throw_machine_stop_str!("exposing pointers isn't supported in ConstProp")
+    }
+
+    #[inline(always)]
     fn init_frame_extra(
         _ecx: &mut InterpCx<'mir, 'tcx, Self>,
         frame: Frame<'mir, 'tcx>,
@@ -370,7 +378,7 @@ impl<'mir, 'tcx> ConstPropagator<'mir, 'tcx> {
         );
 
         let ret = ecx
-            .layout_of(body.return_ty().subst(tcx, substs))
+            .layout_of(EarlyBinder(body.return_ty()).subst(tcx, substs))
             .ok()
             // Don't bother allocating memory for ZST types which have no values
             // or for large values.
