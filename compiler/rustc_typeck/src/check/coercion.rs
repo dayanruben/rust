@@ -737,14 +737,27 @@ impl<'f, 'tcx> Coerce<'f, 'tcx> {
         F: FnOnce(Ty<'tcx>) -> Vec<Adjustment<'tcx>>,
         G: FnOnce(Ty<'tcx>) -> Vec<Adjustment<'tcx>>,
     {
-        if let ty::FnPtr(fn_ty_b) = b.kind()
-            && let (hir::Unsafety::Normal, hir::Unsafety::Unsafe) =
-                (fn_ty_a.unsafety(), fn_ty_b.unsafety())
-        {
-            let unsafe_a = self.tcx.safe_to_unsafe_fn_ty(fn_ty_a);
-            return self.unify_and(unsafe_a, b, to_unsafe);
-        }
-        self.unify_and(a, b, normal)
+        self.commit_unconditionally(|snapshot| {
+            let result = if let ty::FnPtr(fn_ty_b) = b.kind()
+                && let (hir::Unsafety::Normal, hir::Unsafety::Unsafe) =
+                    (fn_ty_a.unsafety(), fn_ty_b.unsafety())
+            {
+                let unsafe_a = self.tcx.safe_to_unsafe_fn_ty(fn_ty_a);
+                self.unify_and(unsafe_a, b, to_unsafe)
+            } else {
+                self.unify_and(a, b, normal)
+            };
+
+            // FIXME(#73154): This is a hack. Currently LUB can generate
+            // unsolvable constraints. Additionally, it returns `a`
+            // unconditionally, even when the "LUB" is `b`. In the future, we
+            // want the coerced type to be the actual supertype of these two,
+            // but for now, we want to just error to ensure we don't lock
+            // ourselves into a specific behavior with NLL.
+            self.leak_check(false, snapshot)?;
+
+            result
+        })
     }
 
     fn coerce_from_fn_pointer(
@@ -1023,7 +1036,8 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         // Special-case that coercion alone cannot handle:
         // Function items or non-capturing closures of differing IDs or InternalSubsts.
         let (a_sig, b_sig) = {
-            let is_capturing_closure = |ty| {
+            #[allow(rustc::usage_of_ty_tykind)]
+            let is_capturing_closure = |ty: &ty::TyKind<'tcx>| {
                 if let &ty::Closure(closure_def_id, _substs) = ty {
                     self.tcx.upvars_mentioned(closure_def_id.expect_local()).is_some()
                 } else {
@@ -1133,8 +1147,8 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     let (adjustments, target) = self.register_infer_ok_obligations(ok);
                     self.apply_adjustments(new, adjustments);
                     debug!(
-                        "coercion::try_find_coercion_lub: was able to coerce from previous type {:?} to new type {:?}",
-                        prev_ty, new_ty,
+                        "coercion::try_find_coercion_lub: was able to coerce from new type {:?} to previous type {:?} ({:?})",
+                        new_ty, prev_ty, target
                     );
                     return Ok(target);
                 }
@@ -1190,15 +1204,15 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 }
             }
             Ok(ok) => {
-                debug!(
-                    "coercion::try_find_coercion_lub: was able to coerce previous type {:?} to new type {:?}",
-                    prev_ty, new_ty,
-                );
                 let (adjustments, target) = self.register_infer_ok_obligations(ok);
                 for expr in exprs {
                     let expr = expr.as_coercion_site();
                     self.apply_adjustments(expr, adjustments.clone());
                 }
+                debug!(
+                    "coercion::try_find_coercion_lub: was able to coerce previous type {:?} to new type {:?} ({:?})",
+                    prev_ty, new_ty, target
+                );
                 Ok(target)
             }
         }
@@ -1351,7 +1365,7 @@ impl<'tcx, 'exprs, E: AsCoercionSite> CoerceMany<'tcx, 'exprs, E> {
     /// is a forced-unit case, and hence `expression_ty` must be
     /// `Nil`.
     #[instrument(skip(self, fcx, augment_error, label_expression_as_expected), level = "debug")]
-    crate fn coerce_inner<'a>(
+    pub(crate) fn coerce_inner<'a>(
         &mut self,
         fcx: &FnCtxt<'a, 'tcx>,
         cause: &ObligationCause<'tcx>,
@@ -1430,6 +1444,7 @@ impl<'tcx, 'exprs, E: AsCoercionSite> CoerceMany<'tcx, 'exprs, E> {
                 })
         };
 
+        debug!(?result);
         match result {
             Ok(v) => {
                 self.final_ty = Some(v);
@@ -1520,7 +1535,10 @@ impl<'tcx, 'exprs, E: AsCoercionSite> CoerceMany<'tcx, 'exprs, E> {
                     augment_error(&mut err);
                 }
 
-                if let Some(expr) = expression {
+                let is_insufficiently_polymorphic =
+                    matches!(coercion_error, TypeError::RegionsInsufficientlyPolymorphic(..));
+
+                if !is_insufficiently_polymorphic && let Some(expr) = expression {
                     fcx.emit_coerce_suggestions(
                         &mut err,
                         expr,

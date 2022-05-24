@@ -1,5 +1,4 @@
 #![doc(html_root_url = "https://doc.rust-lang.org/nightly/nightly-rustc/")]
-#![feature(crate_visibility_modifier)]
 #![feature(decl_macro)]
 #![feature(drain_filter)]
 #![feature(generators)]
@@ -11,6 +10,7 @@
 #![feature(macro_metavar_expr)]
 #![feature(min_specialization)]
 #![feature(slice_as_chunks)]
+#![feature(trusted_len)]
 #![feature(try_blocks)]
 #![feature(never_type)]
 #![recursion_limit = "256"]

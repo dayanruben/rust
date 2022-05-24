@@ -110,7 +110,7 @@ pub struct ItemCtxt<'tcx> {
 ///////////////////////////////////////////////////////////////////////////
 
 #[derive(Default)]
-crate struct HirPlaceholderCollector(crate Vec<Span>);
+pub(crate) struct HirPlaceholderCollector(pub(crate) Vec<Span>);
 
 impl<'v> Visitor<'v> for HirPlaceholderCollector {
     fn visit_ty(&mut self, t: &'v hir::Ty<'v>) {
@@ -144,7 +144,7 @@ struct CollectItemTypesVisitor<'tcx> {
 /// If there are any placeholder types (`_`), emit an error explaining that this is not allowed
 /// and suggest adding type parameters in the appropriate place, taking into consideration any and
 /// all already existing generic type parameters to avoid suggesting a name that is already in use.
-crate fn placeholder_type_error<'tcx>(
+pub(crate) fn placeholder_type_error<'tcx>(
     tcx: TyCtxt<'tcx>,
     generics: Option<&hir::Generics<'_>>,
     placeholder_types: Vec<Span>,
@@ -160,7 +160,7 @@ crate fn placeholder_type_error<'tcx>(
         .emit();
 }
 
-crate fn placeholder_type_error_diag<'tcx>(
+pub(crate) fn placeholder_type_error_diag<'tcx>(
     tcx: TyCtxt<'tcx>,
     generics: Option<&hir::Generics<'_>>,
     placeholder_types: Vec<Span>,
@@ -2454,7 +2454,7 @@ fn trait_explicit_predicates_and_bounds(
     gather_explicit_predicates_of(tcx, def_id.to_def_id())
 }
 
-fn explicit_predicates_of(tcx: TyCtxt<'_>, def_id: DefId) -> ty::GenericPredicates<'_> {
+fn explicit_predicates_of<'tcx>(tcx: TyCtxt<'tcx>, def_id: DefId) -> ty::GenericPredicates<'tcx> {
     let def_kind = tcx.def_kind(def_id);
     if let DefKind::Trait = def_kind {
         // Remove bounds on associated types from the predicates, they will be
@@ -2462,7 +2462,7 @@ fn explicit_predicates_of(tcx: TyCtxt<'_>, def_id: DefId) -> ty::GenericPredicat
         let predicates_and_bounds = tcx.trait_explicit_predicates_and_bounds(def_id.expect_local());
         let trait_identity_substs = InternalSubsts::identity_for_item(tcx, def_id);
 
-        let is_assoc_item_ty = |ty: Ty<'_>| {
+        let is_assoc_item_ty = |ty: Ty<'tcx>| {
             // For a predicate from a where clause to become a bound on an
             // associated type:
             // * It must use the identity substs of the item.

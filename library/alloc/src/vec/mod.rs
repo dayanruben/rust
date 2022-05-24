@@ -1470,11 +1470,11 @@ impl<T, A: Allocator> Vec<T, A> {
     ///
     /// ```
     /// let mut vec = vec![1, 2, 3, 4];
-    /// vec.retain_mut(|x| if *x > 3 {
-    ///     false
-    /// } else {
+    /// vec.retain_mut(|x| if *x <= 3 {
     ///     *x += 1;
     ///     true
+    /// } else {
+    ///     false
     /// });
     /// assert_eq!(vec, [2, 3, 4]);
     /// ```
@@ -2626,10 +2626,13 @@ impl<T, A: Allocator> IntoIterator for Vec<T, A> {
     ///
     /// ```
     /// let v = vec!["a".to_string(), "b".to_string()];
-    /// for s in v.into_iter() {
-    ///     // s has type String, not &String
-    ///     println!("{s}");
-    /// }
+    /// let mut v_iter = v.into_iter();
+    ///
+    /// let first_element: Option<String> = v_iter.next();
+    ///
+    /// assert_eq!(first_element, Some("a".to_string()));
+    /// assert_eq!(v_iter.next(), Some("b".to_string()));
+    /// assert_eq!(v_iter.next(), None);
     /// ```
     #[inline]
     fn into_iter(self) -> IntoIter<T, A> {

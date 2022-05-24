@@ -814,7 +814,7 @@ impl Step for Src {
                 "library/backtrace/crates",
                 // these are 30MB combined and aren't necessary for building
                 // the standard library.
-                "library/stdarch/crates/Cargo.toml",
+                "library/stdarch/Cargo.toml",
                 "library/stdarch/crates/stdarch-verify",
                 "library/stdarch/crates/intrinsic-test",
             ],
@@ -2038,6 +2038,9 @@ impl Step for RustDev {
         tarball.set_overlay(OverlayKind::LLVM);
 
         let src_bindir = builder.llvm_out(target).join("bin");
+        // If updating this list, you likely want to change
+        // src/bootstrap/download-ci-llvm-stamp as well, otherwise local users
+        // will not pick up the extra file until LLVM gets bumped.
         for bin in &[
             "llvm-config",
             "llvm-ar",

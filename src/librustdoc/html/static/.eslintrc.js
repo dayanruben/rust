@@ -38,5 +38,14 @@ module.exports = {
             "error",
             { "before": true, "after": true }
         ],
+        "arrow-spacing": [
+            "error",
+            { "before": true, "after": true }
+        ],
+        "key-spacing": [
+            "error",
+            { "beforeColon": false, "afterColon": true, "mode": "strict" }
+        ],
+        "func-call-spacing": ["error", "never"],
     }
 };

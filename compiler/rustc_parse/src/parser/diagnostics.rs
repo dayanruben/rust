@@ -132,7 +132,7 @@ impl RecoverQPath for Expr {
 }
 
 /// Control whether the closing delimiter should be consumed when calling `Parser::consume_block`.
-crate enum ConsumeClosingDelim {
+pub(crate) enum ConsumeClosingDelim {
     Yes,
     No,
 }
@@ -254,23 +254,23 @@ struct AmbiguousPlus {
 
 #[derive(SessionDiagnostic)]
 #[error(code = "E0178", slug = "parser-maybe-recover-from-bad-type-plus")]
-struct BadTypePlus<'a> {
+struct BadTypePlus {
     pub ty: String,
     #[primary_span]
     pub span: Span,
     #[subdiagnostic]
-    pub sub: BadTypePlusSub<'a>,
+    pub sub: BadTypePlusSub,
 }
 
-#[derive(SessionSubdiagnostic, Clone, Copy)]
-pub enum BadTypePlusSub<'a> {
+#[derive(SessionSubdiagnostic)]
+pub enum BadTypePlusSub {
     #[suggestion(
         slug = "parser-add-paren",
         code = "{sum_with_parens}",
         applicability = "machine-applicable"
     )]
     AddParen {
-        sum_with_parens: &'a str,
+        sum_with_parens: String,
         #[primary_span]
         span: Span,
     },
@@ -1289,11 +1289,9 @@ impl<'a> Parser<'a> {
         let bounds = self.parse_generic_bounds(None)?;
         let sum_span = ty.span.to(self.prev_token.span);
 
-        let sum_with_parens: String;
-
         let sub = match ty.kind {
             TyKind::Rptr(ref lifetime, ref mut_ty) => {
-                sum_with_parens = pprust::to_string(|s| {
+                let sum_with_parens = pprust::to_string(|s| {
                     s.s.word("&");
                     s.print_opt_lifetime(lifetime);
                     s.print_mutability(mut_ty.mutbl, false);
@@ -1303,7 +1301,7 @@ impl<'a> Parser<'a> {
                     s.pclose()
                 });
 
-                BadTypePlusSub::AddParen { sum_with_parens: &sum_with_parens, span: sum_span }
+                BadTypePlusSub::AddParen { sum_with_parens, span: sum_span }
             }
             TyKind::Ptr(..) | TyKind::BareFn(..) => BadTypePlusSub::ForgotParen { span: sum_span },
             _ => BadTypePlusSub::ExpectPath { span: sum_span },
@@ -2459,7 +2457,7 @@ impl<'a> Parser<'a> {
 
     /// Some special error handling for the "top-level" patterns in a match arm,
     /// `for` loop, `let`, &c. (in contrast to subpatterns within such).
-    crate fn maybe_recover_colon_colon_in_pat_typo(
+    pub(crate) fn maybe_recover_colon_colon_in_pat_typo(
         &mut self,
         mut first_pat: P<Pat>,
         ra: RecoverColon,
@@ -2575,7 +2573,7 @@ impl<'a> Parser<'a> {
         first_pat
     }
 
-    crate fn maybe_recover_unexpected_block_label(&mut self) -> bool {
+    pub(crate) fn maybe_recover_unexpected_block_label(&mut self) -> bool {
         let Some(label) = self.eat_label().filter(|_| {
             self.eat(&token::Colon) && self.token.kind == token::OpenDelim(Delimiter::Brace)
         }) else {
@@ -2596,7 +2594,7 @@ impl<'a> Parser<'a> {
 
     /// Some special error handling for the "top-level" patterns in a match arm,
     /// `for` loop, `let`, &c. (in contrast to subpatterns within such).
-    crate fn maybe_recover_unexpected_comma(
+    pub(crate) fn maybe_recover_unexpected_comma(
         &mut self,
         lo: Span,
         rc: RecoverComma,
@@ -2643,7 +2641,7 @@ impl<'a> Parser<'a> {
         Err(err)
     }
 
-    crate fn maybe_recover_bounds_doubled_colon(&mut self, ty: &Ty) -> PResult<'a, ()> {
+    pub(crate) fn maybe_recover_bounds_doubled_colon(&mut self, ty: &Ty) -> PResult<'a, ()> {
         let TyKind::Path(qself, path) = &ty.kind else { return Ok(()) };
         let qself_position = qself.as_ref().map(|qself| qself.position);
         for (i, segments) in path.segments.windows(2).enumerate() {

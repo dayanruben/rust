@@ -6,7 +6,6 @@
 
 #![allow(rustc::potential_query_instability)]
 #![doc(html_root_url = "https://doc.rust-lang.org/nightly/nightly-rustc/")]
-#![feature(crate_visibility_modifier)]
 #![feature(iter_intersperse)]
 #![feature(let_else)]
 #![feature(let_chains)]
@@ -39,7 +38,6 @@ mod liveness;
 pub mod loops;
 mod naked_functions;
 mod reachable;
-mod region;
 pub mod stability;
 mod upvars;
 mod weak_lang_items;
@@ -58,7 +56,6 @@ pub fn provide(providers: &mut Providers) {
     liveness::provide(providers);
     intrinsicck::provide(providers);
     reachable::provide(providers);
-    region::provide(providers);
     stability::provide(providers);
     upvars::provide(providers);
 }

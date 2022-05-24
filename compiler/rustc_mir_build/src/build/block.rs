@@ -6,7 +6,7 @@ use rustc_middle::{mir::*, ty};
 use rustc_span::Span;
 
 impl<'a, 'tcx> Builder<'a, 'tcx> {
-    crate fn ast_block(
+    pub(crate) fn ast_block(
         &mut self,
         destination: Place<'tcx>,
         block: BasicBlock,
@@ -108,7 +108,8 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                     let_scope_stack.push(remainder_scope);
 
                     // Declare the bindings, which may create a source scope.
-                    let remainder_span = remainder_scope.span(this.tcx, this.region_scope_tree);
+                    let remainder_span =
+                        remainder_scope.span(this.tcx, &this.typeck_results.region_scope_tree);
 
                     let visibility_scope =
                         Some(this.new_source_scope(remainder_span, LintLevel::Inherited, None));

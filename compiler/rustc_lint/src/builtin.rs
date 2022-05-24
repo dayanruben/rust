@@ -1372,17 +1372,11 @@ impl UnreachablePub {
             let def_span = cx.tcx.sess.source_map().guess_head_span(span);
             cx.struct_span_lint(UNREACHABLE_PUB, def_span, |lint| {
                 let mut err = lint.build(&format!("unreachable `pub` {}", what));
-                let replacement = if cx.tcx.features().crate_visibility_modifier {
-                    "crate"
-                } else {
-                    "pub(crate)"
-                }
-                .to_owned();
 
                 err.span_suggestion(
                     vis_span,
                     "consider restricting its visibility",
-                    replacement,
+                    "pub(crate)".to_owned(),
                     applicability,
                 );
                 if exportable {
@@ -2705,7 +2699,7 @@ impl SymbolName {
 }
 
 impl ClashingExternDeclarations {
-    crate fn new() -> Self {
+    pub(crate) fn new() -> Self {
         ClashingExternDeclarations { seen_decls: FxHashMap::default() }
     }
     /// Insert a new foreign item into the seen set. If a symbol with the same name already exists

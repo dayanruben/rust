@@ -246,14 +246,14 @@ fn item_module(w: &mut Buffer, cx: &Context<'_>, item: &clean::Item, items: &[cl
     // This call is to remove re-export duplicates in cases such as:
     //
     // ```
-    // crate mod foo {
-    //     crate mod bar {
-    //         crate trait Double { fn foo(); }
+    // pub(crate) mod foo {
+    //     pub(crate) mod bar {
+    //         pub(crate) trait Double { fn foo(); }
     //     }
     // }
     //
-    // crate use foo::bar::*;
-    // crate use foo::*;
+    // pub(crate) use foo::bar::*;
+    // pub(crate) use foo::*;
     // ```
     //
     // `Double` will appear twice in the generated docs.
@@ -445,10 +445,7 @@ fn extra_info_tags(item: &clean::Item, parent: &clean::Item, tcx: TyCtxt<'_>) ->
 
     // The "rustc_private" crates are permanently unstable so it makes no sense
     // to render "unstable" everywhere.
-    if item
-        .stability(tcx)
-        .as_ref()
-        .map(|s| s.level.is_unstable() && s.feature != sym::rustc_private)
+    if item.stability(tcx).as_ref().map(|s| s.is_unstable() && s.feature != sym::rustc_private)
         == Some(true)
     {
         tags += &tag_html("unstable", "", "Experimental");
@@ -1139,6 +1136,7 @@ fn print_tuple_struct_fields(w: &mut Buffer, cx: &Context<'_>, s: &[clean::Item]
 }
 
 fn item_enum(w: &mut Buffer, cx: &Context<'_>, it: &clean::Item, e: &clean::Enum) {
+    let count_variants = e.variants().count();
     wrap_into_docblock(w, |w| {
         wrap_item(w, "enum", |w| {
             render_attributes_in_pre(w, it, "");
@@ -1150,16 +1148,16 @@ fn item_enum(w: &mut Buffer, cx: &Context<'_>, it: &clean::Item, e: &clean::Enum
                 e.generics.print(cx),
                 print_where_clause(&e.generics, cx, 0, true),
             );
-            if e.variants.is_empty() && !e.variants_stripped {
+            let variants_stripped = e.has_stripped_entries();
+            if count_variants == 0 && !variants_stripped {
                 w.write_str(" {}");
             } else {
                 w.write_str(" {\n");
-                let count_variants = e.variants.len();
                 let toggle = should_hide_fields(count_variants);
                 if toggle {
                     toggle_open(w, format_args!("{} variants", count_variants));
                 }
-                for v in &e.variants {
+                for v in e.variants() {
                     w.write_str("    ");
                     let name = v.name.unwrap();
                     match *v.kind {
@@ -1188,7 +1186,7 @@ fn item_enum(w: &mut Buffer, cx: &Context<'_>, it: &clean::Item, e: &clean::Enum
                     w.write_str(",\n");
                 }
 
-                if e.variants_stripped {
+                if variants_stripped {
                     w.write_str("    // some variants omitted\n");
                 }
                 if toggle {
@@ -1201,7 +1199,7 @@ fn item_enum(w: &mut Buffer, cx: &Context<'_>, it: &clean::Item, e: &clean::Enum
 
     document(w, cx, it, None, HeadingOffset::H2);
 
-    if !e.variants.is_empty() {
+    if count_variants != 0 {
         write!(
             w,
             "<h2 id=\"variants\" class=\"variants small-section-header\">\
@@ -1209,7 +1207,7 @@ fn item_enum(w: &mut Buffer, cx: &Context<'_>, it: &clean::Item, e: &clean::Enum
             document_non_exhaustive_header(it)
         );
         document_non_exhaustive(w, it);
-        for variant in &e.variants {
+        for variant in e.variants() {
             let id = cx.derive_id(format!("{}.{}", ItemType::Variant, variant.name.unwrap()));
             write!(
                 w,
@@ -1473,7 +1471,7 @@ fn item_keyword(w: &mut Buffer, cx: &Context<'_>, it: &clean::Item) {
 }
 
 /// Compare two strings treating multi-digit numbers as single units (i.e. natural sort order).
-crate fn compare_names(mut lhs: &str, mut rhs: &str) -> Ordering {
+pub(crate) fn compare_names(mut lhs: &str, mut rhs: &str) -> Ordering {
     /// Takes a non-numeric and a numeric part from the given &str.
     fn take_parts<'a>(s: &mut &'a str) -> (&'a str, &'a str) {
         let i = s.find(|c: char| c.is_ascii_digit());
@@ -1653,7 +1651,7 @@ fn render_union(
         }
     }
 
-    if it.has_stripped_fields().unwrap() {
+    if it.has_stripped_entries().unwrap() {
         write!(w, "    /* private fields */\n{}", tab);
     }
     if toggle {
@@ -1709,11 +1707,11 @@ fn render_struct(
             }
 
             if has_visible_fields {
-                if it.has_stripped_fields().unwrap() {
+                if it.has_stripped_entries().unwrap() {
                     write!(w, "\n{}    /* private fields */", tab);
                 }
                 write!(w, "\n{}", tab);
-            } else if it.has_stripped_fields().unwrap() {
+            } else if it.has_stripped_entries().unwrap() {
                 write!(w, " /* private fields */ ");
             }
             if toggle {
