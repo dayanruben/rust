@@ -172,12 +172,14 @@ pub enum MirPhase {
     /// terminator means that the auto-generated drop glue will be invoked. Also, `Copy` operands
     /// are allowed for non-`Copy` types.
     DropsLowered = 3,
+    /// After this projections may only contain deref projections as the first element.
+    Derefered = 4,
     /// Beginning with this phase, the following variant is disallowed:
     /// * [`Rvalue::Aggregate`] for any `AggregateKind` except `Array`
     ///
     /// And the following variant is allowed:
     /// * [`StatementKind::SetDiscriminant`]
-    Deaggregated = 4,
+    Deaggregated = 5,
     /// Before this phase, generators are in the "source code" form, featuring `yield` statements
     /// and such. With this phase change, they are transformed into a proper state machine. Running
     /// optimizations before this change can be potentially dangerous because the source code is to
@@ -191,8 +193,8 @@ pub enum MirPhase {
     /// Beginning with this phase, the following variants are disallowed:
     /// * [`TerminatorKind::Yield`](terminator::TerminatorKind::Yield)
     /// * [`TerminatorKind::GeneratorDrop`](terminator::TerminatorKind::GeneratorDrop)
-    GeneratorsLowered = 5,
-    Optimized = 6,
+    GeneratorsLowered = 6,
+    Optimized = 7,
 }
 
 impl MirPhase {
@@ -2602,9 +2604,19 @@ pub enum Rvalue<'tcx> {
 #[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
 static_assert_size!(Rvalue<'_>, 40);
 
+impl<'tcx> Rvalue<'tcx> {
+    #[inline]
+    pub fn is_pointer_int_cast(&self) -> bool {
+        matches!(self, Rvalue::Cast(CastKind::PointerAddress, _, _))
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, TyEncodable, TyDecodable, Hash, HashStable)]
 pub enum CastKind {
     Misc,
+    /// A pointer to address cast. A cast between a pointer and an integer type,
+    /// or between a function pointer and an integer type.
+    PointerAddress,
     Pointer(PointerCast),
 }
 
