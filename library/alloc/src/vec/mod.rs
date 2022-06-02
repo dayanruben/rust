@@ -2472,7 +2472,7 @@ impl<T: Copy, A: Allocator> ExtendFromWithinSpec for Vec<T, A> {
             // SAFETY:
             // - Both pointers are created from unique slice references (`&mut [_]`)
             //   so they are valid and do not overlap.
-            // - Elements are :Copy so it's OK to to copy them, without doing
+            // - Elements are :Copy so it's OK to copy them, without doing
             //   anything with the original values
             // - `count` is equal to the len of `source`, so source is valid for
             //   `count` reads
@@ -2495,6 +2495,7 @@ impl<T: Copy, A: Allocator> ExtendFromWithinSpec for Vec<T, A> {
 impl<T, A: Allocator> ops::Deref for Vec<T, A> {
     type Target = [T];
 
+    #[inline]
     fn deref(&self) -> &[T] {
         unsafe { slice::from_raw_parts(self.as_ptr(), self.len) }
     }
@@ -2502,6 +2503,7 @@ impl<T, A: Allocator> ops::Deref for Vec<T, A> {
 
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T, A: Allocator> ops::DerefMut for Vec<T, A> {
+    #[inline]
     fn deref_mut(&mut self) -> &mut [T] {
         unsafe { slice::from_raw_parts_mut(self.as_mut_ptr(), self.len) }
     }
@@ -2985,12 +2987,15 @@ impl<T, const N: usize> From<[T; N]> for Vec<T> {
     /// ```
     #[cfg(not(test))]
     fn from(s: [T; N]) -> Vec<T> {
-        <[T]>::into_vec(box s)
+        <[T]>::into_vec(
+            #[cfg_attr(not(bootstrap), rustc_box)]
+            Box::new(s),
+        )
     }
 
     #[cfg(test)]
     fn from(s: [T; N]) -> Vec<T> {
-        crate::slice::into_vec(box s)
+        crate::slice::into_vec(Box::new(s))
     }
 }
 

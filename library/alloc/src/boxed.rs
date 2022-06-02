@@ -206,7 +206,25 @@ impl<T> Box<T> {
     /// ```
     /// let five = Box::new(5);
     /// ```
-    #[cfg(not(no_global_oom_handling))]
+    #[cfg(all(not(no_global_oom_handling), not(bootstrap)))]
+    #[inline(always)]
+    #[stable(feature = "rust1", since = "1.0.0")]
+    #[must_use]
+    pub fn new(x: T) -> Self {
+        #[rustc_box]
+        Box::new(x)
+    }
+
+    /// Allocates memory on the heap and then places `x` into it.
+    ///
+    /// This doesn't actually allocate if `T` is zero-sized.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let five = Box::new(5);
+    /// ```
+    #[cfg(all(not(no_global_oom_handling), bootstrap))]
     #[inline(always)]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[must_use]
@@ -273,7 +291,9 @@ impl<T> Box<T> {
     #[must_use]
     #[inline(always)]
     pub fn pin(x: T) -> Pin<Box<T>> {
-        (box x).into()
+        (#[cfg_attr(not(bootstrap), rustc_box)]
+        Box::new(x))
+        .into()
     }
 
     /// Allocates memory on the heap then places `x` into it,
@@ -1175,14 +1195,33 @@ impl<T: ?Sized, A: Allocator> Box<T, A> {
     /// This conversion does not allocate on the heap and happens in place.
     ///
     /// This is also available via [`From`].
-    #[unstable(feature = "box_into_pin", issue = "62370")]
+    ///
+    /// # Notes
+    ///
+    /// It's not recommended that crates add an impl like `From<Box<T>> for Pin<T>`,
+    /// as it'll introduce an ambiguity when calling `Pin::from`.
+    /// A demonstration of such a poor impl is shown below.
+    ///
+    /// ```compile_fail
+    /// # use std::pin::Pin;
+    /// struct Foo; // A type defined in this crate.
+    /// impl From<Box<()>> for Pin<Foo> {
+    ///     fn from(_: Box<()>) -> Pin<Foo> {
+    ///         Pin::new(Foo)
+    ///     }
+    /// }
+    ///
+    /// let foo = Box::new(());
+    /// let bar = Pin::from(foo);
+    /// ```
+    #[stable(feature = "box_into_pin", since = "1.63.0")]
     #[rustc_const_unstable(feature = "const_box", issue = "92521")]
     pub const fn into_pin(boxed: Self) -> Pin<Self>
     where
         A: 'static,
     {
         // It's not possible to move or replace the insides of a `Pin<Box<T>>`
-        // when `T: !Unpin`,  so it's safe to pin it directly without any
+        // when `T: !Unpin`, so it's safe to pin it directly without any
         // additional requirements.
         unsafe { Pin::new_unchecked(boxed) }
     }
@@ -1200,7 +1239,8 @@ unsafe impl<#[may_dangle] T: ?Sized, A: Allocator> Drop for Box<T, A> {
 impl<T: Default> Default for Box<T> {
     /// Creates a `Box<T>`, with the `Default` value for T.
     fn default() -> Self {
-        box T::default()
+        #[cfg_attr(not(bootstrap), rustc_box)]
+        Box::new(T::default())
     }
 }
 
@@ -1564,7 +1604,8 @@ impl<T, const N: usize> From<[T; N]> for Box<[T]> {
     /// println!("{boxed:?}");
     /// ```
     fn from(array: [T; N]) -> Box<[T]> {
-        box array
+        #[cfg_attr(not(bootstrap), rustc_box)]
+        Box::new(array)
     }
 }
 
