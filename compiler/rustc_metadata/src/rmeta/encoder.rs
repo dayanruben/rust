@@ -27,12 +27,11 @@ use rustc_middle::ty::codec::TyEncoder;
 use rustc_middle::ty::fast_reject::{self, SimplifiedType, TreatParams};
 use rustc_middle::ty::query::Providers;
 use rustc_middle::ty::{self, SymbolName, Ty, TyCtxt};
-use rustc_serialize::opaque::MemEncoder;
-use rustc_serialize::{Encodable, Encoder};
+use rustc_serialize::{opaque, Encodable, Encoder};
 use rustc_session::config::CrateType;
 use rustc_session::cstore::{ForeignModule, LinkagePreference, NativeLib};
 use rustc_span::hygiene::{ExpnIndex, HygieneEncodeContext, MacroKind};
-use rustc_span::symbol::{sym, Ident, Symbol};
+use rustc_span::symbol::{sym, Symbol};
 use rustc_span::{
     self, DebuggerVisualizerFile, ExternalSource, FileName, SourceFile, Span, SyntaxContext,
 };
@@ -44,7 +43,7 @@ use std::num::NonZeroUsize;
 use tracing::{debug, trace};
 
 pub(super) struct EncodeContext<'a, 'tcx> {
-    opaque: MemEncoder,
+    opaque: opaque::Encoder,
     tcx: TyCtxt<'tcx>,
     feat: &'tcx rustc_feature::Features,
 
@@ -94,6 +93,9 @@ macro_rules! encoder_methods {
 }
 
 impl<'a, 'tcx> Encoder for EncodeContext<'a, 'tcx> {
+    type Ok = <opaque::Encoder as Encoder>::Ok;
+    type Err = <opaque::Encoder as Encoder>::Err;
+
     encoder_methods! {
         emit_usize(usize);
         emit_u128(u128);
@@ -115,6 +117,10 @@ impl<'a, 'tcx> Encoder for EncodeContext<'a, 'tcx> {
         emit_char(char);
         emit_str(&str);
         emit_raw_bytes(&[u8]);
+    }
+
+    fn finish(self) -> Result<Self::Ok, Self::Err> {
+        self.opaque.finish()
     }
 }
 
@@ -1001,6 +1007,9 @@ impl<'a, 'tcx> EncodeContext<'a, 'tcx> {
             record!(self.tables.def_span[def_id] <- tcx.def_span(def_id));
             self.encode_attrs(local_id);
             record!(self.tables.expn_that_defined[def_id] <- self.tcx.expn_that_defined(def_id));
+            if let Some(ident_span) = tcx.def_ident_span(def_id) {
+                record!(self.tables.def_ident_span[def_id] <- ident_span);
+            }
             if def_kind.has_codegen_attrs() {
                 record!(self.tables.codegen_fn_attrs[def_id] <- self.tcx.codegen_fn_attrs(def_id));
             }
@@ -1065,7 +1074,6 @@ impl<'a, 'tcx> EncodeContext<'a, 'tcx> {
             assert!(f.did.is_local());
             f.did.index
         }));
-        self.encode_ident_span(def_id, variant.ident(tcx));
         self.encode_item_type(def_id);
         if variant.ctor_kind == CtorKind::Fn {
             // FIXME(eddyb) encode signature only in `encode_enum_variant_ctor`.
@@ -1157,7 +1165,6 @@ impl<'a, 'tcx> EncodeContext<'a, 'tcx> {
         debug!("EncodeContext::encode_field({:?})", def_id);
 
         record!(self.tables.kind[def_id] <- EntryKind::Field);
-        self.encode_ident_span(def_id, field.ident(self.tcx));
         self.encode_item_type(def_id);
     }
 
@@ -1236,7 +1243,6 @@ impl<'a, 'tcx> EncodeContext<'a, 'tcx> {
                 record!(self.tables.kind[def_id] <- EntryKind::AssocType(container));
             }
         }
-        self.encode_ident_span(def_id, ast_item.ident);
         match trait_item.kind {
             ty::AssocKind::Const | ty::AssocKind::Fn => {
                 self.encode_item_type(def_id);
@@ -1300,7 +1306,6 @@ impl<'a, 'tcx> EncodeContext<'a, 'tcx> {
                 record!(self.tables.kind[def_id] <- EntryKind::AssocType(container));
             }
         }
-        self.encode_ident_span(def_id, impl_item.ident(self.tcx));
         self.encode_item_type(def_id);
         if let Some(trait_item_def_id) = impl_item.trait_item_def_id {
             self.tables.trait_item_def_id.set(def_id.index, trait_item_def_id.into());
@@ -1401,8 +1406,6 @@ impl<'a, 'tcx> EncodeContext<'a, 'tcx> {
         let tcx = self.tcx;
 
         debug!("EncodeContext::encode_info_for_item({:?})", def_id);
-
-        self.encode_ident_span(def_id, item.ident);
 
         let entry_kind = match item.kind {
             hir::ItemKind::Static(..) => EntryKind::Static,
@@ -1947,7 +1950,6 @@ impl<'a, 'tcx> EncodeContext<'a, 'tcx> {
                 record!(self.tables.kind[def_id] <- EntryKind::ForeignType);
             }
         }
-        self.encode_ident_span(def_id, nitem.ident);
         self.encode_item_type(def_id);
         if let hir::ForeignItemKind::Fn(..) = nitem.kind {
             record!(self.tables.fn_sig[def_id] <- tcx.fn_sig(def_id));
@@ -2027,10 +2029,6 @@ impl<'a, 'tcx> EncodeContext<'a, 'tcx> {
         if let hir::ExprKind::Closure(..) = expr.kind {
             self.encode_info_for_closure(expr.hir_id);
         }
-    }
-
-    fn encode_ident_span(&mut self, def_id: DefId, ident: Ident) {
-        record!(self.tables.def_ident_span[def_id] <- ident.span);
     }
 
     /// In some cases, along with the item itself, we also
@@ -2182,7 +2180,7 @@ pub fn encode_metadata(tcx: TyCtxt<'_>) -> EncodedMetadata {
 }
 
 fn encode_metadata_impl(tcx: TyCtxt<'_>) -> EncodedMetadata {
-    let mut encoder = MemEncoder::new();
+    let mut encoder = opaque::Encoder::new();
     encoder.emit_raw_bytes(METADATA_HEADER);
 
     // Will be filled with the root position after encoding everything.
@@ -2217,7 +2215,7 @@ fn encode_metadata_impl(tcx: TyCtxt<'_>) -> EncodedMetadata {
     // culminating in the `CrateRoot` which points to all of it.
     let root = ecx.encode_crate_root();
 
-    let mut result = ecx.opaque.finish();
+    let mut result = ecx.opaque.finish().unwrap();
 
     // Encode the root position.
     let header = METADATA_HEADER.len();
