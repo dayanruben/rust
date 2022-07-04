@@ -210,6 +210,8 @@
 #![allow(unused_lifetimes)]
 // Tell the compiler to link to either panic_abort or panic_unwind
 #![needs_panic_runtime]
+// Ensure that std can be linked against panic_abort despite compiled with `-C panic=unwind`
+#![cfg_attr(not(bootstrap), deny(ffi_unwind_calls))]
 // std may use features in a platform-specific way
 #![allow(unused_features)]
 #![cfg_attr(test, feature(internal_output_capture, print_internals, update_panic_count))]
@@ -249,7 +251,6 @@
 #![feature(needs_panic_runtime)]
 #![feature(negative_impls)]
 #![feature(never_type)]
-#![cfg_attr(bootstrap, feature(nll))]
 #![feature(platform_intrinsics)]
 #![feature(prelude_import)]
 #![feature(rustc_attrs)]
@@ -585,7 +586,7 @@ mod backtrace_rs;
 #[stable(feature = "rust1", since = "1.0.0")]
 #[allow(deprecated, deprecated_in_future)]
 pub use core::{
-    assert_eq, assert_ne, debug_assert, debug_assert_eq, debug_assert_ne, matches, r#try, todo,
+    assert_eq, assert_ne, debug_assert, debug_assert_eq, debug_assert_ne, matches, todo, r#try,
     unimplemented, unreachable, write, writeln,
 };
 
