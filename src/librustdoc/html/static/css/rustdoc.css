@@ -418,7 +418,7 @@ nav.sub {
 	background-color: var(--sidebar-background-color);
 }
 
-#sidebar-toggle:hover {
+#sidebar-toggle > button:hover, #sidebar-toggle > button:focus {
 	background-color: var(--sidebar-background-color-hover);
 }
 
@@ -1401,7 +1401,6 @@ pre.rust {
 	position: sticky;
 	top: 0;
 	left: 0;
-	cursor: pointer;
 	font-weight: bold;
 	font-size: 1.25rem;
 	border-bottom: 1px solid;
@@ -1422,7 +1421,24 @@ pre.rust {
 	border-bottom: 1px solid;
 	margin-bottom: 6px;
 }
-
+#sidebar-toggle > button {
+	background: none;
+	color: inherit;
+	cursor: pointer;
+	text-align: center;
+	border: none;
+	outline: none;
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	left: 0;
+	right: 0;
+	/* work around button layout strangeness: https://stackoverflow.com/q/7271561 */
+	width: 100%;
+	/* iOS button gradient: https://stackoverflow.com/q/5438567 */
+	-webkit-appearance: none;
+	opacity: 1;
+}
 #settings-menu, #help-button {
 	margin-left: 4px;
 	outline: none;
@@ -1723,6 +1739,11 @@ details.rustdoc-toggle[open] > summary.hideme::after {
 
 /* Media Queries */
 
+/*
+WARNING: RUSTDOC_MOBILE_BREAKPOINT MEDIA QUERY;
+If you update this line, then you also need to update the line with the same warning
+in storage.js plus the media query with (max-width: 700px)
+*/
 @media (min-width: 701px) {
 	/* In case there is no documentation before a code block, we need to add some margin at the top
 	to prevent an overlay between the "collapse toggle" and the information tooltip.
@@ -1743,6 +1764,11 @@ details.rustdoc-toggle[open] > summary.hideme::after {
 	}
 }
 
+/*
+WARNING: RUSTDOC_MOBILE_BREAKPOINT MEDIA QUERY
+If you update this line, then you also need to update the line with the same warning
+in storage.js plus the media query with (min-width: 701px)
+*/
 @media (max-width: 700px) {
 	/* When linking to an item with an `id` (for instance, by clicking a link in the sidebar,
 	   or visiting a URL with a fragment like `#method.new`, we don't want the item to be obscured
