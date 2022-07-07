@@ -21,7 +21,9 @@ use rustc_middle::hir::nested_filter;
 use rustc_middle::ty::layout::{LayoutError, MAX_SIMD_LANES};
 use rustc_middle::ty::subst::GenericArgKind;
 use rustc_middle::ty::util::{Discr, IntTypeExt};
-use rustc_middle::ty::{self, ParamEnv, ToPredicate, Ty, TyCtxt, TypeFoldable, TypeSuperFoldable};
+use rustc_middle::ty::{
+    self, ParamEnv, ToPredicate, Ty, TyCtxt, TypeSuperVisitable, TypeVisitable,
+};
 use rustc_session::lint::builtin::{UNINHABITED_STATIC, UNSUPPORTED_CALLING_CONVENTIONS};
 use rustc_span::symbol::sym;
 use rustc_span::{self, Span};
@@ -286,11 +288,9 @@ fn check_panic_info_fn(
         tcx.sess.span_err(decl.output.span(), "return type should be `!`");
     }
 
-    let span = tcx.def_span(fn_id);
     let inputs = fn_sig.inputs();
     if inputs.len() != 1 {
-        let span = tcx.sess.source_map().guess_head_span(span);
-        tcx.sess.span_err(span, "function should have one argument");
+        tcx.sess.span_err(tcx.def_span(fn_id), "function should have one argument");
         return;
     }
 
@@ -343,9 +343,7 @@ fn check_alloc_error_fn(
 
     let inputs = fn_sig.inputs();
     if inputs.len() != 1 {
-        let span = tcx.def_span(fn_id);
-        let span = tcx.sess.source_map().guess_head_span(span);
-        tcx.sess.span_err(span, "function should have one argument");
+        tcx.sess.span_err(tcx.def_span(fn_id), "function should have one argument");
         return;
     }
 
@@ -522,7 +520,7 @@ pub(super) fn check_opaque_for_inheriting_lifetimes<'tcx>(
 
     struct FoundParentLifetime;
     struct FindParentLifetimeVisitor<'tcx>(&'tcx ty::Generics);
-    impl<'tcx> ty::fold::TypeVisitor<'tcx> for FindParentLifetimeVisitor<'tcx> {
+    impl<'tcx> ty::visit::TypeVisitor<'tcx> for FindParentLifetimeVisitor<'tcx> {
         type BreakTy = FoundParentLifetime;
 
         fn visit_region(&mut self, r: ty::Region<'tcx>) -> ControlFlow<Self::BreakTy> {
@@ -556,7 +554,7 @@ pub(super) fn check_opaque_for_inheriting_lifetimes<'tcx>(
         selftys: Vec<(Span, Option<String>)>,
     }
 
-    impl<'tcx> ty::fold::TypeVisitor<'tcx> for ProhibitOpaqueVisitor<'tcx> {
+    impl<'tcx> ty::visit::TypeVisitor<'tcx> for ProhibitOpaqueVisitor<'tcx> {
         type BreakTy = Ty<'tcx>;
 
         fn visit_ty(&mut self, t: Ty<'tcx>) -> ControlFlow<Self::BreakTy> {
@@ -1032,7 +1030,6 @@ fn check_impl_items_against_trait<'tcx>(
                 compare_impl_method(
                     tcx,
                     &ty_impl_item,
-                    impl_item.span,
                     &ty_trait_item,
                     impl_trait_ref,
                     opt_trait_span,
@@ -1092,17 +1089,20 @@ fn check_impl_items_against_trait<'tcx>(
         }
 
         if !missing_items.is_empty() {
-            let impl_span = tcx.sess.source_map().guess_head_span(full_impl_span);
-            missing_items_err(tcx, impl_span, &missing_items, full_impl_span);
+            missing_items_err(tcx, tcx.def_span(impl_id), &missing_items, full_impl_span);
         }
 
         if let Some(missing_items) = must_implement_one_of {
-            let impl_span = tcx.sess.source_map().guess_head_span(full_impl_span);
             let attr_span = tcx
                 .get_attr(impl_trait_ref.def_id, sym::rustc_must_implement_one_of)
                 .map(|attr| attr.span);
 
-            missing_items_must_implement_one_of_err(tcx, impl_span, missing_items, attr_span);
+            missing_items_must_implement_one_of_err(
+                tcx,
+                tcx.def_span(impl_id),
+                missing_items,
+                attr_span,
+            );
         }
     }
 }
@@ -1595,7 +1595,7 @@ fn opaque_type_cycle_error(tcx: TyCtxt<'_>, def_id: LocalDefId, span: Span) -> E
                 .filter(|(_, ty)| !matches!(ty.kind(), ty::Never))
             {
                 struct OpaqueTypeCollector(Vec<DefId>);
-                impl<'tcx> ty::fold::TypeVisitor<'tcx> for OpaqueTypeCollector {
+                impl<'tcx> ty::visit::TypeVisitor<'tcx> for OpaqueTypeCollector {
                     fn visit_ty(&mut self, t: Ty<'tcx>) -> ControlFlow<Self::BreakTy> {
                         match *t.kind() {
                             ty::Opaque(def, _) => {

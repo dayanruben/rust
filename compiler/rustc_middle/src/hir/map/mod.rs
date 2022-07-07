@@ -225,7 +225,8 @@ impl<'hir> Map<'hir> {
         self.tcx.definitions_untracked().iter_local_def_id()
     }
 
-    pub fn opt_def_kind(self, local_def_id: LocalDefId) -> Option<DefKind> {
+    /// Do not call this function directly. The query should be called.
+    pub(super) fn opt_def_kind(self, local_def_id: LocalDefId) -> Option<DefKind> {
         let hir_id = self.local_def_id_to_hir_id(local_def_id);
         let def_kind = match self.find(hir_id)? {
             Node::Item(item) => match item.kind {
@@ -1012,12 +1013,13 @@ impl<'hir> Map<'hir> {
                 ItemKind::Use(path, _) => path.span,
                 _ => named_span(item.span, item.ident, item.kind.generics()),
             },
+            Node::Variant(variant) => named_span(variant.span, variant.ident, None),
             Node::ImplItem(item) => named_span(item.span, item.ident, Some(item.generics)),
             Node::ForeignItem(item) => match item.kind {
                 ForeignItemKind::Fn(decl, _, _) => until_within(item.span, decl.output.span()),
                 _ => named_span(item.span, item.ident, None),
             },
-            Node::Ctor(..) => return self.opt_span(self.get_parent_node(hir_id)),
+            Node::Ctor(_) => return self.opt_span(self.get_parent_node(hir_id)),
             _ => self.span_with_body(hir_id),
         };
         Some(span)

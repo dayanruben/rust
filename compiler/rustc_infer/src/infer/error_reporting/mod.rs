@@ -68,7 +68,7 @@ use rustc_middle::dep_graph::DepContext;
 use rustc_middle::ty::print::with_no_trimmed_paths;
 use rustc_middle::ty::{
     self, error::TypeError, Binder, List, Region, Subst, Ty, TyCtxt, TypeFoldable,
-    TypeSuperFoldable,
+    TypeSuperVisitable, TypeVisitable,
 };
 use rustc_span::{sym, symbol::kw, BytePos, DesugaringKind, Pos, Span};
 use rustc_target::spec::abi;
@@ -148,12 +148,10 @@ fn msg_span_from_early_bound_and_free_regions<'tcx>(
     tcx: TyCtxt<'tcx>,
     region: ty::Region<'tcx>,
 ) -> (String, Span) {
-    let sm = tcx.sess.source_map();
-
     let scope = region.free_region_binding_scope(tcx).expect_local();
     match *region {
         ty::ReEarlyBound(ref br) => {
-            let mut sp = sm.guess_head_span(tcx.def_span(scope));
+            let mut sp = tcx.def_span(scope);
             if let Some(param) =
                 tcx.hir().get_generics(scope).and_then(|generics| generics.get_named(br.name))
             {
@@ -174,7 +172,7 @@ fn msg_span_from_early_bound_and_free_regions<'tcx>(
             } else {
                 match fr.bound_region {
                     ty::BoundRegionKind::BrNamed(_, name) => {
-                        let mut sp = sm.guess_head_span(tcx.def_span(scope));
+                        let mut sp = tcx.def_span(scope);
                         if let Some(param) =
                             tcx.hir().get_generics(scope).and_then(|generics| generics.get_named(name))
                         {
@@ -193,7 +191,7 @@ fn msg_span_from_early_bound_and_free_regions<'tcx>(
                     ),
                     _ => (
                         format!("the lifetime `{}` as defined here", region),
-                        sm.guess_head_span(tcx.def_span(scope)),
+                        tcx.def_span(scope),
                     ),
                 }
             }
@@ -1540,7 +1538,7 @@ impl<'a, 'tcx> InferCtxt<'a, 'tcx> {
             }
         }
 
-        impl<'tcx> ty::fold::TypeVisitor<'tcx> for OpaqueTypesVisitor<'tcx> {
+        impl<'tcx> ty::visit::TypeVisitor<'tcx> for OpaqueTypesVisitor<'tcx> {
             fn visit_ty(&mut self, t: Ty<'tcx>) -> ControlFlow<Self::BreakTy> {
                 if let Some((kind, def_id)) = TyCategory::from_ty(self.tcx, t) {
                     let span = self.tcx.def_span(def_id);

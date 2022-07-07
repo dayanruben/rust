@@ -179,7 +179,8 @@ pub enum BorrowKind {
 /// Not all of these are allowed at every [`MirPhase`]. Check the documentation there to see which
 /// ones you do not have to worry about. The MIR validator will generally enforce such restrictions,
 /// causing an ICE if they are violated.
-#[derive(Clone, Debug, PartialEq, TyEncodable, TyDecodable, Hash, HashStable, TypeFoldable)]
+#[derive(Clone, Debug, PartialEq, TyEncodable, TyDecodable, Hash, HashStable)]
+#[derive(TypeFoldable, TypeVisitable)]
 pub enum StatementKind<'tcx> {
     /// Assign statements roughly correspond to an assignment in Rust proper (`x = ...`) except
     /// without the possibility of dropping the previous value (that must be done separately, if at
@@ -376,13 +377,15 @@ pub enum FakeReadCause {
     ForIndex,
 }
 
-#[derive(Clone, Debug, PartialEq, TyEncodable, TyDecodable, Hash, HashStable, TypeFoldable)]
+#[derive(Clone, Debug, PartialEq, TyEncodable, TyDecodable, Hash, HashStable)]
+#[derive(TypeFoldable, TypeVisitable)]
 pub struct Coverage {
     pub kind: CoverageKind,
     pub code_region: Option<CodeRegion>,
 }
 
-#[derive(Clone, Debug, PartialEq, TyEncodable, TyDecodable, Hash, HashStable, TypeFoldable)]
+#[derive(Clone, Debug, PartialEq, TyEncodable, TyDecodable, Hash, HashStable)]
+#[derive(TypeFoldable, TypeVisitable)]
 pub struct CopyNonOverlapping<'tcx> {
     pub src: Operand<'tcx>,
     pub dst: Operand<'tcx>,
@@ -393,6 +396,8 @@ pub struct CopyNonOverlapping<'tcx> {
 ///////////////////////////////////////////////////////////////////////////
 // Terminators
 
+/// The various kinds of terminators, representing ways of exiting from a basic block.
+///
 /// A note on unwinding: Panics may occur during the execution of some terminators. Depending on the
 /// `-C panic` flag, this may either cause the program to abort or the call stack to unwind. Such
 /// terminators have a `cleanup: Option<BasicBlock>` field on them. If stack unwinding occurs, then
@@ -672,7 +677,8 @@ pub enum AssertKind<O> {
     ResumedAfterPanic(GeneratorKind),
 }
 
-#[derive(Clone, Debug, PartialEq, TyEncodable, TyDecodable, Hash, HashStable, TypeFoldable)]
+#[derive(Clone, Debug, PartialEq, TyEncodable, TyDecodable, Hash, HashStable)]
+#[derive(TypeFoldable, TypeVisitable)]
 pub enum InlineAsmOperand<'tcx> {
     In {
         reg: InlineAsmRegOrRegClass,
@@ -907,7 +913,7 @@ pub enum Operand<'tcx> {
 static_assert_size!(Operand<'_>, 24);
 
 ///////////////////////////////////////////////////////////////////////////
-/// Rvalues
+// Rvalues
 
 /// The various kinds of rvalues that can appear in MIR.
 ///
