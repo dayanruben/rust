@@ -89,8 +89,7 @@ use crate::deriving::generic::ty::*;
 use crate::deriving::generic::*;
 use crate::deriving::pathvec_std;
 
-use rustc_ast::ptr::P;
-use rustc_ast::{Expr, ExprKind, MetaItem, Mutability};
+use rustc_ast::{ExprKind, MetaItem, Mutability};
 use rustc_expand::base::{Annotatable, ExtCtxt};
 use rustc_span::symbol::{sym, Ident, Symbol};
 use rustc_span::Span;
@@ -121,7 +120,10 @@ pub fn expand_deriving_rustc_encodable(
                 )],
             },
             explicit_self: true,
-            args: vec![(Ref(Box::new(Path(Path::new_local(typaram))), Mutability::Mut), sym::s)],
+            nonself_args: vec![(
+                Ref(Box::new(Path(Path::new_local(typaram))), Mutability::Mut),
+                sym::s,
+            )],
             ret_ty: Path(Path::new_(
                 pathvec_std!(result::Result),
                 vec![
@@ -147,8 +149,8 @@ fn encodable_substructure(
     trait_span: Span,
     substr: &Substructure<'_>,
     krate: Symbol,
-) -> P<Expr> {
-    let encoder = substr.nonself_args[0].clone();
+) -> BlockOrExpr {
+    let encoder = substr.nonselflike_args[0].clone();
     // throw an underscore in front to suppress unused variable warnings
     let blkarg = Ident::new(sym::_e, trait_span);
     let blkencoder = cx.expr_ident(trait_span, blkarg);
@@ -166,12 +168,12 @@ fn encodable_substructure(
             let fn_emit_struct_field_path =
                 cx.def_site_path(&[sym::rustc_serialize, sym::Encoder, sym::emit_struct_field]);
             let mut stmts = Vec::new();
-            for (i, &FieldInfo { name, ref self_, span, .. }) in fields.iter().enumerate() {
+            for (i, &FieldInfo { name, ref self_expr, span, .. }) in fields.iter().enumerate() {
                 let name = match name {
                     Some(id) => id.name,
                     None => Symbol::intern(&format!("_field{}", i)),
                 };
-                let self_ref = cx.expr_addr_of(span, self_.clone());
+                let self_ref = cx.expr_addr_of(span, self_expr.clone());
                 let enc = cx.expr_call(span, fn_path.clone(), vec![self_ref, blkencoder.clone()]);
                 let lambda = cx.lambda1(span, enc, blkarg);
                 let call = cx.expr_call_global(
@@ -208,7 +210,7 @@ fn encodable_substructure(
             let fn_emit_struct_path =
                 cx.def_site_path(&[sym::rustc_serialize, sym::Encoder, sym::emit_struct]);
 
-            cx.expr_call_global(
+            let expr = cx.expr_call_global(
                 trait_span,
                 fn_emit_struct_path,
                 vec![
@@ -217,7 +219,8 @@ fn encodable_substructure(
                     cx.expr_usize(trait_span, fields.len()),
                     blk,
                 ],
-            )
+            );
+            BlockOrExpr::new_expr(expr)
         }
 
         EnumMatching(idx, _, variant, ref fields) => {
@@ -234,8 +237,8 @@ fn encodable_substructure(
             let mut stmts = Vec::new();
             if !fields.is_empty() {
                 let last = fields.len() - 1;
-                for (i, &FieldInfo { ref self_, span, .. }) in fields.iter().enumerate() {
-                    let self_ref = cx.expr_addr_of(span, self_.clone());
+                for (i, &FieldInfo { ref self_expr, span, .. }) in fields.iter().enumerate() {
+                    let self_ref = cx.expr_addr_of(span, self_expr.clone());
                     let enc =
                         cx.expr_call(span, fn_path.clone(), vec![self_ref, blkencoder.clone()]);
                     let lambda = cx.lambda1(span, enc, blkarg);
@@ -279,12 +282,12 @@ fn encodable_substructure(
             let blk = cx.lambda1(trait_span, call, blkarg);
             let fn_emit_enum_path: Vec<_> =
                 cx.def_site_path(&[sym::rustc_serialize, sym::Encoder, sym::emit_enum]);
-            let ret = cx.expr_call_global(
+            let expr = cx.expr_call_global(
                 trait_span,
                 fn_emit_enum_path,
                 vec![encoder, cx.expr_str(trait_span, substr.type_ident.name), blk],
             );
-            cx.expr_block(cx.block(trait_span, vec![me, cx.stmt_expr(ret)]))
+            BlockOrExpr::new_mixed(vec![me], expr)
         }
 
         _ => cx.bug("expected Struct or EnumMatching in derive(Encodable)"),

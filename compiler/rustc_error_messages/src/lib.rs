@@ -33,6 +33,8 @@ pub use unic_langid::{langid, LanguageIdentifier};
 fluent_messages! {
     borrowck => "../locales/en-US/borrowck.ftl",
     builtin_macros => "../locales/en-US/builtin_macros.ftl",
+    const_eval => "../locales/en-US/const_eval.ftl",
+    expand => "../locales/en-US/expand.ftl",
     lint => "../locales/en-US/lint.ftl",
     parser => "../locales/en-US/parser.ftl",
     privacy => "../locales/en-US/privacy.ftl",

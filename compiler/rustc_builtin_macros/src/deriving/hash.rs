@@ -2,8 +2,7 @@ use crate::deriving::generic::ty::*;
 use crate::deriving::generic::*;
 use crate::deriving::{self, path_std, pathvec_std};
 
-use rustc_ast::ptr::P;
-use rustc_ast::{Expr, MetaItem, Mutability};
+use rustc_ast::{MetaItem, Mutability};
 use rustc_expand::base::{Annotatable, ExtCtxt};
 use rustc_span::symbol::sym;
 use rustc_span::Span;
@@ -31,7 +30,7 @@ pub fn expand_deriving_hash(
             name: sym::hash,
             generics: Bounds { bounds: vec![(typaram, vec![path_std!(hash::Hasher)])] },
             explicit_self: true,
-            args: vec![(Ref(Box::new(Path(arg)), Mutability::Mut), sym::state)],
+            nonself_args: vec![(Ref(Box::new(Path(arg)), Mutability::Mut), sym::state)],
             ret_ty: Unit,
             attributes: vec![],
             unify_fieldless_variants: true,
@@ -45,8 +44,12 @@ pub fn expand_deriving_hash(
     hash_trait_def.expand(cx, mitem, item, push);
 }
 
-fn hash_substructure(cx: &mut ExtCtxt<'_>, trait_span: Span, substr: &Substructure<'_>) -> P<Expr> {
-    let [state_expr] = substr.nonself_args else {
+fn hash_substructure(
+    cx: &mut ExtCtxt<'_>,
+    trait_span: Span,
+    substr: &Substructure<'_>,
+) -> BlockOrExpr {
+    let [state_expr] = substr.nonselflike_args else {
         cx.span_bug(trait_span, "incorrect number of arguments in `derive(Hash)`");
     };
     let call_hash = |span, thing_expr| {
@@ -79,8 +82,9 @@ fn hash_substructure(cx: &mut ExtCtxt<'_>, trait_span: Span, substr: &Substructu
     };
 
     stmts.extend(
-        fields.iter().map(|FieldInfo { ref self_, span, .. }| call_hash(*span, self_.clone())),
+        fields
+            .iter()
+            .map(|FieldInfo { ref self_expr, span, .. }| call_hash(*span, self_expr.clone())),
     );
-
-    cx.expr_block(cx.block(trait_span, stmts))
+    BlockOrExpr::new_stmts(stmts)
 }

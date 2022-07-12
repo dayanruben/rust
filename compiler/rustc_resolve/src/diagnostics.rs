@@ -28,7 +28,7 @@ use rustc_span::{BytePos, Span};
 use tracing::debug;
 
 use crate::imports::{Import, ImportKind, ImportResolver};
-use crate::late::Rib;
+use crate::late::{PatternSource, Rib};
 use crate::path_names_to_string;
 use crate::{AmbiguityError, AmbiguityErrorMisc, AmbiguityKind, BindingError, Finalize};
 use crate::{HasGenericParams, MacroRulesScope, Module, ModuleKind, ModuleOrUniformRoot};
@@ -896,25 +896,40 @@ impl<'a> Resolver<'a> {
                 err
             }
             ResolutionError::BindingShadowsSomethingUnacceptable {
-                shadowing_binding_descr,
+                shadowing_binding,
                 name,
                 participle,
                 article,
-                shadowed_binding_descr,
+                shadowed_binding,
                 shadowed_binding_span,
             } => {
+                let shadowed_binding_descr = shadowed_binding.descr();
                 let mut err = struct_span_err!(
                     self.session,
                     span,
                     E0530,
                     "{}s cannot shadow {}s",
-                    shadowing_binding_descr,
+                    shadowing_binding.descr(),
                     shadowed_binding_descr,
                 );
                 err.span_label(
                     span,
                     format!("cannot be named the same as {} {}", article, shadowed_binding_descr),
                 );
+                match (shadowing_binding, shadowed_binding) {
+                    (
+                        PatternSource::Match,
+                        Res::Def(DefKind::Ctor(CtorOf::Variant | CtorOf::Struct, CtorKind::Fn), _),
+                    ) => {
+                        err.span_suggestion(
+                            span,
+                            "try specify the pattern arguments",
+                            format!("{}(..)", name),
+                            Applicability::Unspecified,
+                        );
+                    }
+                    _ => (),
+                }
                 let msg =
                     format!("the {} `{}` is {} here", shadowed_binding_descr, name, participle);
                 err.span_label(shadowed_binding_span, msg);
@@ -928,10 +943,7 @@ impl<'a> Resolver<'a> {
                     "generic parameters with a default cannot use \
                                                 forward declared identifiers"
                 );
-                err.span_label(
-                    span,
-                    "defaulted generic parameters cannot be forward declared".to_string(),
-                );
+                err.span_label(span, "defaulted generic parameters cannot be forward declared");
                 err
             }
             ResolutionError::ParamInTyOfConstParam(name) => {
@@ -1635,7 +1647,7 @@ impl<'a> Resolver<'a> {
 
     fn binding_description(&self, b: &NameBinding<'_>, ident: Ident, from_prelude: bool) -> String {
         let res = b.res();
-        if b.span.is_dummy() || self.session.source_map().span_to_snippet(b.span).is_err() {
+        if b.span.is_dummy() || !self.session.source_map().is_span_accessible(b.span) {
             // These already contain the "built-in" prefix or look bad with it.
             let add_built_in =
                 !matches!(b.res(), Res::NonMacroAttr(..) | Res::PrimTy(..) | Res::ToolMod);

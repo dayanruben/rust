@@ -991,7 +991,7 @@ impl<T> AtomicPtr<T> {
     /// use std::sync::atomic::AtomicPtr;
     ///
     /// let ptr = &mut 5;
-    /// let atomic_ptr  = AtomicPtr::new(ptr);
+    /// let atomic_ptr = AtomicPtr::new(ptr);
     /// ```
     #[inline]
     #[stable(feature = "rust1", since = "1.0.0")]
@@ -1487,7 +1487,7 @@ impl<T> AtomicPtr<T> {
     /// ```
     #[inline]
     #[cfg(target_has_atomic = "ptr")]
-    #[unstable(feature = "strict_provenance_atomic_ptr", issue = "95228")]
+    #[unstable(feature = "strict_provenance_atomic_ptr", issue = "99108")]
     pub fn fetch_ptr_add(&self, val: usize, order: Ordering) -> *mut T {
         self.fetch_byte_add(val.wrapping_mul(core::mem::size_of::<T>()), order)
     }
@@ -1531,7 +1531,7 @@ impl<T> AtomicPtr<T> {
     /// ```
     #[inline]
     #[cfg(target_has_atomic = "ptr")]
-    #[unstable(feature = "strict_provenance_atomic_ptr", issue = "95228")]
+    #[unstable(feature = "strict_provenance_atomic_ptr", issue = "99108")]
     pub fn fetch_ptr_sub(&self, val: usize, order: Ordering) -> *mut T {
         self.fetch_byte_sub(val.wrapping_mul(core::mem::size_of::<T>()), order)
     }
@@ -1566,7 +1566,7 @@ impl<T> AtomicPtr<T> {
     /// ```
     #[inline]
     #[cfg(target_has_atomic = "ptr")]
-    #[unstable(feature = "strict_provenance_atomic_ptr", issue = "95228")]
+    #[unstable(feature = "strict_provenance_atomic_ptr", issue = "99108")]
     pub fn fetch_byte_add(&self, val: usize, order: Ordering) -> *mut T {
         #[cfg(not(bootstrap))]
         // SAFETY: data races are prevented by atomic intrinsics.
@@ -1609,7 +1609,7 @@ impl<T> AtomicPtr<T> {
     /// ```
     #[inline]
     #[cfg(target_has_atomic = "ptr")]
-    #[unstable(feature = "strict_provenance_atomic_ptr", issue = "95228")]
+    #[unstable(feature = "strict_provenance_atomic_ptr", issue = "99108")]
     pub fn fetch_byte_sub(&self, val: usize, order: Ordering) -> *mut T {
         #[cfg(not(bootstrap))]
         // SAFETY: data races are prevented by atomic intrinsics.
@@ -1667,7 +1667,7 @@ impl<T> AtomicPtr<T> {
     /// ```
     #[inline]
     #[cfg(target_has_atomic = "ptr")]
-    #[unstable(feature = "strict_provenance_atomic_ptr", issue = "95228")]
+    #[unstable(feature = "strict_provenance_atomic_ptr", issue = "99108")]
     pub fn fetch_or(&self, val: usize, order: Ordering) -> *mut T {
         #[cfg(not(bootstrap))]
         // SAFETY: data races are prevented by atomic intrinsics.
@@ -1724,7 +1724,7 @@ impl<T> AtomicPtr<T> {
     /// ```
     #[inline]
     #[cfg(target_has_atomic = "ptr")]
-    #[unstable(feature = "strict_provenance_atomic_ptr", issue = "95228")]
+    #[unstable(feature = "strict_provenance_atomic_ptr", issue = "99108")]
     pub fn fetch_and(&self, val: usize, order: Ordering) -> *mut T {
         #[cfg(not(bootstrap))]
         // SAFETY: data races are prevented by atomic intrinsics.
@@ -1779,7 +1779,7 @@ impl<T> AtomicPtr<T> {
     /// ```
     #[inline]
     #[cfg(target_has_atomic = "ptr")]
-    #[unstable(feature = "strict_provenance_atomic_ptr", issue = "95228")]
+    #[unstable(feature = "strict_provenance_atomic_ptr", issue = "99108")]
     pub fn fetch_xor(&self, val: usize, order: Ordering) -> *mut T {
         #[cfg(not(bootstrap))]
         // SAFETY: data races are prevented by atomic intrinsics.
@@ -2692,7 +2692,7 @@ atomic_int! {
     stable(feature = "integer_atomics_stable", since = "1.34.0"),
     stable(feature = "integer_atomics_stable", since = "1.34.0"),
     rustc_const_stable(feature = "const_integer_atomics", since = "1.34.0"),
-    unstable(feature = "integer_atomics", issue = "32976"),
+    unstable(feature = "integer_atomics", issue = "99069"),
     cfg_attr(not(test), rustc_diagnostic_item = "AtomicI8"),
     "i8",
     "",
@@ -2712,7 +2712,7 @@ atomic_int! {
     stable(feature = "integer_atomics_stable", since = "1.34.0"),
     stable(feature = "integer_atomics_stable", since = "1.34.0"),
     rustc_const_stable(feature = "const_integer_atomics", since = "1.34.0"),
-    unstable(feature = "integer_atomics", issue = "32976"),
+    unstable(feature = "integer_atomics", issue = "99069"),
     cfg_attr(not(test), rustc_diagnostic_item = "AtomicU8"),
     "u8",
     "",
@@ -2732,7 +2732,7 @@ atomic_int! {
     stable(feature = "integer_atomics_stable", since = "1.34.0"),
     stable(feature = "integer_atomics_stable", since = "1.34.0"),
     rustc_const_stable(feature = "const_integer_atomics", since = "1.34.0"),
-    unstable(feature = "integer_atomics", issue = "32976"),
+    unstable(feature = "integer_atomics", issue = "99069"),
     cfg_attr(not(test), rustc_diagnostic_item = "AtomicI16"),
     "i16",
     "",
@@ -2752,7 +2752,7 @@ atomic_int! {
     stable(feature = "integer_atomics_stable", since = "1.34.0"),
     stable(feature = "integer_atomics_stable", since = "1.34.0"),
     rustc_const_stable(feature = "const_integer_atomics", since = "1.34.0"),
-    unstable(feature = "integer_atomics", issue = "32976"),
+    unstable(feature = "integer_atomics", issue = "99069"),
     cfg_attr(not(test), rustc_diagnostic_item = "AtomicU16"),
     "u16",
     "",
@@ -2772,7 +2772,7 @@ atomic_int! {
     stable(feature = "integer_atomics_stable", since = "1.34.0"),
     stable(feature = "integer_atomics_stable", since = "1.34.0"),
     rustc_const_stable(feature = "const_integer_atomics", since = "1.34.0"),
-    unstable(feature = "integer_atomics", issue = "32976"),
+    unstable(feature = "integer_atomics", issue = "99069"),
     cfg_attr(not(test), rustc_diagnostic_item = "AtomicI32"),
     "i32",
     "",
@@ -2792,7 +2792,7 @@ atomic_int! {
     stable(feature = "integer_atomics_stable", since = "1.34.0"),
     stable(feature = "integer_atomics_stable", since = "1.34.0"),
     rustc_const_stable(feature = "const_integer_atomics", since = "1.34.0"),
-    unstable(feature = "integer_atomics", issue = "32976"),
+    unstable(feature = "integer_atomics", issue = "99069"),
     cfg_attr(not(test), rustc_diagnostic_item = "AtomicU32"),
     "u32",
     "",
@@ -2812,7 +2812,7 @@ atomic_int! {
     stable(feature = "integer_atomics_stable", since = "1.34.0"),
     stable(feature = "integer_atomics_stable", since = "1.34.0"),
     rustc_const_stable(feature = "const_integer_atomics", since = "1.34.0"),
-    unstable(feature = "integer_atomics", issue = "32976"),
+    unstable(feature = "integer_atomics", issue = "99069"),
     cfg_attr(not(test), rustc_diagnostic_item = "AtomicI64"),
     "i64",
     "",
@@ -2832,7 +2832,7 @@ atomic_int! {
     stable(feature = "integer_atomics_stable", since = "1.34.0"),
     stable(feature = "integer_atomics_stable", since = "1.34.0"),
     rustc_const_stable(feature = "const_integer_atomics", since = "1.34.0"),
-    unstable(feature = "integer_atomics", issue = "32976"),
+    unstable(feature = "integer_atomics", issue = "99069"),
     cfg_attr(not(test), rustc_diagnostic_item = "AtomicU64"),
     "u64",
     "",
@@ -2845,14 +2845,14 @@ atomic_int! {
 atomic_int! {
     cfg(target_has_atomic = "128"),
     cfg(target_has_atomic_equal_alignment = "128"),
-    unstable(feature = "integer_atomics", issue = "32976"),
-    unstable(feature = "integer_atomics", issue = "32976"),
-    unstable(feature = "integer_atomics", issue = "32976"),
-    unstable(feature = "integer_atomics", issue = "32976"),
-    unstable(feature = "integer_atomics", issue = "32976"),
-    unstable(feature = "integer_atomics", issue = "32976"),
+    unstable(feature = "integer_atomics", issue = "99069"),
+    unstable(feature = "integer_atomics", issue = "99069"),
+    unstable(feature = "integer_atomics", issue = "99069"),
+    unstable(feature = "integer_atomics", issue = "99069"),
+    unstable(feature = "integer_atomics", issue = "99069"),
+    unstable(feature = "integer_atomics", issue = "99069"),
     rustc_const_stable(feature = "const_integer_atomics", since = "1.34.0"),
-    unstable(feature = "integer_atomics", issue = "32976"),
+    unstable(feature = "integer_atomics", issue = "99069"),
     cfg_attr(not(test), rustc_diagnostic_item = "AtomicI128"),
     "i128",
     "#![feature(integer_atomics)]\n\n",
@@ -2865,14 +2865,14 @@ atomic_int! {
 atomic_int! {
     cfg(target_has_atomic = "128"),
     cfg(target_has_atomic_equal_alignment = "128"),
-    unstable(feature = "integer_atomics", issue = "32976"),
-    unstable(feature = "integer_atomics", issue = "32976"),
-    unstable(feature = "integer_atomics", issue = "32976"),
-    unstable(feature = "integer_atomics", issue = "32976"),
-    unstable(feature = "integer_atomics", issue = "32976"),
-    unstable(feature = "integer_atomics", issue = "32976"),
+    unstable(feature = "integer_atomics", issue = "99069"),
+    unstable(feature = "integer_atomics", issue = "99069"),
+    unstable(feature = "integer_atomics", issue = "99069"),
+    unstable(feature = "integer_atomics", issue = "99069"),
+    unstable(feature = "integer_atomics", issue = "99069"),
+    unstable(feature = "integer_atomics", issue = "99069"),
     rustc_const_stable(feature = "const_integer_atomics", since = "1.34.0"),
-    unstable(feature = "integer_atomics", issue = "32976"),
+    unstable(feature = "integer_atomics", issue = "99069"),
     cfg_attr(not(test), rustc_diagnostic_item = "AtomicU128"),
     "u128",
     "#![feature(integer_atomics)]\n\n",

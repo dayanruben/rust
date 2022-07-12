@@ -2,8 +2,7 @@ use crate::deriving::generic::ty::*;
 use crate::deriving::generic::*;
 use crate::deriving::path_std;
 
-use rustc_ast::ptr::P;
-use rustc_ast::{self as ast, Expr, MetaItem};
+use rustc_ast::{self as ast, MetaItem};
 use rustc_expand::base::{Annotatable, ExtCtxt};
 use rustc_span::symbol::{sym, Ident, Symbol};
 use rustc_span::Span;
@@ -29,7 +28,7 @@ pub fn expand_deriving_debug(
             name: sym::fmt,
             generics: Bounds::empty(),
             explicit_self: true,
-            args: vec![(fmtr, sym::f)],
+            nonself_args: vec![(fmtr, sym::f)],
             ret_ty: Path(path_std!(fmt::Result)),
             attributes: Vec::new(),
             unify_fieldless_variants: false,
@@ -42,7 +41,7 @@ pub fn expand_deriving_debug(
     trait_def.expand(cx, mitem, item, push)
 }
 
-fn show_substructure(cx: &mut ExtCtxt<'_>, span: Span, substr: &Substructure<'_>) -> P<Expr> {
+fn show_substructure(cx: &mut ExtCtxt<'_>, span: Span, substr: &Substructure<'_>) -> BlockOrExpr {
     let (ident, vdata, fields) = match substr.fields {
         Struct(vdata, fields) => (substr.type_ident, *vdata, fields),
         EnumMatching(_, _, v, fields) => (v.ident, &v.data, fields),
@@ -54,7 +53,7 @@ fn show_substructure(cx: &mut ExtCtxt<'_>, span: Span, substr: &Substructure<'_>
     // We want to make sure we have the ctxt set so that we can use unstable methods
     let span = cx.with_def_site_ctxt(span);
     let name = cx.expr_lit(span, ast::LitKind::Str(ident.name, ast::StrStyle::Cooked));
-    let fmt = substr.nonself_args[0].clone();
+    let fmt = substr.nonselflike_args[0].clone();
 
     // Struct and tuples are similar enough that we use the same code for both,
     // with some extra pieces for structs due to the field names.
@@ -74,7 +73,8 @@ fn show_substructure(cx: &mut ExtCtxt<'_>, span: Span, substr: &Substructure<'_>
     if fields.is_empty() {
         // Special case for no fields.
         let fn_path_write_str = cx.std_path(&[sym::fmt, sym::Formatter, sym::write_str]);
-        cx.expr_call_global(span, fn_path_write_str, vec![fmt, name])
+        let expr = cx.expr_call_global(span, fn_path_write_str, vec![fmt, name]);
+        BlockOrExpr::new_expr(expr)
     } else if fields.len() <= CUTOFF {
         // Few enough fields that we can use a specific-length method.
         let debug = if is_struct {
@@ -96,11 +96,12 @@ fn show_substructure(cx: &mut ExtCtxt<'_>, span: Span, substr: &Substructure<'_>
                 args.push(name);
             }
             // Use double indirection to make sure this works for unsized types
-            let field = cx.expr_addr_of(field.span, field.self_.clone());
+            let field = cx.expr_addr_of(field.span, field.self_expr.clone());
             let field = cx.expr_addr_of(field.span, field);
             args.push(field);
         }
-        cx.expr_call_global(span, fn_path_debug, args)
+        let expr = cx.expr_call_global(span, fn_path_debug, args);
+        BlockOrExpr::new_expr(expr)
     } else {
         // Enough fields that we must use the any-length method.
         let mut name_exprs = Vec::with_capacity(fields.len());
@@ -115,7 +116,7 @@ fn show_substructure(cx: &mut ExtCtxt<'_>, span: Span, substr: &Substructure<'_>
             }
 
             // Use double indirection to make sure this works for unsized types
-            let value_ref = cx.expr_addr_of(field.span, field.self_.clone());
+            let value_ref = cx.expr_addr_of(field.span, field.self_expr.clone());
             value_exprs.push(cx.expr_addr_of(field.span, value_ref));
         }
 
@@ -176,8 +177,6 @@ fn show_substructure(cx: &mut ExtCtxt<'_>, span: Span, substr: &Substructure<'_>
             stmts.push(names_let.unwrap());
         }
         stmts.push(values_let);
-        stmts.push(cx.stmt_expr(expr));
-
-        cx.expr_block(cx.block(span, stmts))
+        BlockOrExpr::new_mixed(stmts, expr)
     }
 }

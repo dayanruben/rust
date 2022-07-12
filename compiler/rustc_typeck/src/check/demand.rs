@@ -317,9 +317,9 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                                 .tcx
                                 .is_diagnostic_item(sym::Result, expected_adt.did())
                             {
-                                vec!["Ok(())".to_string()]
+                                vec!["Ok(())"]
                             } else if self.tcx.is_diagnostic_item(sym::Option, expected_adt.did()) {
-                                vec!["None".to_string(), "Some(())".to_string()]
+                                vec!["None", "Some(())"]
                             } else {
                                 return;
                             };
@@ -760,7 +760,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     if let Some(call_span) =
                         iter::successors(Some(expr.span), |s| s.parent_callsite())
                             .find(|&s| sp.contains(s))
-                        && sm.span_to_snippet(call_span).is_ok()
+                        && sm.is_span_accessible(call_span)
                     {
                         return Some((
                             sp.with_hi(call_span.lo()),
@@ -773,7 +773,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     return None;
                 }
                 if sp.contains(expr.span)
-                    && sm.span_to_snippet(expr.span).is_ok()
+                    && sm.is_span_accessible(expr.span)
                 {
                     return Some((
                         sp.with_hi(expr.span.lo()),

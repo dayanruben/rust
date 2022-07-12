@@ -597,16 +597,16 @@ impl UseSpans<'_> {
     }
 
     /// Describe the span associated with a use of a place.
-    pub(super) fn describe(&self) -> String {
+    pub(super) fn describe(&self) -> &str {
         match *self {
             UseSpans::ClosureUse { generator_kind, .. } => {
                 if generator_kind.is_some() {
-                    " in generator".to_string()
+                    " in generator"
                 } else {
-                    " in closure".to_string()
+                    " in closure"
                 }
             }
-            _ => String::new(),
+            _ => "",
         }
     }
 
@@ -975,14 +975,7 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
                     if self.fn_self_span_reported.insert(fn_span) {
                         err.span_note(
                             // Check whether the source is accessible
-                            if self
-                                .infcx
-                                .tcx
-                                .sess
-                                .source_map()
-                                .span_to_snippet(self_arg.span)
-                                .is_ok()
-                            {
+                            if self.infcx.tcx.sess.source_map().is_span_accessible(self_arg.span) {
                                 self_arg.span
                             } else {
                                 fn_call_span

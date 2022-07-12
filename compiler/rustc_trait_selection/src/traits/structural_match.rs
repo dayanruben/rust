@@ -26,6 +26,7 @@ pub enum NonStructuralMatchTyKind<'tcx> {
     Closure,
     Generator,
     Projection,
+    Float,
 }
 
 /// This method traverses the structure of `ty`, trying to find an
@@ -53,15 +54,16 @@ pub enum NonStructuralMatchTyKind<'tcx> {
 /// For more background on why Rust has this requirement, and issues
 /// that arose when the requirement was not enforced completely, see
 /// Rust RFC 1445, rust-lang/rust#61188, and rust-lang/rust#62307.
+///
+/// The floats_allowed flag is used to deny constants in floating point
 pub fn search_for_structural_match_violation<'tcx>(
     span: Span,
     tcx: TyCtxt<'tcx>,
     ty: Ty<'tcx>,
+    floats_allowed: bool,
 ) -> Option<NonStructuralMatchTy<'tcx>> {
-    // FIXME: we should instead pass in an `infcx` from the outside.
-    tcx.infer_ctxt().enter(|infcx| {
-        ty.visit_with(&mut Search { infcx, span, seen: FxHashSet::default() }).break_value()
-    })
+    ty.visit_with(&mut Search { tcx, span, seen: FxHashSet::default(), floats_allowed })
+        .break_value()
 }
 
 /// This method returns true if and only if `adt_ty` itself has been marked as
@@ -114,27 +116,25 @@ fn type_marked_structural<'tcx>(
 /// This implements the traversal over the structure of a given type to try to
 /// find instances of ADTs (specifically structs or enums) that do not implement
 /// the structural-match traits (`StructuralPartialEq` and `StructuralEq`).
-struct Search<'a, 'tcx> {
+struct Search<'tcx> {
     span: Span,
 
-    infcx: InferCtxt<'a, 'tcx>,
+    tcx: TyCtxt<'tcx>,
 
     /// Tracks ADTs previously encountered during search, so that
     /// we will not recur on them again.
     seen: FxHashSet<hir::def_id::DefId>,
+
+    floats_allowed: bool,
 }
 
-impl<'a, 'tcx> Search<'a, 'tcx> {
-    fn tcx(&self) -> TyCtxt<'tcx> {
-        self.infcx.tcx
-    }
-
+impl<'tcx> Search<'tcx> {
     fn type_marked_structural(&self, adt_ty: Ty<'tcx>) -> bool {
-        adt_ty.is_structural_eq_shallow(self.tcx())
+        adt_ty.is_structural_eq_shallow(self.tcx)
     }
 }
 
-impl<'a, 'tcx> TypeVisitor<'tcx> for Search<'a, 'tcx> {
+impl<'tcx> TypeVisitor<'tcx> for Search<'tcx> {
     type BreakTy = NonStructuralMatchTy<'tcx>;
 
     fn visit_ty(&mut self, ty: Ty<'tcx>) -> ControlFlow<Self::BreakTy> {
@@ -193,17 +193,28 @@ impl<'a, 'tcx> TypeVisitor<'tcx> for Search<'a, 'tcx> {
                 return ControlFlow::CONTINUE;
             }
             ty::Array(_, n)
-                if { n.try_eval_usize(self.tcx(), ty::ParamEnv::reveal_all()) == Some(0) } =>
+                if { n.try_eval_usize(self.tcx, ty::ParamEnv::reveal_all()) == Some(0) } =>
             {
                 // rust-lang/rust#62336: ignore type of contents
                 // for empty array.
                 return ControlFlow::CONTINUE;
             }
-            ty::Bool | ty::Char | ty::Int(_) | ty::Uint(_) | ty::Float(_) | ty::Str | ty::Never => {
+            ty::Bool | ty::Char | ty::Int(_) | ty::Uint(_) | ty::Str | ty::Never => {
                 // These primitive types are always structural match.
                 //
                 // `Never` is kind of special here, but as it is not inhabitable, this should be fine.
                 return ControlFlow::CONTINUE;
+            }
+
+            ty::Float(_) => {
+                if self.floats_allowed {
+                    return ControlFlow::CONTINUE;
+                } else {
+                    return ControlFlow::Break(NonStructuralMatchTy {
+                        ty,
+                        kind: NonStructuralMatchTyKind::Float,
+                    });
+                }
             }
 
             ty::Array(..) | ty::Slice(_) | ty::Ref(..) | ty::Tuple(..) => {
@@ -214,7 +225,7 @@ impl<'a, 'tcx> TypeVisitor<'tcx> for Search<'a, 'tcx> {
                 bug!("unexpected type during structural-match checking: {:?}", ty);
             }
             ty::Error(_) => {
-                self.tcx().sess.delay_span_bug(self.span, "ty::Error in structural-match check");
+                self.tcx.sess.delay_span_bug(self.span, "ty::Error in structural-match check");
                 // We still want to check other types after encountering an error,
                 // as this may still emit relevant errors.
                 return ControlFlow::CONTINUE;
@@ -244,9 +255,9 @@ impl<'a, 'tcx> TypeVisitor<'tcx> for Search<'a, 'tcx> {
 
         // even though we skip super_visit_with, we must recur on
         // fields of ADT.
-        let tcx = self.tcx();
+        let tcx = self.tcx;
         adt_def.all_fields().map(|field| field.ty(tcx, substs)).try_for_each(|field_ty| {
-            let ty = self.tcx().normalize_erasing_regions(ty::ParamEnv::empty(), field_ty);
+            let ty = self.tcx.normalize_erasing_regions(ty::ParamEnv::empty(), field_ty);
             debug!("structural-match ADT: field_ty={:?}, ty={:?}", field_ty, ty);
             ty.visit_with(self)
         })

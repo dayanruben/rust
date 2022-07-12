@@ -126,8 +126,8 @@ impl<'a, 'tcx> WrongNumberOfGenericArgs<'a, 'tcx> {
         }
     }
 
-    fn kind(&self) -> String {
-        if self.missing_lifetimes() { "lifetime".to_string() } else { "generic".to_string() }
+    fn kind(&self) -> &str {
+        if self.missing_lifetimes() { "lifetime" } else { "generic" }
     }
 
     fn num_provided_args(&self) -> usize {
@@ -812,7 +812,7 @@ impl<'a, 'tcx> WrongNumberOfGenericArgs<'a, 'tcx> {
     /// Builds the `type defined here` message.
     fn show_definition(&self, err: &mut Diagnostic) {
         let mut spans: MultiSpan = if let Some(def_span) = self.tcx.def_ident_span(self.def_id) {
-            if self.tcx.sess.source_map().span_to_snippet(def_span).is_ok() {
+            if self.tcx.sess.source_map().is_span_accessible(def_span) {
                 def_span.into()
             } else {
                 return;
