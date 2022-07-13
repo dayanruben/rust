@@ -711,6 +711,13 @@ macro_rules! make_mir_visitor {
                         };
                         self.visit_place(path, ctx, location);
                     }
+                    Rvalue::CopyForDeref(place) => {
+                        self.visit_place(
+                            place,
+                            PlaceContext::NonMutatingUse(NonMutatingUseContext::Inspect),
+                            location
+                        );
+                    }
 
                     Rvalue::AddressOf(m, path) => {
                         let ctx = match m {
@@ -1111,11 +1118,9 @@ macro_rules! visit_place_fns {
             context: PlaceContext,
             location: Location,
         ) {
-            // FIXME: Use PlaceRef::iter_projections, once that exists.
-            let mut cursor = place_ref.projection;
-            while let &[ref proj_base @ .., elem] = cursor {
-                cursor = proj_base;
-                self.visit_projection_elem(place_ref.local, cursor, elem, context, location);
+            for (base, elem) in place_ref.iter_projections().rev() {
+                let base_proj = base.projection;
+                self.visit_projection_elem(place_ref.local, base_proj, elem, context, location);
             }
         }
 
