@@ -13,13 +13,12 @@ use rustc_hir::{FieldDef, Generics, HirId, Item, ItemKind, TraitRef, Ty, TyKind,
 use rustc_middle::hir::nested_filter;
 use rustc_middle::middle::privacy::AccessLevels;
 use rustc_middle::middle::stability::{AllowUnstable, DeprecationEntry, Index};
-use rustc_middle::ty::{self, query::Providers, TyCtxt};
+use rustc_middle::ty::{query::Providers, TyCtxt};
 use rustc_session::lint;
 use rustc_session::lint::builtin::{INEFFECTIVE_UNSTABLE_TRAIT_IMPL, USELESS_DEPRECATED};
-use rustc_session::parse::feature_err;
 use rustc_session::Session;
 use rustc_span::symbol::{sym, Symbol};
-use rustc_span::{Span, DUMMY_SP};
+use rustc_span::Span;
 use rustc_target::spec::abi::Abi;
 
 use std::cmp::Ordering;
@@ -628,7 +627,7 @@ fn stability_index(tcx: TyCtxt<'_>, (): ()) -> Index {
         // compiling `librustc_*` crates themselves so we can leverage crates.io
         // while maintaining the invariant that all sysroot crates are unstable
         // by default and are unable to be used.
-        if tcx.sess.opts.debugging_opts.force_unstable_if_unmarked {
+        if tcx.sess.opts.unstable_opts.force_unstable_if_unmarked {
             let reason = "this crate is being loaded from the sysroot, an \
                           unstable location; did you mean to load this crate \
                           from crates.io via `Cargo.toml` instead?";
@@ -766,39 +765,6 @@ impl<'tcx> Visitor<'tcx> for Checker<'tcx> {
                 }
             }
 
-            // There's no good place to insert stability check for non-Copy unions,
-            // so semi-randomly perform it here in stability.rs
-            hir::ItemKind::Union(..) if !self.tcx.features().untagged_unions => {
-                let ty = self.tcx.type_of(item.def_id);
-                let ty::Adt(adt_def, substs) = ty.kind() else { bug!() };
-
-                // Non-`Copy` fields are unstable, except for `ManuallyDrop`.
-                let param_env = self.tcx.param_env(item.def_id);
-                for field in &adt_def.non_enum_variant().fields {
-                    let field_ty = field.ty(self.tcx, substs);
-                    if !field_ty.ty_adt_def().map_or(false, |adt_def| adt_def.is_manually_drop())
-                        && !field_ty.is_copy_modulo_regions(self.tcx.at(DUMMY_SP), param_env)
-                    {
-                        if field_ty.needs_drop(self.tcx, param_env) {
-                            // Avoid duplicate error: This will error later anyway because fields
-                            // that need drop are not allowed.
-                            self.tcx.sess.delay_span_bug(
-                                item.span,
-                                "union should have been rejected due to potentially dropping field",
-                            );
-                        } else {
-                            feature_err(
-                                &self.tcx.sess.parse_sess,
-                                sym::untagged_unions,
-                                self.tcx.def_span(field.did),
-                                "unions with non-`Copy` fields other than `ManuallyDrop<T>` are unstable",
-                            )
-                            .emit();
-                        }
-                    }
-                }
-            }
-
             _ => (/* pass */),
         }
         intravisit::walk_item(self, item);
@@ -884,7 +850,7 @@ impl<'tcx> Visitor<'tcx> for CheckTraitImplStable<'tcx> {
 /// libraries, identify activated features that don't exist and error about them.
 pub fn check_unused_or_stable_features(tcx: TyCtxt<'_>) {
     let is_staged_api =
-        tcx.sess.opts.debugging_opts.force_unstable_if_unmarked || tcx.features().staged_api;
+        tcx.sess.opts.unstable_opts.force_unstable_if_unmarked || tcx.features().staged_api;
     if is_staged_api {
         let access_levels = &tcx.privacy_access_levels(());
         let mut missing = MissingStabilityAnnotations { tcx, access_levels };
