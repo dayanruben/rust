@@ -12,7 +12,7 @@ pub mod util;
 use crate::infer::canonical::Canonical;
 use crate::ty::abstract_const::NotConstEvaluatable;
 use crate::ty::subst::SubstsRef;
-use crate::ty::{self, AdtKind, Ty, TyCtxt};
+use crate::ty::{self, AdtKind, Predicate, Ty, TyCtxt};
 
 use rustc_data_structures::sync::Lrc;
 use rustc_errors::{Applicability, Diagnostic};
@@ -414,6 +414,7 @@ pub enum ObligationCauseCode<'tcx> {
     BinOp {
         rhs_span: Option<Span>,
         is_lit: bool,
+        output_pred: Option<Predicate<'tcx>>,
     },
 }
 
@@ -541,16 +542,8 @@ pub enum SelectionError<'tcx> {
     ErrorReporting,
     /// Multiple applicable `impl`s where found. The `DefId`s correspond to
     /// all the `impl`s' Items.
-    Ambiguous(Vec<AmbiguousSelection>),
+    Ambiguous(Vec<DefId>),
 }
-
-#[derive(Copy, Clone, Debug)]
-pub enum AmbiguousSelection {
-    Impl(DefId),
-    ParamEnv(Span),
-}
-
-TrivialTypeTraversalAndLiftImpls! { AmbiguousSelection, }
 
 /// When performing resolution, it is typically the case that there
 /// can be one of three outcomes:

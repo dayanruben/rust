@@ -282,11 +282,13 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         match expr.kind {
             ExprKind::Box(subexpr) => self.check_expr_box(subexpr, expected),
             ExprKind::Lit(ref lit) => self.check_lit(&lit, expected),
-            ExprKind::Binary(op, lhs, rhs) => self.check_binop(expr, op, lhs, rhs),
+            ExprKind::Binary(op, lhs, rhs) => self.check_binop(expr, op, lhs, rhs, expected),
             ExprKind::Assign(lhs, rhs, span) => {
                 self.check_expr_assign(expr, expected, lhs, rhs, span)
             }
-            ExprKind::AssignOp(op, lhs, rhs) => self.check_binop_assign(expr, op, lhs, rhs),
+            ExprKind::AssignOp(op, lhs, rhs) => {
+                self.check_binop_assign(expr, op, lhs, rhs, expected)
+            }
             ExprKind::Unary(unop, oprnd) => self.check_expr_unary(unop, oprnd, expected, expr),
             ExprKind::AddrOf(kind, mutbl, oprnd) => {
                 self.check_expr_addr_of(kind, mutbl, oprnd, expected, expr)
@@ -404,14 +406,14 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     }
                 }
                 hir::UnOp::Not => {
-                    let result = self.check_user_unop(expr, oprnd_t, unop);
+                    let result = self.check_user_unop(expr, oprnd_t, unop, expected_inner);
                     // If it's builtin, we can reuse the type, this helps inference.
                     if !(oprnd_t.is_integral() || *oprnd_t.kind() == ty::Bool) {
                         oprnd_t = result;
                     }
                 }
                 hir::UnOp::Neg => {
-                    let result = self.check_user_unop(expr, oprnd_t, unop);
+                    let result = self.check_user_unop(expr, oprnd_t, unop, expected_inner);
                     // If it's builtin, we can reuse the type, this helps inference.
                     if !oprnd_t.is_numeric() {
                         oprnd_t = result;
@@ -529,7 +531,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 tcx.ty_error()
             }
             Res::Def(DefKind::Ctor(_, CtorKind::Fictive), _) => {
-                report_unexpected_variant_res(tcx, res, expr.span);
+                report_unexpected_variant_res(tcx, res, qpath, expr.span);
                 tcx.ty_error()
             }
             _ => self.instantiate_value_path(segs, opt_ty, res, expr.span, expr.hir_id).0,
@@ -1854,7 +1856,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             let remaining_private_fields_len = remaining_private_fields.len();
             let names = match &remaining_private_fields
                 .iter()
-                .map(|(name, _, _)| name.to_string())
+                .map(|(name, _, _)| name)
                 .collect::<Vec<_>>()[..]
             {
                 _ if remaining_private_fields_len > 6 => String::new(),
