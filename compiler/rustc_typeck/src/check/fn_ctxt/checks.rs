@@ -573,6 +573,8 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             // If so, we might have just forgotten to wrap some args in a tuple.
             if let Some(ty::Tuple(tys)) =
                 formal_and_expected_inputs.get(mismatch_idx.into()).map(|tys| tys.1.kind())
+                // If the tuple is unit, we're not actually wrapping any arguments.
+                && !tys.is_empty()
                 && provided_arg_tys.len() == formal_and_expected_inputs.len() - 1 + tys.len()
             {
                 // Wrap up the N provided arguments starting at this position in a tuple.
@@ -1755,19 +1757,11 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                             .flat_map(|a| a.args.iter())
                         {
                             if let hir::GenericArg::Type(hir_ty) = &arg {
-                                if let hir::TyKind::Path(hir::QPath::TypeRelative(..)) =
-                                    &hir_ty.kind
-                                {
-                                    // Avoid ICE with associated types. As this is best
-                                    // effort only, it's ok to ignore the case. It
-                                    // would trigger in `is_send::<T::AssocType>();`
-                                    // from `typeck-default-trait-impl-assoc-type.rs`.
-                                } else {
-                                    let ty = <dyn AstConv<'_>>::ast_ty_to_ty(self, hir_ty);
-                                    let ty = self.resolve_vars_if_possible(ty);
-                                    if ty == predicate.self_ty() {
-                                        error.obligation.cause.span = hir_ty.span;
-                                    }
+                                let ty = self.resolve_vars_if_possible(
+                                    self.typeck_results.borrow().node_type(hir_ty.hir_id),
+                                );
+                                if ty == predicate.self_ty() {
+                                    error.obligation.cause.span = hir_ty.span;
                                 }
                             }
                         }
