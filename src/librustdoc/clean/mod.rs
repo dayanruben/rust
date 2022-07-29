@@ -327,10 +327,12 @@ impl<'tcx> Clean<'tcx, Option<WherePredicate>> for ty::Predicate<'tcx> {
     fn clean(&self, cx: &mut DocContext<'tcx>) -> Option<WherePredicate> {
         let bound_predicate = self.kind();
         match bound_predicate.skip_binder() {
-            ty::PredicateKind::Trait(pred) => bound_predicate.rebind(pred).clean(cx),
-            ty::PredicateKind::RegionOutlives(pred) => pred.clean(cx),
-            ty::PredicateKind::TypeOutlives(pred) => pred.clean(cx),
-            ty::PredicateKind::Projection(pred) => Some(pred.clean(cx)),
+            ty::PredicateKind::Trait(pred) => {
+                clean_poly_trait_predicate(bound_predicate.rebind(pred), cx)
+            }
+            ty::PredicateKind::RegionOutlives(pred) => clean_region_outlives_predicate(pred, cx),
+            ty::PredicateKind::TypeOutlives(pred) => clean_type_outlives_predicate(pred, cx),
+            ty::PredicateKind::Projection(pred) => Some(clean_projection_predicate(pred, cx)),
             ty::PredicateKind::ConstEvaluatable(..) => None,
             ty::PredicateKind::WellFormed(..) => None,
 
@@ -344,84 +346,83 @@ impl<'tcx> Clean<'tcx, Option<WherePredicate>> for ty::Predicate<'tcx> {
     }
 }
 
-impl<'tcx> Clean<'tcx, Option<WherePredicate>> for ty::PolyTraitPredicate<'tcx> {
-    fn clean(&self, cx: &mut DocContext<'tcx>) -> Option<WherePredicate> {
-        // `T: ~const Destruct` is hidden because `T: Destruct` is a no-op.
-        if self.skip_binder().constness == ty::BoundConstness::ConstIfConst
-            && Some(self.skip_binder().def_id()) == cx.tcx.lang_items().destruct_trait()
-        {
-            return None;
-        }
+fn clean_poly_trait_predicate<'tcx>(
+    pred: ty::PolyTraitPredicate<'tcx>,
+    cx: &mut DocContext<'tcx>,
+) -> Option<WherePredicate> {
+    // `T: ~const Destruct` is hidden because `T: Destruct` is a no-op.
+    if pred.skip_binder().constness == ty::BoundConstness::ConstIfConst
+        && Some(pred.skip_binder().def_id()) == cx.tcx.lang_items().destruct_trait()
+    {
+        return None;
+    }
 
-        let poly_trait_ref = self.map_bound(|pred| pred.trait_ref);
-        Some(WherePredicate::BoundPredicate {
-            ty: clean_middle_ty(poly_trait_ref.skip_binder().self_ty(), cx, None),
-            bounds: vec![poly_trait_ref.clean(cx)],
-            bound_params: Vec::new(),
-        })
+    let poly_trait_ref = pred.map_bound(|pred| pred.trait_ref);
+    Some(WherePredicate::BoundPredicate {
+        ty: clean_middle_ty(poly_trait_ref.skip_binder().self_ty(), cx, None),
+        bounds: vec![poly_trait_ref.clean(cx)],
+        bound_params: Vec::new(),
+    })
+}
+
+fn clean_region_outlives_predicate<'tcx>(
+    pred: ty::OutlivesPredicate<ty::Region<'tcx>, ty::Region<'tcx>>,
+    cx: &mut DocContext<'tcx>,
+) -> Option<WherePredicate> {
+    let ty::OutlivesPredicate(a, b) = pred;
+
+    if a.is_empty() && b.is_empty() {
+        return None;
+    }
+
+    Some(WherePredicate::RegionPredicate {
+        lifetime: a.clean(cx).expect("failed to clean lifetime"),
+        bounds: vec![GenericBound::Outlives(b.clean(cx).expect("failed to clean bounds"))],
+    })
+}
+
+fn clean_type_outlives_predicate<'tcx>(
+    pred: ty::OutlivesPredicate<Ty<'tcx>, ty::Region<'tcx>>,
+    cx: &mut DocContext<'tcx>,
+) -> Option<WherePredicate> {
+    let ty::OutlivesPredicate(ty, lt) = pred;
+
+    if lt.is_empty() {
+        return None;
+    }
+
+    Some(WherePredicate::BoundPredicate {
+        ty: clean_middle_ty(ty, cx, None),
+        bounds: vec![GenericBound::Outlives(lt.clean(cx).expect("failed to clean lifetimes"))],
+        bound_params: Vec::new(),
+    })
+}
+
+fn clean_middle_term<'tcx>(term: ty::Term<'tcx>, cx: &mut DocContext<'tcx>) -> Term {
+    match term {
+        ty::Term::Ty(ty) => Term::Type(clean_middle_ty(ty, cx, None)),
+        ty::Term::Const(c) => Term::Constant(clean_middle_const(c, cx)),
     }
 }
 
-impl<'tcx> Clean<'tcx, Option<WherePredicate>>
-    for ty::OutlivesPredicate<ty::Region<'tcx>, ty::Region<'tcx>>
-{
-    fn clean(&self, cx: &mut DocContext<'tcx>) -> Option<WherePredicate> {
-        let ty::OutlivesPredicate(a, b) = self;
-
-        if a.is_empty() && b.is_empty() {
-            return None;
-        }
-
-        Some(WherePredicate::RegionPredicate {
-            lifetime: a.clean(cx).expect("failed to clean lifetime"),
-            bounds: vec![GenericBound::Outlives(b.clean(cx).expect("failed to clean bounds"))],
-        })
-    }
-}
-
-impl<'tcx> Clean<'tcx, Option<WherePredicate>>
-    for ty::OutlivesPredicate<Ty<'tcx>, ty::Region<'tcx>>
-{
-    fn clean(&self, cx: &mut DocContext<'tcx>) -> Option<WherePredicate> {
-        let ty::OutlivesPredicate(ty, lt) = self;
-
-        if lt.is_empty() {
-            return None;
-        }
-
-        Some(WherePredicate::BoundPredicate {
-            ty: clean_middle_ty(*ty, cx, None),
-            bounds: vec![GenericBound::Outlives(lt.clean(cx).expect("failed to clean lifetimes"))],
-            bound_params: Vec::new(),
-        })
-    }
-}
-
-impl<'tcx> Clean<'tcx, Term> for ty::Term<'tcx> {
-    fn clean(&self, cx: &mut DocContext<'tcx>) -> Term {
-        match self {
-            ty::Term::Ty(ty) => Term::Type(clean_middle_ty(*ty, cx, None)),
-            ty::Term::Const(c) => Term::Constant(clean_middle_const(*c, cx)),
-        }
-    }
-}
-
-impl<'tcx> Clean<'tcx, Term> for hir::Term<'tcx> {
-    fn clean(&self, cx: &mut DocContext<'tcx>) -> Term {
-        match self {
-            hir::Term::Ty(ty) => Term::Type(clean_ty(ty, cx)),
-            hir::Term::Const(c) => {
-                let def_id = cx.tcx.hir().local_def_id(c.hir_id);
-                Term::Constant(clean_middle_const(ty::Const::from_anon_const(cx.tcx, def_id), cx))
-            }
+fn clean_hir_term<'tcx>(term: &hir::Term<'tcx>, cx: &mut DocContext<'tcx>) -> Term {
+    match term {
+        hir::Term::Ty(ty) => Term::Type(clean_ty(ty, cx)),
+        hir::Term::Const(c) => {
+            let def_id = cx.tcx.hir().local_def_id(c.hir_id);
+            Term::Constant(clean_middle_const(ty::Const::from_anon_const(cx.tcx, def_id), cx))
         }
     }
 }
 
-impl<'tcx> Clean<'tcx, WherePredicate> for ty::ProjectionPredicate<'tcx> {
-    fn clean(&self, cx: &mut DocContext<'tcx>) -> WherePredicate {
-        let ty::ProjectionPredicate { projection_ty, term } = self;
-        WherePredicate::EqPredicate { lhs: projection_ty.clean(cx), rhs: term.clean(cx) }
+fn clean_projection_predicate<'tcx>(
+    pred: ty::ProjectionPredicate<'tcx>,
+    cx: &mut DocContext<'tcx>,
+) -> WherePredicate {
+    let ty::ProjectionPredicate { projection_ty, term } = pred;
+    WherePredicate::EqPredicate {
+        lhs: clean_projection(projection_ty, cx, None),
+        rhs: clean_middle_term(term, cx),
     }
 }
 
@@ -447,12 +448,6 @@ fn clean_projection<'tcx>(
     }
 }
 
-impl<'tcx> Clean<'tcx, Type> for ty::ProjectionTy<'tcx> {
-    fn clean(&self, cx: &mut DocContext<'tcx>) -> Type {
-        clean_projection(*self, cx, None)
-    }
-}
-
 fn compute_should_show_cast(self_def_id: Option<DefId>, trait_: &Path, self_type: &Type) -> bool {
     !trait_.segments.is_empty()
         && self_def_id
@@ -475,47 +470,44 @@ fn projection_to_path_segment<'tcx>(
     }
 }
 
-impl<'tcx> Clean<'tcx, GenericParamDef> for ty::GenericParamDef {
-    fn clean(&self, cx: &mut DocContext<'tcx>) -> GenericParamDef {
-        let (name, kind) = match self.kind {
-            ty::GenericParamDefKind::Lifetime => {
-                (self.name, GenericParamDefKind::Lifetime { outlives: vec![] })
-            }
-            ty::GenericParamDefKind::Type { has_default, synthetic, .. } => {
-                let default = if has_default {
-                    Some(clean_middle_ty(cx.tcx.type_of(self.def_id), cx, Some(self.def_id)))
-                } else {
-                    None
-                };
-                (
-                    self.name,
-                    GenericParamDefKind::Type {
-                        did: self.def_id,
-                        bounds: vec![], // These are filled in from the where-clauses.
-                        default: default.map(Box::new),
-                        synthetic,
-                    },
-                )
-            }
-            ty::GenericParamDefKind::Const { has_default } => (
-                self.name,
-                GenericParamDefKind::Const {
-                    did: self.def_id,
-                    ty: Box::new(clean_middle_ty(
-                        cx.tcx.type_of(self.def_id),
-                        cx,
-                        Some(self.def_id),
-                    )),
-                    default: match has_default {
-                        true => Some(Box::new(cx.tcx.const_param_default(self.def_id).to_string())),
-                        false => None,
-                    },
+fn clean_generic_param_def<'tcx>(
+    def: &ty::GenericParamDef,
+    cx: &mut DocContext<'tcx>,
+) -> GenericParamDef {
+    let (name, kind) = match def.kind {
+        ty::GenericParamDefKind::Lifetime => {
+            (def.name, GenericParamDefKind::Lifetime { outlives: vec![] })
+        }
+        ty::GenericParamDefKind::Type { has_default, synthetic, .. } => {
+            let default = if has_default {
+                Some(clean_middle_ty(cx.tcx.type_of(def.def_id), cx, Some(def.def_id)))
+            } else {
+                None
+            };
+            (
+                def.name,
+                GenericParamDefKind::Type {
+                    did: def.def_id,
+                    bounds: vec![], // These are filled in from the where-clauses.
+                    default: default.map(Box::new),
+                    synthetic,
                 },
-            ),
-        };
+            )
+        }
+        ty::GenericParamDefKind::Const { has_default } => (
+            def.name,
+            GenericParamDefKind::Const {
+                did: def.def_id,
+                ty: Box::new(clean_middle_ty(cx.tcx.type_of(def.def_id), cx, Some(def.def_id))),
+                default: match has_default {
+                    true => Some(Box::new(cx.tcx.const_param_default(def.def_id).to_string())),
+                    false => None,
+                },
+            },
+        ),
+    };
 
-        GenericParamDef { name, kind }
-    }
+    GenericParamDef { name, kind }
 }
 
 fn clean_generic_param<'tcx>(
@@ -673,7 +665,7 @@ fn clean_ty_generics<'tcx>(
         .iter()
         .filter_map(|param| match param.kind {
             ty::GenericParamDefKind::Lifetime if param.name == kw::UnderscoreLifetime => None,
-            ty::GenericParamDefKind::Lifetime => Some(param.clean(cx)),
+            ty::GenericParamDefKind::Lifetime => Some(clean_generic_param_def(param, cx)),
             ty::GenericParamDefKind::Type { synthetic, .. } => {
                 if param.name == kw::SelfUpper {
                     assert_eq!(param.index, 0);
@@ -683,9 +675,9 @@ fn clean_ty_generics<'tcx>(
                     impl_trait.insert(param.index.into(), vec![]);
                     return None;
                 }
-                Some(param.clean(cx))
+                Some(clean_generic_param_def(param, cx))
             }
-            ty::GenericParamDefKind::Const { .. } => Some(param.clean(cx)),
+            ty::GenericParamDefKind::Const { .. } => Some(clean_generic_param_def(param, cx)),
         })
         .collect::<Vec<GenericParamDef>>();
 
@@ -734,8 +726,12 @@ fn clean_ty_generics<'tcx>(
                             .filter(|b| !b.is_sized_bound(cx)),
                     );
 
-                    let proj = projection
-                        .map(|p| (p.skip_binder().projection_ty.clean(cx), p.skip_binder().term));
+                    let proj = projection.map(|p| {
+                        (
+                            clean_projection(p.skip_binder().projection_ty, cx, None),
+                            p.skip_binder().term,
+                        )
+                    });
                     if let Some(((_, trait_did, name), rhs)) = proj
                         .as_ref()
                         .and_then(|(lhs, rhs): &(Type, _)| Some((lhs.projection()?, rhs)))
@@ -1679,7 +1675,9 @@ pub(crate) fn clean_middle_ty<'tcx>(
                             .projection_ty,
                         cx,
                     ),
-                    kind: TypeBindingKind::Equality { term: pb.skip_binder().term.clean(cx) },
+                    kind: TypeBindingKind::Equality {
+                        term: clean_middle_term(pb.skip_binder().term, cx),
+                    },
                 });
             }
 
@@ -1743,7 +1741,7 @@ pub(crate) fn clean_middle_ty<'tcx>(
                                     Some(TypeBinding {
                                         assoc: projection_to_path_segment(proj.projection_ty, cx),
                                         kind: TypeBindingKind::Equality {
-                                            term: proj.term.clean(cx),
+                                            term: clean_middle_term(proj.term, cx),
                                         },
                                     })
                                 } else {
@@ -1814,32 +1812,25 @@ fn is_field_vis_inherited(tcx: TyCtxt<'_>, def_id: DefId) -> bool {
     }
 }
 
-impl<'tcx> Clean<'tcx, Visibility> for ty::Visibility {
-    fn clean(&self, _cx: &mut DocContext<'_>) -> Visibility {
-        match *self {
-            ty::Visibility::Public => Visibility::Public,
-            // NOTE: this is not quite right: `ty` uses `Invisible` to mean 'private',
-            // while rustdoc really does mean inherited. That means that for enum variants, such as
-            // `pub enum E { V }`, `V` will be marked as `Public` by `ty`, but as `Inherited` by rustdoc.
-            // Various parts of clean override `tcx.visibility` explicitly to make sure this distinction is captured.
-            ty::Visibility::Invisible => Visibility::Inherited,
-            ty::Visibility::Restricted(module) => Visibility::Restricted(module),
-        }
+pub(crate) fn clean_visibility(vis: ty::Visibility) -> Visibility {
+    match vis {
+        ty::Visibility::Public => Visibility::Public,
+        // NOTE: this is not quite right: `ty` uses `Invisible` to mean 'private',
+        // while rustdoc really does mean inherited. That means that for enum variants, such as
+        // `pub enum E { V }`, `V` will be marked as `Public` by `ty`, but as `Inherited` by rustdoc.
+        // Various parts of clean override `tcx.visibility` explicitly to make sure this distinction is captured.
+        ty::Visibility::Invisible => Visibility::Inherited,
+        ty::Visibility::Restricted(module) => Visibility::Restricted(module),
     }
 }
 
-impl<'tcx> Clean<'tcx, VariantStruct> for rustc_hir::VariantData<'tcx> {
-    fn clean(&self, cx: &mut DocContext<'tcx>) -> VariantStruct {
-        VariantStruct {
-            struct_type: CtorKind::from_hir(self),
-            fields: self.fields().iter().map(|x| clean_field(x, cx)).collect(),
-        }
-    }
-}
-
-impl<'tcx> Clean<'tcx, Vec<Item>> for hir::VariantData<'tcx> {
-    fn clean(&self, cx: &mut DocContext<'tcx>) -> Vec<Item> {
-        self.fields().iter().map(|x| clean_field(x, cx)).collect()
+fn clean_variant_data<'tcx>(
+    variant: &hir::VariantData<'tcx>,
+    cx: &mut DocContext<'tcx>,
+) -> VariantStruct {
+    VariantStruct {
+        struct_type: CtorKind::from_hir(variant),
+        fields: variant.fields().iter().map(|x| clean_field(x, cx)).collect(),
     }
 }
 
@@ -1865,8 +1856,10 @@ impl<'tcx> Clean<'tcx, Item> for ty::VariantDef {
 impl<'tcx> Clean<'tcx, Variant> for hir::VariantData<'tcx> {
     fn clean(&self, cx: &mut DocContext<'tcx>) -> Variant {
         match self {
-            hir::VariantData::Struct(..) => Variant::Struct(self.clean(cx)),
-            hir::VariantData::Tuple(..) => Variant::Tuple(self.clean(cx)),
+            hir::VariantData::Struct(..) => Variant::Struct(clean_variant_data(self, cx)),
+            hir::VariantData::Tuple(..) => {
+                Variant::Tuple(self.fields().iter().map(|x| clean_field(x, cx)).collect())
+            }
             hir::VariantData::Unit(..) => Variant::CLike,
         }
     }
@@ -1985,7 +1978,7 @@ fn clean_maybe_renamed_item<'tcx>(
                 clean_fn_or_proc_macro(item, sig, generics, body_id, &mut name, cx)
             }
             ItemKind::Macro(ref macro_def, _) => {
-                let ty_vis = cx.tcx.visibility(def_id).clean(cx);
+                let ty_vis = clean_visibility(cx.tcx.visibility(def_id));
                 MacroItem(Macro {
                     source: display_macro_source(cx, name, macro_def, def_id, ty_vis),
                 })
@@ -2114,7 +2107,7 @@ fn clean_extern_crate<'tcx>(
         name: Some(name),
         attrs: Box::new(attrs.clean(cx)),
         item_id: crate_def_id.into(),
-        visibility: ty_vis.clean(cx),
+        visibility: clean_visibility(ty_vis),
         kind: box ExternCrateItem { src: orig_name },
         cfg: attrs.cfg(cx.tcx, &cx.cache.hidden_cfg),
     }]
@@ -2280,7 +2273,7 @@ impl<'tcx> Clean<'tcx, TypeBindingKind> for hir::TypeBindingKind<'tcx> {
     fn clean(&self, cx: &mut DocContext<'tcx>) -> TypeBindingKind {
         match *self {
             hir::TypeBindingKind::Equality { ref term } => {
-                TypeBindingKind::Equality { term: term.clean(cx) }
+                TypeBindingKind::Equality { term: clean_hir_term(term, cx) }
             }
             hir::TypeBindingKind::Constraint { bounds } => TypeBindingKind::Constraint {
                 bounds: bounds.iter().filter_map(|b| b.clean(cx)).collect(),
