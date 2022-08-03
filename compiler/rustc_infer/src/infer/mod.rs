@@ -8,7 +8,7 @@ pub use self::ValuePairs::*;
 use self::opaque_types::OpaqueTypeStorage;
 pub(crate) use self::undo_log::{InferCtxtUndoLogs, Snapshot, UndoLog};
 
-use crate::traits::{self, ObligationCause, PredicateObligations, TraitEngine};
+use crate::traits::{self, ObligationCause, PredicateObligations, TraitEngine, TraitEngineExt};
 
 use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 use rustc_data_structures::sync::Lrc;
@@ -645,9 +645,7 @@ impl<'tcx, T> InferOk<'tcx, T> {
         fulfill_cx: &mut dyn TraitEngine<'tcx>,
     ) -> T {
         let InferOk { value, obligations } = self;
-        for obligation in obligations {
-            fulfill_cx.register_predicate_obligation(infcx, obligation);
-        }
+        fulfill_cx.register_predicate_obligations(infcx, obligations);
         value
     }
 }
@@ -840,18 +838,6 @@ impl<'a, 'tcx> InferCtxt<'a, 'tcx> {
         self.in_snapshot.set(was_in_snapshot);
 
         self.inner.borrow_mut().commit(undo_snapshot);
-    }
-
-    /// Executes `f` and commit the bindings.
-    #[instrument(skip(self, f), level = "debug")]
-    pub fn commit_unconditionally<R, F>(&self, f: F) -> R
-    where
-        F: FnOnce(&CombinedSnapshot<'a, 'tcx>) -> R,
-    {
-        let snapshot = self.start_snapshot();
-        let r = f(&snapshot);
-        self.commit_from(snapshot);
-        r
     }
 
     /// Execute `f` and commit the bindings if closure `f` returns `Ok(_)`.
@@ -2069,7 +2055,7 @@ fn replace_param_and_infer_substs_with_placeholder<'tcx>(
                     ty,
                     kind: ty::ConstKind::Placeholder(ty::PlaceholderConst {
                         universe: ty::UniverseIndex::ROOT,
-                        name: ty::BoundConst { ty, var: ty::BoundVar::from_usize(idx) },
+                        name: ty::BoundVar::from_usize(idx),
                     }),
                 })
                 .into()
