@@ -53,7 +53,7 @@ pub(crate) fn target_from_impl_item<'tcx>(
 #[derive(Clone, Copy)]
 enum ItemLike<'tcx> {
     Item(&'tcx Item<'tcx>),
-    ForeignItem(&'tcx ForeignItem<'tcx>),
+    ForeignItem,
 }
 
 struct CheckAttrVisitor<'tcx> {
@@ -146,6 +146,7 @@ impl CheckAttrVisitor<'_> {
                 | sym::stable
                 | sym::rustc_allowed_through_unstable_modules
                 | sym::rustc_promotable => self.check_stability_promotable(&attr, span, target),
+                sym::link_ordinal => self.check_link_ordinal(&attr, span, target),
                 _ => true,
             };
             is_valid &= attr_is_valid;
@@ -209,7 +210,14 @@ impl CheckAttrVisitor<'_> {
         }
 
         // FIXME(@lcnr): this doesn't belong here.
-        if matches!(target, Target::Closure | Target::Fn | Target::Method(_) | Target::ForeignFn) {
+        if matches!(
+            target,
+            Target::Closure
+                | Target::Fn
+                | Target::Method(_)
+                | Target::ForeignFn
+                | Target::ForeignStatic
+        ) {
             self.tcx.ensure().codegen_fn_attrs(self.tcx.hir().local_def_id(hir_id));
         }
 
@@ -1886,6 +1894,16 @@ impl CheckAttrVisitor<'_> {
         }
     }
 
+    fn check_link_ordinal(&self, attr: &Attribute, _span: Span, target: Target) -> bool {
+        match target {
+            Target::ForeignFn | Target::ForeignStatic => true,
+            _ => {
+                self.tcx.sess.emit_err(errors::LinkOrdinal { attr_span: attr.span });
+                false
+            }
+        }
+    }
+
     fn check_deprecated(&self, hir_id: HirId, attr: &Attribute, _span: Span, target: Target) {
         match target {
             Target::Closure | Target::Expression | Target::Statement | Target::Arm => {
@@ -2020,12 +2038,7 @@ impl<'tcx> Visitor<'tcx> for CheckAttrVisitor<'tcx> {
 
     fn visit_foreign_item(&mut self, f_item: &'tcx ForeignItem<'tcx>) {
         let target = Target::from_foreign_item(f_item);
-        self.check_attributes(
-            f_item.hir_id(),
-            f_item.span,
-            target,
-            Some(ItemLike::ForeignItem(f_item)),
-        );
+        self.check_attributes(f_item.hir_id(), f_item.span, target, Some(ItemLike::ForeignItem));
         intravisit::walk_foreign_item(self, f_item)
     }
 
