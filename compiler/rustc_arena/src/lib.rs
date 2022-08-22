@@ -19,6 +19,8 @@
 #![feature(rustc_attrs)]
 #![cfg_attr(test, feature(test))]
 #![feature(strict_provenance)]
+#![deny(rustc::untranslatable_diagnostic)]
+#![deny(rustc::diagnostic_outside_of_impl)]
 
 use smallvec::SmallVec;
 
@@ -217,7 +219,7 @@ impl<T> TypedArena<T> {
             } else {
                 let ptr = self.ptr.get();
                 // Advance the pointer.
-                self.ptr.set(self.ptr.get().offset(1));
+                self.ptr.set(self.ptr.get().add(1));
                 // Write into uninitialized memory.
                 ptr::write(ptr, object);
                 &mut *ptr
