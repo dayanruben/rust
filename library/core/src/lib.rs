@@ -149,6 +149,7 @@
 #![feature(maybe_uninit_uninit_array)]
 #![feature(ptr_metadata)]
 #![feature(slice_ptr_get)]
+#![feature(slice_split_at_unchecked)]
 #![feature(str_internals)]
 #![feature(utf16_extra)]
 #![feature(utf16_extra_const)]
@@ -302,6 +303,8 @@ pub mod clone;
 pub mod cmp;
 pub mod convert;
 pub mod default;
+#[cfg(not(bootstrap))]
+pub mod error;
 pub mod marker;
 pub mod ops;
 
