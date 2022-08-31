@@ -1566,6 +1566,9 @@ rustc_queries! {
         -> Option<NativeLibKind> {
         desc { |tcx| "native_library_kind({})", tcx.def_path_str(def_id) }
     }
+    query native_library(def_id: DefId) -> Option<&'tcx NativeLib> {
+        desc { |tcx| "native_library({})", tcx.def_path_str(def_id) }
+    }
 
     /// Does lifetime resolution, but does not descend into trait items. This
     /// should only be used for resolving lifetimes of on trait definitions,
@@ -1594,8 +1597,9 @@ rustc_queries! {
     /// for each parameter if a trait object were to be passed for that parameter.
     /// For example, for `struct Foo<'a, T, U>`, this would be `['static, 'static]`.
     /// For `struct Foo<'a, T: 'a, U>`, this would instead be `['a, 'static]`.
-    query object_lifetime_defaults(_: LocalDefId) -> Option<&'tcx [ObjectLifetimeDefault]> {
-        desc { "looking up lifetime defaults for a region on an item" }
+    query object_lifetime_default(key: DefId) -> Option<ObjectLifetimeDefault> {
+        desc { "looking up lifetime defaults for generic parameter `{:?}`", key }
+        separate_provide_extern
     }
     query late_bound_vars_map(_: LocalDefId)
         -> Option<&'tcx FxHashMap<ItemLocalId, Vec<ty::BoundVariableKind>>> {

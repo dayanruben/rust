@@ -2,8 +2,8 @@ use super::{CompileTimeEvalContext, CompileTimeInterpreter, ConstEvalErr};
 use crate::interpret::eval_nullary_intrinsic;
 use crate::interpret::{
     intern_const_alloc_recursive, Allocation, ConstAlloc, ConstValue, CtfeValidationMode, GlobalId,
-    Immediate, InternKind, InterpCx, InterpResult, MPlaceTy, MemoryKind, OpTy, RefTracking,
-    StackPopCleanup,
+    Immediate, InternKind, InterpCx, InterpError, InterpResult, MPlaceTy, MemoryKind, OpTy,
+    RefTracking, StackPopCleanup,
 };
 
 use rustc_hir::def::DefKind;
@@ -74,7 +74,9 @@ fn eval_body_using_ecx<'mir, 'tcx>(
             None => InternKind::Constant,
         }
     };
+    ecx.machine.check_alignment = false; // interning doesn't need to respect alignment
     intern_const_alloc_recursive(ecx, intern_kind, &ret)?;
+    // we leave alignment checks off, since this `ecx` will not be used for further evaluation anyway
 
     debug!("eval_body_using_ecx done: {:?}", *ret);
     Ok(ret)
@@ -385,7 +387,9 @@ pub fn eval_to_allocation_raw_provider<'tcx>(
                     ecx.tcx,
                     "it is undefined behavior to use this value",
                     |diag| {
-                        diag.note(NOTE_ON_UNDEFINED_BEHAVIOR_ERROR);
+                        if matches!(err.error, InterpError::UndefinedBehavior(_)) {
+                            diag.note(NOTE_ON_UNDEFINED_BEHAVIOR_ERROR);
+                        }
                         diag.note(&format!(
                             "the raw bytes of the constant ({}",
                             display_allocation(
