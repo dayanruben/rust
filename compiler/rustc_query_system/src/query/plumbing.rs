@@ -14,7 +14,6 @@ use rustc_data_structures::profiling::TimingGuard;
 #[cfg(parallel_compiler)]
 use rustc_data_structures::sharded::Sharded;
 use rustc_data_structures::sync::Lock;
-use rustc_data_structures::thin_vec::ThinVec;
 use rustc_errors::{DiagnosticBuilder, ErrorGuaranteed, FatalError};
 use rustc_session::Session;
 use rustc_span::{Span, DUMMY_SP};
@@ -24,6 +23,7 @@ use std::fmt::Debug;
 use std::hash::Hash;
 use std::mem;
 use std::ptr;
+use thin_vec::ThinVec;
 
 pub struct QueryState<K> {
     #[cfg(parallel_compiler)]
@@ -618,16 +618,12 @@ fn incremental_verify_ich_cold(sess: &Session, dep_node: DebugArg<'_>, result: D
     let old_in_panic = INSIDE_VERIFY_PANIC.with(|in_panic| in_panic.replace(true));
 
     if old_in_panic {
-        sess.struct_err(
-            "internal compiler error: re-entrant incremental verify failure, suppressing message",
-        )
-        .emit();
+        sess.emit_err(crate::error::Reentrant);
     } else {
-        sess.struct_err(&format!("internal compiler error: encountered incremental compilation error with {:?}", dep_node))
-                .help(&format!("This is a known issue with the compiler. Run {} to allow your project to compile", run_cmd))
-                .note("Please follow the instructions below to create a bug report with the provided information")
-                .note("See <https://github.com/rust-lang/rust/issues/84970> for more information")
-                .emit();
+        sess.emit_err(crate::error::IncrementCompilation {
+            run_cmd,
+            dep_node: format!("{:?}", dep_node),
+        });
         panic!("Found unstable fingerprints for {:?}: {:?}", dep_node, result);
     }
 

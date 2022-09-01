@@ -58,7 +58,6 @@ use smallvec::{smallvec, SmallVec};
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeSet;
 use std::{cmp, fmt, ptr};
-use tracing::debug;
 
 use diagnostics::{ImportSuggestion, LabelSuggestion, Suggestion};
 use imports::{Import, ImportKind, ImportResolver, NameResolution};
@@ -1991,7 +1990,7 @@ impl<'a> Resolver<'a> {
                         _ => panic!("invalid arg index"),
                     }
                 }
-                // Cache the lookup to avoid parsing attributes for an iterm multiple times.
+                // Cache the lookup to avoid parsing attributes for an item multiple times.
                 self.legacy_const_generic_args.insert(def_id, Some(ret.clone()));
                 return Some(ret);
             }

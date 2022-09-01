@@ -5,6 +5,9 @@
 #![deny(rustc::untranslatable_diagnostic)]
 #![deny(rustc::diagnostic_outside_of_impl)]
 
+#[macro_use]
+extern crate tracing;
+
 use fluent_bundle::FluentResource;
 use fluent_syntax::parser::ParserError;
 use rustc_data_structures::sync::Lrc;
@@ -16,7 +19,6 @@ use std::fmt;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use tracing::{instrument, trace};
 
 #[cfg(not(parallel_compiler))]
 use std::cell::LazyCell as Lazy;
@@ -50,6 +52,7 @@ fluent_messages! {
     passes => "../locales/en-US/passes.ftl",
     plugin_impl => "../locales/en-US/plugin_impl.ftl",
     privacy => "../locales/en-US/privacy.ftl",
+    query_system => "../locales/en-US/query_system.ftl",
     save_analysis => "../locales/en-US/save_analysis.ftl",
     ty_utils => "../locales/en-US/ty_utils.ftl",
     typeck => "../locales/en-US/typeck.ftl",
