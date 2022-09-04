@@ -55,6 +55,7 @@ mod expect;
 pub mod hidden_unicode_codepoints;
 mod internal;
 mod late;
+mod let_underscore;
 mod levels;
 mod methods;
 mod non_ascii_idents;
@@ -86,6 +87,7 @@ use builtin::*;
 use enum_intrinsics_non_enums::EnumIntrinsicsNonEnums;
 use hidden_unicode_codepoints::*;
 use internal::*;
+use let_underscore::*;
 use methods::*;
 use non_ascii_idents::*;
 use non_fmt_panic::NonPanicFmt;
@@ -133,6 +135,7 @@ macro_rules! early_lint_passes {
                 UnusedBraces: UnusedBraces,
                 UnusedImportBraces: UnusedImportBraces,
                 UnsafeCode: UnsafeCode,
+                SpecialModuleName: SpecialModuleName,
                 AnonymousParameters: AnonymousParameters,
                 EllipsisInclusiveRangePatterns: EllipsisInclusiveRangePatterns::default(),
                 NonCamelCaseTypes: NonCamelCaseTypes,
@@ -143,6 +146,7 @@ macro_rules! early_lint_passes {
                 IncompleteFeatures: IncompleteFeatures,
                 RedundantSemicolons: RedundantSemicolons,
                 UnusedDocComment: UnusedDocComment,
+                UnexpectedCfgs: UnexpectedCfgs,
             ]
         );
     };
@@ -188,6 +192,7 @@ macro_rules! late_lint_mod_passes {
                 VariantSizeDifferences: VariantSizeDifferences,
                 BoxPointers: BoxPointers,
                 PathStatements: PathStatements,
+                LetUnderscore: LetUnderscore,
                 // Depends on referenced function signatures in expressions
                 UnusedResults: UnusedResults,
                 NonUpperCaseGlobals: NonUpperCaseGlobals,
@@ -313,6 +318,8 @@ fn register_builtins(store: &mut LintStore, no_interleave_lints: bool) {
         UNUSED_BRACES,
         REDUNDANT_SEMICOLONS
     );
+
+    add_lint_group!("let_underscore", LET_UNDERSCORE_DROP, LET_UNDERSCORE_LOCK);
 
     add_lint_group!(
         "rust_2018_idioms",

@@ -1173,13 +1173,6 @@ pub fn linker_and_flavor(sess: &Session) -> (PathBuf, LinkerFlavor) {
             // only the linker flavor is known; use the default linker for the selected flavor
             (None, Some(flavor)) => Some((
                 PathBuf::from(match flavor {
-                    LinkerFlavor::Em => {
-                        if cfg!(windows) {
-                            "emcc.bat"
-                        } else {
-                            "emcc"
-                        }
-                    }
                     LinkerFlavor::Gcc => {
                         if cfg!(any(target_os = "solaris", target_os = "illumos")) {
                             // On historical Solaris systems, "cc" may have
@@ -1194,11 +1187,17 @@ pub fn linker_and_flavor(sess: &Session) -> (PathBuf, LinkerFlavor) {
                         }
                     }
                     LinkerFlavor::Ld => "ld",
-                    LinkerFlavor::Msvc => "link.exe",
                     LinkerFlavor::Lld(_) => "lld",
-                    LinkerFlavor::PtxLinker => "rust-ptx-linker",
-                    LinkerFlavor::BpfLinker => "bpf-linker",
-                    LinkerFlavor::L4Bender => "l4-bender",
+                    LinkerFlavor::Msvc => "link.exe",
+                    LinkerFlavor::EmCc => {
+                        if cfg!(windows) {
+                            "emcc.bat"
+                        } else {
+                            "emcc"
+                        }
+                    }
+                    LinkerFlavor::Bpf => "bpf-linker",
+                    LinkerFlavor::Ptx => "rust-ptx-linker",
                 }),
                 flavor,
             )),
@@ -1208,7 +1207,7 @@ pub fn linker_and_flavor(sess: &Session) -> (PathBuf, LinkerFlavor) {
                 });
 
                 let flavor = if stem == "emcc" {
-                    LinkerFlavor::Em
+                    LinkerFlavor::EmCc
                 } else if stem == "gcc"
                     || stem.ends_with("-gcc")
                     || stem == "clang"
@@ -1236,7 +1235,8 @@ pub fn linker_and_flavor(sess: &Session) -> (PathBuf, LinkerFlavor) {
 
     // linker and linker flavor specified via command line have precedence over what the target
     // specification specifies
-    if let Some(ret) = infer_from(sess, sess.opts.cg.linker.clone(), sess.opts.cg.linker_flavor) {
+    let linker_flavor = sess.opts.cg.linker_flavor.map(LinkerFlavor::from_cli);
+    if let Some(ret) = infer_from(sess, sess.opts.cg.linker.clone(), linker_flavor) {
         return ret;
     }
 
@@ -2113,11 +2113,11 @@ fn add_order_independent_options(
         });
     }
 
-    if flavor == LinkerFlavor::PtxLinker {
+    if flavor == LinkerFlavor::Ptx {
         // Provide the linker with fallback to internal `target-cpu`.
         cmd.arg("--fallback-arch");
         cmd.arg(&codegen_results.crate_info.target_cpu);
-    } else if flavor == LinkerFlavor::BpfLinker {
+    } else if flavor == LinkerFlavor::Bpf {
         cmd.arg("--cpu");
         cmd.arg(&codegen_results.crate_info.target_cpu);
         cmd.arg("--cpu-features");
@@ -2797,20 +2797,24 @@ fn add_gcc_ld_path(cmd: &mut dyn Linker, sess: &Session, flavor: LinkerFlavor) {
         if let LinkerFlavor::Gcc = flavor {
             match ld_impl {
                 LdImpl::Lld => {
-                    let tools_path = sess.get_tools_search_paths(false);
-                    let gcc_ld_dir = tools_path
-                        .into_iter()
-                        .map(|p| p.join("gcc-ld"))
-                        .find(|p| {
-                            p.join(if sess.host.is_like_windows { "ld.exe" } else { "ld" }).exists()
-                        })
-                        .unwrap_or_else(|| sess.fatal("rust-lld (as ld) not found"));
-                    cmd.arg({
-                        let mut arg = OsString::from("-B");
-                        arg.push(gcc_ld_dir);
-                        arg
-                    });
-                    cmd.arg(format!("-Wl,-rustc-lld-flavor={}", sess.target.lld_flavor.as_str()));
+                    // Implement the "self-contained" part of -Zgcc-ld
+                    // by adding rustc distribution directories to the tool search path.
+                    for path in sess.get_tools_search_paths(false) {
+                        cmd.arg({
+                            let mut arg = OsString::from("-B");
+                            arg.push(path.join("gcc-ld"));
+                            arg
+                        });
+                    }
+                    // Implement the "linker flavor" part of -Zgcc-ld
+                    // by asking cc to use some kind of lld.
+                    cmd.arg("-fuse-ld=lld");
+                    if sess.target.lld_flavor != LldFlavor::Ld {
+                        // Tell clang to use a non-default LLD flavor.
+                        // Gcc doesn't understand the target option, but we currently assume
+                        // that gcc is not used for Apple and Wasm targets (#97402).
+                        cmd.arg(format!("--target={}", sess.target.llvm_target));
+                    }
                 }
             }
         } else {

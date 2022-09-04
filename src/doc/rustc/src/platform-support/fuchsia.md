@@ -79,7 +79,7 @@ the following commands:
 
 ```sh
 rustup target add x86_64-fuchsia
-rustup target add aarch_64-fuchsia
+rustup target add aarch64-fuchsia
 ```
 
 After installing our Fuchsia targets, we can now compile a Rust binary that targets
@@ -125,12 +125,19 @@ during compilation:
 [target.x86_64-fuchsia]
 
 rustflags = [
-    "-Lnative", "<SDK_PATH>/arch/x64/sysroot/lib",
-    "-Lnative", "<SDK_PATH>/arch/x64/lib"
+    "-Lnative=<SDK_PATH>/arch/x64/lib",
+    "-Lnative=<SDK_PATH>/arch/x64/sysroot/lib"
 ]
 ```
 
 *Note: Make sure to fill out `<SDK_PATH>` with the path to the downloaded [Fuchsia SDK].*
+
+These options configure the following:
+
+* `-Lnative=${SDK_PATH}/arch/${ARCH}/lib`: Link against Fuchsia libraries from
+  the SDK
+* `-Lnative=${SDK_PATH}/arch/${ARCH}/sysroot/lib`: Link against Fuchsia kernel
+  libraries from the SDK
 
 In total, our new project will look like:
 
@@ -323,10 +330,18 @@ Now, create the following files inside:
 The `package` file describes our package's name and version number. Every
 package must contain one.
 
-**`pkg/hello_fuchsia.manifest`**
+**`pkg/hello_fuchsia.manifest` if using cargo**
 ```txt
-bin/hello_fuchsia=target/x86_64-fuchsia/debug/hello_fuchsia     # If using cargo...
-bin/hello_fuchsia=bin/hello_fuchsia                             # If using rustc...
+bin/hello_fuchsia=target/x86_64-fuchsia/debug/hello_fuchsia
+lib/ld.so.1=<SDK_PATH>/arch/x64/sysroot/dist/lib/ld.so.1
+lib/libfdio.so=<SDK_PATH>/arch/x64/dist/libfdio.so
+meta/package=pkg/meta/package
+meta/hello_fuchsia.cm=pkg/meta/hello_fuchsia.cm
+```
+
+**`pkg/hello_fuchsia.manifest` if using rustc**
+```txt
+bin/hello_fuchsia=bin/hello_fuchsia
 lib/ld.so.1=<SDK_PATH>/arch/x64/sysroot/dist/lib/ld.so.1
 lib/libfdio.so=<SDK_PATH>/arch/x64/dist/libfdio.so
 meta/package=pkg/meta/package
@@ -368,6 +383,7 @@ language called CML. The Fuchsia devsite contains an [overview of CML] and a
 }
 ```
 
+**Current directory structure**
 ```txt
 hello_fuchsia/
 ┗━ pkg/
@@ -386,6 +402,9 @@ ${SDK_PATH}/tools/${ARCH}/cmc compile \
     -o pkg/meta/hello_fuchsia.cm
 ```
 
+*Note: `--includepath` tells the compiler where to look for `include`s from our CML.
+In our case, we're only using `syslog/client.shard.cml`.*
+
 **Current directory structure**
 ```txt
 hello_fuchsia/
@@ -397,19 +416,16 @@ hello_fuchsia/
    ┗━ hello_fuchsia.cml
 ```
 
-*Note: `--includepath` tells the compiler where to look for `include`s from our CML.
-In our case, we're only using `syslog/client.shard.cml`.*
-
 ### Building a Fuchsia package
 
 Next, we'll build a package manifest as defined by our manifest:
 
 ```sh
 ${SDK_PATH}/tools/${ARCH}/pm \
-    -o hello_fuchsia_manifest \
+    -o pkg/hello_fuchsia_manifest \
     -m pkg/hello_fuchsia.manifest \
     build \
-    -output-package-manifest hello_fuchsia_package_manifest
+    -output-package-manifest pkg/hello_fuchsia_package_manifest
 ```
 
 This will produce `pkg/hello_fuchsia_manifest/` which is a package manifest we can
@@ -469,15 +485,15 @@ We can publish our new package to that repository with:
 
 ```sh
 ${SDK_PATH}/tools/${ARCH}/pm publish \
-    -repo repo \
-    -lp -f <(echo "hello_fuchsia_package_manifest")
+    -repo pkg/repo \
+    -lp -f <(echo "pkg/hello_fuchsia_package_manifest")
 ```
 
 Then we can add the repository to `ffx`'s package server as `hello-fuchsia` using:
 
 ```sh
 ${SDK_PATH}/tools/${ARCH}/ffx repository add-from-pm \
-    repo \
+    pkg/repo \
     -r hello-fuchsia
 ```
 
@@ -554,6 +570,7 @@ Finally, run the component:
 
 ```sh
 ${SDK_PATH}/tools/${ARCH}/ffx component run \
+    /core/ffx-laboratory:hello_fuchsia \
     fuchsia-pkg://hello-fuchsia/hello_fuchsia_manifest#meta/hello_fuchsia.cm
 ```
 
@@ -563,6 +580,7 @@ passed.
 ```sh
 ${SDK_PATH}/tools/${ARCH}/ffx component run \
     --recreate \
+    /core/ffx-laboratory:hello_fuchsia \
     fuchsia-pkg://hello-fuchsia/hello_fuchsia_manifest#meta/hello_fuchsia.cm
 ```
 
