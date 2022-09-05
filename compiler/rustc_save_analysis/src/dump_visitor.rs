@@ -912,7 +912,10 @@ impl<'tcx> DumpVisitor<'tcx> {
                     _,
                 )
                 | Res::SelfTy { .. } => {
-                    self.dump_path_segment_ref(id, &hir::PathSegment::from_ident(ident));
+                    self.dump_path_segment_ref(
+                        id,
+                        &hir::PathSegment::new(ident, hir::HirId::INVALID, Res::Err),
+                    );
                 }
                 def => {
                     error!("unexpected definition kind when processing collected idents: {:?}", def)
@@ -972,7 +975,7 @@ impl<'tcx> DumpVisitor<'tcx> {
         self.process_macro_use(trait_item.span);
         match trait_item.kind {
             hir::TraitItemKind::Const(ref ty, body) => {
-                let body = body.map(|b| &self.tcx.hir().body(b).value);
+                let body = body.map(|b| self.tcx.hir().body(b).value);
                 let attrs = self.tcx.hir().attrs(trait_item.hir_id());
                 self.process_assoc_const(
                     trait_item.def_id,
