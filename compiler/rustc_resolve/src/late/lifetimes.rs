@@ -525,6 +525,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
         }
     }
 
+    #[instrument(level = "debug", skip(self))]
     fn visit_item(&mut self, item: &'tcx hir::Item<'tcx>) {
         match &item.kind {
             hir::ItemKind::Impl(hir::Impl { of_trait, .. }) => {
@@ -714,7 +715,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                 };
                 self.with(scope, |this| this.visit_ty(&mt.ty));
             }
-            hir::TyKind::OpaqueDef(item_id, lifetimes) => {
+            hir::TyKind::OpaqueDef(item_id, lifetimes, _in_trait) => {
                 // Resolve the lifetimes in the bounds to the lifetime defs in the generics.
                 // `fn foo<'a>() -> impl MyTrait<'a> { ... }` desugars to
                 // `type MyAnonTy<'b> = impl MyTrait<'b>;`
@@ -839,6 +840,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
         }
     }
 
+    #[instrument(level = "debug", skip(self))]
     fn visit_trait_item(&mut self, trait_item: &'tcx hir::TraitItem<'tcx>) {
         use self::hir::TraitItemKind::*;
         match trait_item.kind {
@@ -888,6 +890,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
         }
     }
 
+    #[instrument(level = "debug", skip(self))]
     fn visit_impl_item(&mut self, impl_item: &'tcx hir::ImplItem<'tcx>) {
         use self::hir::ImplItemKind::*;
         match impl_item.kind {

@@ -1031,12 +1031,12 @@ pub fn can_move_expr_to_closure<'tcx>(cx: &LateContext<'tcx>, expr: &'tcx Expr<'
     v.allow_closure.then_some(v.captures)
 }
 
+/// Arguments of a method: the receiver and all the additional arguments.
+pub type MethodArguments<'tcx> = Vec<(&'tcx Expr<'tcx>, &'tcx [Expr<'tcx>])>;
+
 /// Returns the method names and argument list of nested method call expressions that make up
 /// `expr`. method/span lists are sorted with the most recent call first.
-pub fn method_calls<'tcx>(
-    expr: &'tcx Expr<'tcx>,
-    max_depth: usize,
-) -> (Vec<Symbol>, Vec<(&'tcx Expr<'tcx>, &'tcx [Expr<'tcx>])>, Vec<Span>) {
+pub fn method_calls<'tcx>(expr: &'tcx Expr<'tcx>, max_depth: usize) -> (Vec<Symbol>, MethodArguments<'tcx>, Vec<Span>) {
     let mut method_names = Vec::with_capacity(max_depth);
     let mut arg_lists = Vec::with_capacity(max_depth);
     let mut spans = Vec::with_capacity(max_depth);
@@ -1552,7 +1552,8 @@ pub fn iter_input_pats<'tcx>(decl: &FnDecl<'_>, body: &'tcx Body<'_>) -> impl It
 pub fn is_try<'tcx>(cx: &LateContext<'_>, expr: &'tcx Expr<'tcx>) -> Option<&'tcx Expr<'tcx>> {
     fn is_ok(cx: &LateContext<'_>, arm: &Arm<'_>) -> bool {
         if_chain! {
-            if let PatKind::TupleStruct(ref path, pat, None) = arm.pat.kind;
+            if let PatKind::TupleStruct(ref path, pat, ddpos) = arm.pat.kind;
+            if ddpos.as_opt_usize().is_none();
             if is_lang_ctor(cx, path, ResultOk);
             if let PatKind::Binding(_, hir_id, _, None) = pat[0].kind;
             if path_to_local_id(arm.body, hir_id);

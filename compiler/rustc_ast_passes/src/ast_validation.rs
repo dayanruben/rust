@@ -290,12 +290,6 @@ impl<'a> AstValidator<'a> {
         }
     }
 
-    fn check_trait_fn_not_async(&self, fn_span: Span, asyncness: Async) {
-        if let Async::Yes { span, .. } = asyncness {
-            self.session.emit_err(TraitFnAsync { fn_span, span });
-        }
-    }
-
     fn check_trait_fn_not_const(&self, constness: Const) {
         if let Const::Yes(span) = constness {
             self.session.emit_err(TraitFnConst { span });
@@ -845,10 +839,10 @@ fn validate_generic_param_order(
         let (kind, bounds, span) = (&param.kind, &param.bounds, ident.span);
         let (ord_kind, ident) = match &param.kind {
             GenericParamKind::Lifetime => (ParamKindOrd::Lifetime, ident.to_string()),
-            GenericParamKind::Type { default: _ } => (ParamKindOrd::Type, ident.to_string()),
+            GenericParamKind::Type { default: _ } => (ParamKindOrd::TypeOrConst, ident.to_string()),
             GenericParamKind::Const { ref ty, kw_span: _, default: _ } => {
                 let ty = pprust::ty_to_string(ty);
-                (ParamKindOrd::Const, format!("const {}: {}", ident, ty))
+                (ParamKindOrd::TypeOrConst, format!("const {}: {}", ident, ty))
             }
         };
         param_idents.push((kind, ord_kind, bounds, idx, ident));
@@ -1596,7 +1590,6 @@ impl<'a> Visitor<'a> for AstValidator<'a> {
             self.invalid_visibility(&item.vis, None);
             if let AssocItemKind::Fn(box Fn { sig, .. }) = &item.kind {
                 self.check_trait_fn_not_const(sig.header.constness);
-                self.check_trait_fn_not_async(item.span, sig.header.asyncness);
             }
         }
 

@@ -27,8 +27,9 @@ impl GenericParamDefKind {
     pub fn to_ord(&self) -> ast::ParamKindOrd {
         match self {
             GenericParamDefKind::Lifetime => ast::ParamKindOrd::Lifetime,
-            GenericParamDefKind::Type { .. } => ast::ParamKindOrd::Type,
-            GenericParamDefKind::Const { .. } => ast::ParamKindOrd::Const,
+            GenericParamDefKind::Type { .. } | GenericParamDefKind::Const { .. } => {
+                ast::ParamKindOrd::TypeOrConst
+            }
         }
     }
 
@@ -328,6 +329,7 @@ impl<'tcx> GenericPredicates<'tcx> {
         }
     }
 
+    #[instrument(level = "debug", skip(self, tcx))]
     fn instantiate_into(
         &self,
         tcx: TyCtxt<'tcx>,

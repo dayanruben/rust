@@ -559,7 +559,7 @@ impl<'mir, 'tcx: 'mir, M: Machine<'mir, 'tcx>> InterpCx<'mir, 'tcx, M> {
         layout: Option<TyAndLayout<'tcx>>,
     ) -> InterpResult<'tcx, OpTy<'tcx, M::Provenance>> {
         match c.kind() {
-            ty::ConstKind::Param(_) | ty::ConstKind::Bound(..) => throw_inval!(TooGeneric),
+            ty::ConstKind::Param(_) | ty::ConstKind::Placeholder(..) => throw_inval!(TooGeneric),
             ty::ConstKind::Error(DelaySpanBugEmitted { reported, .. }) => {
                 throw_inval!(AlreadyReported(reported))
             }
@@ -567,7 +567,7 @@ impl<'mir, 'tcx: 'mir, M: Machine<'mir, 'tcx>> InterpCx<'mir, 'tcx, M> {
                 let instance = self.resolve(uv.def, uv.substs)?;
                 Ok(self.eval_to_allocation(GlobalId { instance, promoted: uv.promoted })?.into())
             }
-            ty::ConstKind::Infer(..) | ty::ConstKind::Placeholder(..) => {
+            ty::ConstKind::Bound(..) | ty::ConstKind::Infer(..) => {
                 span_bug!(self.cur_span(), "const_to_op: Unexpected ConstKind {:?}", c)
             }
             ty::ConstKind::Value(valtree) => {
@@ -718,7 +718,7 @@ impl<'mir, 'tcx: 'mir, M: Machine<'mir, 'tcx>> InterpCx<'mir, 'tcx, M> {
                 // Return the cast value, and the index.
                 (discr_val, index.0)
             }
-            TagEncoding::Niche { dataful_variant, ref niche_variants, niche_start } => {
+            TagEncoding::Niche { untagged_variant, ref niche_variants, niche_start } => {
                 let tag_val = tag_val.to_scalar();
                 // Compute the variant this niche value/"tag" corresponds to. With niche layout,
                 // discriminant (encoded in niche/tag) and variant index are the same.
@@ -736,7 +736,7 @@ impl<'mir, 'tcx: 'mir, M: Machine<'mir, 'tcx>> InterpCx<'mir, 'tcx, M> {
                         if !ptr_valid {
                             throw_ub!(InvalidTag(dbg_val))
                         }
-                        dataful_variant
+                        untagged_variant
                     }
                     Ok(tag_bits) => {
                         let tag_bits = tag_bits.assert_bits(tag_layout.size);
@@ -766,7 +766,7 @@ impl<'mir, 'tcx: 'mir, M: Machine<'mir, 'tcx>> InterpCx<'mir, 'tcx, M> {
                             assert!(usize::try_from(variant_index).unwrap() < variants_len);
                             VariantIdx::from_u32(variant_index)
                         } else {
-                            dataful_variant
+                            untagged_variant
                         }
                     }
                 };
@@ -780,13 +780,13 @@ impl<'mir, 'tcx: 'mir, M: Machine<'mir, 'tcx>> InterpCx<'mir, 'tcx, M> {
 }
 
 // Some nodes are used a lot. Make sure they don't unintentionally get bigger.
-#[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
+#[cfg(all(target_arch = "x86_64", target_pointer_width = "64", not(bootstrap)))]
 mod size_asserts {
     use super::*;
     use rustc_data_structures::static_assert_size;
     // These are in alphabetical order, which is easy to maintain.
-    static_assert_size!(Immediate, 56);
-    static_assert_size!(ImmTy<'_>, 72);
-    static_assert_size!(Operand, 64);
-    static_assert_size!(OpTy<'_>, 88);
+    static_assert_size!(Immediate, 48);
+    static_assert_size!(ImmTy<'_>, 64);
+    static_assert_size!(Operand, 56);
+    static_assert_size!(OpTy<'_>, 80);
 }

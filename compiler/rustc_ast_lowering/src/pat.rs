@@ -37,7 +37,7 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
                             qself,
                             path,
                             ParamMode::Optional,
-                            ImplTraitContext::Disallowed(ImplTraitPosition::Path),
+                            &mut ImplTraitContext::Disallowed(ImplTraitPosition::Path),
                         );
                         let (pats, ddpos) = self.lower_pat_tuple(pats, "tuple struct");
                         break hir::PatKind::TupleStruct(qpath, pats, ddpos);
@@ -53,7 +53,7 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
                             qself,
                             path,
                             ParamMode::Optional,
-                            ImplTraitContext::Disallowed(ImplTraitPosition::Path),
+                            &mut ImplTraitContext::Disallowed(ImplTraitPosition::Path),
                         );
                         break hir::PatKind::Path(qpath);
                     }
@@ -63,7 +63,7 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
                             qself,
                             path,
                             ParamMode::Optional,
-                            ImplTraitContext::Disallowed(ImplTraitPosition::Path),
+                            &mut ImplTraitContext::Disallowed(ImplTraitPosition::Path),
                         );
 
                         let fs = self.arena.alloc_from_iter(fields.iter().map(|f| {
@@ -116,7 +116,7 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
         &mut self,
         pats: &[P<Pat>],
         ctx: &str,
-    ) -> (&'hir [hir::Pat<'hir>], Option<usize>) {
+    ) -> (&'hir [hir::Pat<'hir>], hir::DotDotPos) {
         let mut elems = Vec::with_capacity(pats.len());
         let mut rest = None;
 
@@ -160,7 +160,7 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
             }
         }
 
-        (self.arena.alloc_from_iter(elems), rest.map(|(ddpos, _)| ddpos))
+        (self.arena.alloc_from_iter(elems), hir::DotDotPos::new(rest.map(|(ddpos, _)| ddpos)))
     }
 
     /// Lower a slice pattern of form `[pat_0, ..., pat_n]` into

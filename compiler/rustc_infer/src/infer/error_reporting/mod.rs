@@ -61,6 +61,7 @@ use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 use rustc_errors::{pluralize, struct_span_err, Diagnostic, ErrorGuaranteed, IntoDiagnosticArg};
 use rustc_errors::{Applicability, DiagnosticBuilder, DiagnosticStyledString, MultiSpan};
 use rustc_hir as hir;
+use rustc_hir::def::DefKind;
 use rustc_hir::def_id::{DefId, LocalDefId};
 use rustc_hir::lang_items::LangItem;
 use rustc_hir::Node;
@@ -1586,28 +1587,31 @@ impl<'a, 'tcx> InferCtxt<'a, 'tcx> {
             Some(values) => {
                 let values = self.resolve_vars_if_possible(values);
                 let (is_simple_error, exp_found) = match values {
-                    ValuePairs::Terms(infer::ExpectedFound {
-                        expected: ty::Term::Ty(expected),
-                        found: ty::Term::Ty(found),
-                    }) => {
-                        let is_simple_err = expected.is_simple_text() && found.is_simple_text();
-                        OpaqueTypesVisitor::visit_expected_found(self.tcx, expected, found, span)
-                            .report(diag);
+                    ValuePairs::Terms(infer::ExpectedFound { expected, found }) => {
+                        match (expected.unpack(), found.unpack()) {
+                            (ty::TermKind::Ty(expected), ty::TermKind::Ty(found)) => {
+                                let is_simple_err =
+                                    expected.is_simple_text() && found.is_simple_text();
+                                OpaqueTypesVisitor::visit_expected_found(
+                                    self.tcx, expected, found, span,
+                                )
+                                .report(diag);
 
-                        (
-                            is_simple_err,
-                            Mismatch::Variable(infer::ExpectedFound { expected, found }),
-                        )
+                                (
+                                    is_simple_err,
+                                    Mismatch::Variable(infer::ExpectedFound { expected, found }),
+                                )
+                            }
+                            (ty::TermKind::Const(_), ty::TermKind::Const(_)) => {
+                                (false, Mismatch::Fixed("constant"))
+                            }
+                            _ => (false, Mismatch::Fixed("type")),
+                        }
                     }
-                    ValuePairs::Terms(infer::ExpectedFound {
-                        expected: ty::Term::Const(_),
-                        found: ty::Term::Const(_),
-                    }) => (false, Mismatch::Fixed("constant")),
                     ValuePairs::TraitRefs(_) | ValuePairs::PolyTraitRefs(_) => {
                         (false, Mismatch::Fixed("trait"))
                     }
                     ValuePairs::Regions(_) => (false, Mismatch::Fixed("lifetime")),
-                    _ => (false, Mismatch::Fixed("type")),
                 };
                 let vals = match self.values_str(values) {
                     Some((expected, found)) => Some((expected, found)),
@@ -1674,6 +1678,19 @@ impl<'a, 'tcx> InferCtxt<'a, 'tcx> {
                             let pos = sm.lookup_char_pos(self.tcx.def_span(*def_id).lo());
                             format!(
                                 " (opaque type at <{}:{}:{}>)",
+                                sm.filename_for_diagnostics(&pos.file.name),
+                                pos.line,
+                                pos.col.to_usize() + 1,
+                            )
+                        }
+                        (true, ty::Projection(proj))
+                            if self.tcx.def_kind(proj.item_def_id)
+                                == DefKind::ImplTraitPlaceholder =>
+                        {
+                            let sm = self.tcx.sess.source_map();
+                            let pos = sm.lookup_char_pos(self.tcx.def_span(proj.item_def_id).lo());
+                            format!(
+                                " (trait associated opaque type at <{}:{}:{}>)",
                                 sm.filename_for_diagnostics(&pos.file.name),
                                 pos.line,
                                 pos.col.to_usize() + 1,
@@ -1755,7 +1772,7 @@ impl<'a, 'tcx> InferCtxt<'a, 'tcx> {
 
         // In some (most?) cases cause.body_id points to actual body, but in some cases
         // it's an actual definition. According to the comments (e.g. in
-        // librustc_typeck/check/compare_method.rs:compare_predicate_entailment) the latter
+        // librustc_typeck/check/compare_method.rs:compare_predicates_and_trait_impl_trait_tys) the latter
         // is relied upon by some other code. This might (or might not) need cleanup.
         let body_owner_def_id =
             self.tcx.hir().opt_local_def_id(cause.body_id).unwrap_or_else(|| {
@@ -2273,11 +2290,11 @@ impl<'a, 'tcx> InferCtxt<'a, 'tcx> {
             return None;
         }
 
-        Some(match (exp_found.expected, exp_found.found) {
-            (ty::Term::Ty(expected), ty::Term::Ty(found)) => self.cmp(expected, found),
-            (expected, found) => (
-                DiagnosticStyledString::highlighted(expected.to_string()),
-                DiagnosticStyledString::highlighted(found.to_string()),
+        Some(match (exp_found.expected.unpack(), exp_found.found.unpack()) {
+            (ty::TermKind::Ty(expected), ty::TermKind::Ty(found)) => self.cmp(expected, found),
+            _ => (
+                DiagnosticStyledString::highlighted(exp_found.expected.to_string()),
+                DiagnosticStyledString::highlighted(exp_found.found.to_string()),
             ),
         })
     }

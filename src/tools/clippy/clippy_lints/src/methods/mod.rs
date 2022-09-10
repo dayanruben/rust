@@ -825,8 +825,9 @@ declare_clippy_lint! {
 declare_clippy_lint! {
     /// ### What it does
     /// Checks for calls to `.or(foo(..))`, `.unwrap_or(foo(..))`,
-    /// etc., and suggests to use `or_else`, `unwrap_or_else`, etc., or
-    /// `unwrap_or_default` instead.
+    /// `.or_insert(foo(..))` etc., and suggests to use `.or_else(|| foo(..))`,
+    /// `.unwrap_or_else(|| foo(..))`, `.unwrap_or_default()` or `.or_default()`
+    /// etc. instead.
     ///
     /// ### Why is this bad?
     /// The function will always be called and potentially
@@ -3304,9 +3305,9 @@ impl<'tcx> LateLintPass<'tcx> for Methods {
                 // one of the associated types must be Self
                 for &(predicate, _span) in cx.tcx.explicit_item_bounds(def_id) {
                     if let ty::PredicateKind::Projection(projection_predicate) = predicate.kind().skip_binder() {
-                        let assoc_ty = match projection_predicate.term {
-                            ty::Term::Ty(ty) => ty,
-                            ty::Term::Const(_c) => continue,
+                        let assoc_ty = match projection_predicate.term.unpack() {
+                            ty::TermKind::Ty(ty) => ty,
+                            ty::TermKind::Const(_c) => continue,
                         };
                         // walk the associated type and check for Self
                         if let Some(self_adt) = self_ty.ty_adt_def() {

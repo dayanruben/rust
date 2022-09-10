@@ -65,8 +65,8 @@ pub(super) fn opt_const_param_of(tcx: TyCtxt<'_>, def_id: LocalDefId) -> Option<
             let ty = item_ctxt.ast_ty_to_ty(hir_ty);
 
             // Iterate through the generics of the projection to find the one that corresponds to
-            // the def_id that this query was called with. We filter to only const args here as a
-            // precaution for if it's ever allowed to elide lifetimes in GAT's. It currently isn't
+            // the def_id that this query was called with. We filter to only type and const args here
+            // as a precaution for if it's ever allowed to elide lifetimes in GAT's. It currently isn't
             // but it can't hurt to be safe ^^
             if let ty::Projection(projection) = ty.kind() {
                 let generics = tcx.generics_of(projection.item_def_id);
@@ -333,8 +333,12 @@ pub(super) fn type_of(tcx: TyCtxt<'_>, def_id: DefId) -> Ty<'_> {
                     find_opaque_ty_constraints_for_tait(tcx, def_id)
                 }
                 // Opaque types desugared from `impl Trait`.
-                ItemKind::OpaqueTy(OpaqueTy { origin: hir::OpaqueTyOrigin::FnReturn(owner) | hir::OpaqueTyOrigin::AsyncFn(owner), .. }) => {
-                    find_opaque_ty_constraints_for_rpit(tcx, def_id, owner)
+                ItemKind::OpaqueTy(OpaqueTy { origin: hir::OpaqueTyOrigin::FnReturn(owner) | hir::OpaqueTyOrigin::AsyncFn(owner), in_trait, .. }) => {
+                    if in_trait {
+                        span_bug!(item.span, "impl-trait in trait has no default")
+                    } else {
+                        find_opaque_ty_constraints_for_rpit(tcx, def_id, owner)
+                    }
                 }
                 ItemKind::Trait(..)
                 | ItemKind::TraitAlias(..)

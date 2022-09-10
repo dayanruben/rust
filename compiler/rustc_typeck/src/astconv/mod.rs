@@ -1183,11 +1183,11 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                 // `<T as Iterator>::Item = u32`
                 let assoc_item_def_id = projection_ty.skip_binder().item_def_id;
                 let def_kind = tcx.def_kind(assoc_item_def_id);
-                match (def_kind, term) {
-                    (hir::def::DefKind::AssocTy, ty::Term::Ty(_))
-                    | (hir::def::DefKind::AssocConst, ty::Term::Const(_)) => (),
+                match (def_kind, term.unpack()) {
+                    (hir::def::DefKind::AssocTy, ty::TermKind::Ty(_))
+                    | (hir::def::DefKind::AssocConst, ty::TermKind::Const(_)) => (),
                     (_, _) => {
-                        let got = if let ty::Term::Ty(_) = term { "type" } else { "constant" };
+                        let got = if let Some(_) = term.ty() { "type" } else { "constant" };
                         let expected = def_kind.descr(assoc_item_def_id);
                         tcx.sess
                             .struct_span_err(
@@ -1375,9 +1375,11 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                         let pred = bound_predicate.rebind(pred);
                         // A `Self` within the original bound will be substituted with a
                         // `trait_object_dummy_self`, so check for that.
-                        let references_self = match pred.skip_binder().term {
-                            ty::Term::Ty(ty) => ty.walk().any(|arg| arg == dummy_self.into()),
-                            ty::Term::Const(c) => c.ty().walk().any(|arg| arg == dummy_self.into()),
+                        let references_self = match pred.skip_binder().term.unpack() {
+                            ty::TermKind::Ty(ty) => ty.walk().any(|arg| arg == dummy_self.into()),
+                            ty::TermKind::Const(c) => {
+                                c.ty().walk().any(|arg| arg == dummy_self.into())
+                            }
                         };
 
                         // If the projection output contains `Self`, force the user to
@@ -2358,7 +2360,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
 
         let span = path.span;
         match path.res {
-            Res::Def(DefKind::OpaqueTy, did) => {
+            Res::Def(DefKind::OpaqueTy | DefKind::ImplTraitPlaceholder, did) => {
                 // Check for desugared `impl Trait`.
                 assert!(ty::is_impl_trait_defn(tcx, did).is_none());
                 let item_segment = path.segments.split_last().unwrap();
@@ -2625,13 +2627,13 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                 let opt_self_ty = maybe_qself.as_ref().map(|qself| self.ast_ty_to_ty(qself));
                 self.res_to_ty(opt_self_ty, path, false)
             }
-            hir::TyKind::OpaqueDef(item_id, lifetimes) => {
+            hir::TyKind::OpaqueDef(item_id, lifetimes, in_trait) => {
                 let opaque_ty = tcx.hir().item(item_id);
                 let def_id = item_id.def_id.to_def_id();
 
                 match opaque_ty.kind {
                     hir::ItemKind::OpaqueTy(hir::OpaqueTy { origin, .. }) => {
-                        self.impl_trait_ty_to_ty(def_id, lifetimes, origin)
+                        self.impl_trait_ty_to_ty(def_id, lifetimes, origin, in_trait)
                     }
                     ref i => bug!("`impl Trait` pointed to non-opaque type?? {:#?}", i),
                 }
@@ -2695,11 +2697,13 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
         result_ty
     }
 
+    #[instrument(level = "debug", skip(self), ret)]
     fn impl_trait_ty_to_ty(
         &self,
         def_id: DefId,
         lifetimes: &[hir::GenericArg<'_>],
         origin: OpaqueTyOrigin,
+        in_trait: bool,
     ) -> Ty<'tcx> {
         debug!("impl_trait_ty_to_ty(def_id={:?}, lifetimes={:?})", def_id, lifetimes);
         let tcx = self.tcx();
@@ -2743,9 +2747,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
         });
         debug!("impl_trait_ty_to_ty: substs={:?}", substs);
 
-        let ty = tcx.mk_opaque(def_id, substs);
-        debug!("impl_trait_ty_to_ty: {}", ty);
-        ty
+        if in_trait { tcx.mk_projection(def_id, substs) } else { tcx.mk_opaque(def_id, substs) }
     }
 
     pub fn ty_of_arg(&self, ty: &hir::Ty<'_>, expected_ty: Option<Ty<'tcx>>) -> Ty<'tcx> {
@@ -2939,8 +2941,9 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                 // though we can easily give a hint that ought to be
                 // relevant.
                 err.note(
-                    "lifetimes appearing in an associated type are not considered constrained",
+                    "lifetimes appearing in an associated or opaque type are not considered constrained",
                 );
+                err.note("consider introducing a named lifetime parameter");
             }
 
             err.emit();

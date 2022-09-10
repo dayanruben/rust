@@ -830,25 +830,22 @@ fn walk_parents<'tcx>(
                             )
                         {
                             return Some(Position::MethodReceiverRefImpl)
-                        } else {
-                            return Some(Position::MethodReceiver)
                         }
+                        return Some(Position::MethodReceiver);
                     }
-                    args.iter()
-                        .position(|arg| arg.hir_id == child_id)
-                        .map(|i| {
-                            let ty = cx.tcx.fn_sig(id).skip_binder().inputs()[i + 1];
-                            if let ty::Param(param_ty) = ty.kind() {
-                                needless_borrow_impl_arg_position(cx, parent, i + 1, *param_ty, e, precedence, msrv)
-                            } else {
-                                ty_auto_deref_stability(
-                                    cx,
-                                    cx.tcx.erase_late_bound_regions(cx.tcx.fn_sig(id).input(i + 1)),
-                                    precedence,
-                                )
-                                .position_for_arg()
-                            }
-                        })
+                    args.iter().position(|arg| arg.hir_id == child_id).map(|i| {
+                        let ty = cx.tcx.fn_sig(id).skip_binder().inputs()[i + 1];
+                        if let ty::Param(param_ty) = ty.kind() {
+                            needless_borrow_impl_arg_position(cx, parent, i + 1, *param_ty, e, precedence, msrv)
+                        } else {
+                            ty_auto_deref_stability(
+                                cx,
+                                cx.tcx.erase_late_bound_regions(cx.tcx.fn_sig(id).input(i + 1)),
+                                precedence,
+                            )
+                            .position_for_arg()
+                        }
+                    })
                 },
                 ExprKind::Field(child, name) if child.hir_id == e.hir_id => Some(Position::FieldAccess(name.name)),
                 ExprKind::Unary(UnOp::Deref, child) if child.hir_id == e.hir_id => Some(Position::Deref),
@@ -1175,7 +1172,7 @@ fn replace_types<'tcx>(
         if replaced.insert(param_ty.index) {
             for projection_predicate in projection_predicates {
                 if projection_predicate.projection_ty.self_ty() == param_ty.to_ty(cx.tcx)
-                    && let ty::Term::Ty(term_ty) = projection_predicate.term
+                    && let Some(term_ty) = projection_predicate.term.ty()
                     && let ty::Param(term_param_ty) = term_ty.kind()
                 {
                     let item_def_id = projection_predicate.projection_ty.item_def_id;

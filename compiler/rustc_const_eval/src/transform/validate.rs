@@ -7,9 +7,10 @@ use rustc_middle::mir::interpret::Scalar;
 use rustc_middle::mir::visit::NonUseContext::VarDebugInfo;
 use rustc_middle::mir::visit::{PlaceContext, Visitor};
 use rustc_middle::mir::{
-    traversal, AggregateKind, BasicBlock, BinOp, Body, BorrowKind, CastKind, Local, Location,
-    MirPass, MirPhase, Operand, Place, PlaceElem, PlaceRef, ProjectionElem, RuntimePhase, Rvalue,
-    SourceScope, Statement, StatementKind, Terminator, TerminatorKind, UnOp, START_BLOCK,
+    traversal, AggregateKind, BasicBlock, BinOp, Body, BorrowKind, CastKind, CopyNonOverlapping,
+    Local, Location, MirPass, MirPhase, NonDivergingIntrinsic, Operand, Place, PlaceElem, PlaceRef,
+    ProjectionElem, RuntimePhase, Rvalue, SourceScope, Statement, StatementKind, Terminator,
+    TerminatorKind, UnOp, START_BLOCK,
 };
 use rustc_middle::ty::fold::BottomUpFolder;
 use rustc_middle::ty::subst::Subst;
@@ -89,20 +90,21 @@ pub fn equal_up_to_regions<'tcx>(
 
     // Normalize lifetimes away on both sides, then compare.
     let normalize = |ty: Ty<'tcx>| {
-        let ty = ty.fold_with(&mut BottomUpFolder {
-            tcx,
-            // FIXME: We erase all late-bound lifetimes, but this is not fully correct.
-            // If you have a type like `<for<'a> fn(&'a u32) as SomeTrait>::Assoc`,
-            // this is not necessarily equivalent to `<fn(&'static u32) as SomeTrait>::Assoc`,
-            // since one may have an `impl SomeTrait for fn(&32)` and
-            // `impl SomeTrait for fn(&'static u32)` at the same time which
-            // specify distinct values for Assoc. (See also #56105)
-            lt_op: |_| tcx.lifetimes.re_erased,
-            // Leave consts and types unchanged.
-            ct_op: |ct| ct,
-            ty_op: |ty| ty,
-        });
-        tcx.try_normalize_erasing_regions(param_env, ty).unwrap_or(ty)
+        tcx.try_normalize_erasing_regions(param_env, ty).unwrap_or(ty).fold_with(
+            &mut BottomUpFolder {
+                tcx,
+                // FIXME: We erase all late-bound lifetimes, but this is not fully correct.
+                // If you have a type like `<for<'a> fn(&'a u32) as SomeTrait>::Assoc`,
+                // this is not necessarily equivalent to `<fn(&'static u32) as SomeTrait>::Assoc`,
+                // since one may have an `impl SomeTrait for fn(&32)` and
+                // `impl SomeTrait for fn(&'static u32)` at the same time which
+                // specify distinct values for Assoc. (See also #56105)
+                lt_op: |_| tcx.lifetimes.re_erased,
+                // Leave consts and types unchanged.
+                ct_op: |ct| ct,
+                ty_op: |ty| ty,
+            },
+        )
     };
     tcx.infer_ctxt().enter(|infcx| infcx.can_eq(param_env, normalize(src), normalize(dest)).is_ok())
 }
@@ -636,11 +638,18 @@ impl<'a, 'tcx> Visitor<'tcx> for TypeChecker<'a, 'tcx> {
                     );
                 }
             }
-            StatementKind::CopyNonOverlapping(box rustc_middle::mir::CopyNonOverlapping {
-                ref src,
-                ref dst,
-                ref count,
-            }) => {
+            StatementKind::Intrinsic(box NonDivergingIntrinsic::Assume(op)) => {
+                let ty = op.ty(&self.body.local_decls, self.tcx);
+                if !ty.is_bool() {
+                    self.fail(
+                        location,
+                        format!("`assume` argument must be `bool`, but got: `{}`", ty),
+                    );
+                }
+            }
+            StatementKind::Intrinsic(box NonDivergingIntrinsic::CopyNonOverlapping(
+                CopyNonOverlapping { src, dst, count },
+            )) => {
                 let src_ty = src.ty(&self.body.local_decls, self.tcx);
                 let op_src_ty = if let Some(src_deref) = src_ty.builtin_deref(true) {
                     src_deref.ty
