@@ -1609,7 +1609,8 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
         };
 
         // (*) Prefer `BuiltinCandidate { has_nested: false }`, `PointeeCandidate`,
-        // `DiscriminantKindCandidate`, and `ConstDestructCandidate` to anything else.
+        // `DiscriminantKindCandidate`, `ConstDestructCandidate`, and `TupleCandidate`
+        // to anything else.
         //
         // This is a fix for #53123 and prevents winnowing from accidentally extending the
         // lifetime of a variable.
@@ -1629,7 +1630,8 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
                 BuiltinCandidate { has_nested: false }
                 | DiscriminantKindCandidate
                 | PointeeCandidate
-                | ConstDestructCandidate(_),
+                | ConstDestructCandidate(_)
+                | TupleCandidate,
                 _,
             ) => true,
             (
@@ -1637,7 +1639,8 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
                 BuiltinCandidate { has_nested: false }
                 | DiscriminantKindCandidate
                 | PointeeCandidate
-                | ConstDestructCandidate(_),
+                | ConstDestructCandidate(_)
+                | TupleCandidate,
             ) => false,
 
             (ParamCandidate(other), ParamCandidate(victim)) => {
@@ -1928,14 +1931,50 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
             ty::Dynamic(..)
             | ty::Str
             | ty::Slice(..)
-            | ty::Generator(..)
-            | ty::GeneratorWitness(..)
+            | ty::Generator(_, _, hir::Movability::Static)
             | ty::Foreign(..)
             | ty::Ref(_, _, hir::Mutability::Mut) => None,
 
             ty::Tuple(tys) => {
                 // (*) binder moved here
                 Where(obligation.predicate.rebind(tys.iter().collect()))
+            }
+
+            ty::Generator(_, substs, hir::Movability::Movable) => {
+                if self.tcx().features().generator_clone {
+                    let resolved_upvars =
+                        self.infcx.shallow_resolve(substs.as_generator().tupled_upvars_ty());
+                    let resolved_witness =
+                        self.infcx.shallow_resolve(substs.as_generator().witness());
+                    if resolved_upvars.is_ty_var() || resolved_witness.is_ty_var() {
+                        // Not yet resolved.
+                        Ambiguous
+                    } else {
+                        let all = substs
+                            .as_generator()
+                            .upvar_tys()
+                            .chain(iter::once(substs.as_generator().witness()))
+                            .collect::<Vec<_>>();
+                        Where(obligation.predicate.rebind(all))
+                    }
+                } else {
+                    None
+                }
+            }
+
+            ty::GeneratorWitness(binder) => {
+                let witness_tys = binder.skip_binder();
+                for witness_ty in witness_tys.iter() {
+                    let resolved = self.infcx.shallow_resolve(witness_ty);
+                    if resolved.is_ty_var() {
+                        return Ambiguous;
+                    }
+                }
+                // (*) binder moved here
+                let all_vars = self.tcx().mk_bound_variable_kinds(
+                    obligation.predicate.bound_vars().iter().chain(binder.bound_vars().iter()),
+                );
+                Where(ty::Binder::bind_with_vars(witness_tys.to_vec(), all_vars))
             }
 
             ty::Closure(_, substs) => {
