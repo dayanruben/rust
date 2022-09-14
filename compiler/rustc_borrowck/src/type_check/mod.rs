@@ -30,8 +30,9 @@ use rustc_middle::ty::cast::CastTy;
 use rustc_middle::ty::subst::{GenericArgKind, SubstsRef, UserSubsts};
 use rustc_middle::ty::visit::TypeVisitable;
 use rustc_middle::ty::{
-    self, CanonicalUserTypeAnnotation, CanonicalUserTypeAnnotations, OpaqueHiddenType,
-    OpaqueTypeKey, RegionVid, ToPredicate, Ty, TyCtxt, UserType, UserTypeAnnotationIndex,
+    self, Binder, CanonicalUserTypeAnnotation, CanonicalUserTypeAnnotations, Dynamic,
+    OpaqueHiddenType, OpaqueTypeKey, RegionVid, ToPredicate, Ty, TyCtxt, UserType,
+    UserTypeAnnotationIndex,
 };
 use rustc_span::def_id::CRATE_DEF_ID;
 use rustc_span::{Span, DUMMY_SP};
@@ -311,6 +312,8 @@ impl<'a, 'b, 'tcx> Visitor<'tcx> for TypeVerifier<'a, 'b, 'tcx> {
     }
 
     fn visit_constant(&mut self, constant: &Constant<'tcx>, location: Location) {
+        debug!(?constant, ?location, "visit_constant");
+
         self.super_constant(constant, location);
         let ty = self.sanitize_type(constant, constant.literal.ty());
 
@@ -1810,6 +1813,8 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
     }
 
     fn check_operand(&mut self, op: &Operand<'tcx>, location: Location) {
+        debug!(?op, ?location, "check_operand");
+
         if let Operand::Constant(constant) = op {
             let maybe_uneval = match constant.literal {
                 ConstantKind::Ty(ct) => match ct.kind() {
@@ -2004,6 +2009,36 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
 
                         self.prove_trait_ref(
                             trait_ref,
+                            location.to_locations(),
+                            ConstraintCategory::Cast,
+                        );
+                    }
+
+                    CastKind::DynStar => {
+                        // get the constraints from the target type (`dyn* Clone`)
+                        //
+                        // apply them to prove that the source type `Foo` implements `Clone` etc
+                        let (existential_predicates, region) = match ty.kind() {
+                            Dynamic(predicates, region, ty::DynStar) => (predicates, region),
+                            _ => panic!("Invalid dyn* cast_ty"),
+                        };
+
+                        let self_ty = op.ty(body, tcx);
+
+                        self.prove_predicates(
+                            existential_predicates
+                                .iter()
+                                .map(|predicate| predicate.with_self_ty(tcx, self_ty)),
+                            location.to_locations(),
+                            ConstraintCategory::Cast,
+                        );
+
+                        let outlives_predicate =
+                            tcx.mk_predicate(Binder::dummy(ty::PredicateKind::TypeOutlives(
+                                ty::OutlivesPredicate(self_ty, *region),
+                            )));
+                        self.prove_predicate(
+                            outlives_predicate,
                             location.to_locations(),
                             ConstraintCategory::Cast,
                         );
@@ -2560,7 +2595,7 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
                 .enumerate()
                 .filter_map(|(idx, constraint)| {
                     let ty::OutlivesPredicate(k1, r2) =
-                        constraint.no_bound_vars().unwrap_or_else(|| {
+                        constraint.0.no_bound_vars().unwrap_or_else(|| {
                             bug!("query_constraint {:?} contained bound vars", constraint,);
                         });
 
