@@ -207,7 +207,6 @@ a.source,
 .out-of-band,
 span.since,
 details.rustdoc-toggle > summary::before,
-.content ul.crate a.crate,
 a.srclink,
 #help-button > button,
 details.rustdoc-toggle.top-doc > summary,
@@ -218,11 +217,10 @@ details.rustdoc-toggle.non-exhaustive > summary::before,
 .more-examples-toggle summary, .more-examples-toggle .hide-more,
 .example-links a,
 /* This selector is for the items listed in the "all items" page. */
-#main-content > ul.docblock > li > a {
+ul.all-items {
 	font-family: "Fira Sans", Arial, NanumBarunGothic, sans-serif;
 }
 
-h1, h2, h3, h4,
 a#toggle-all-docs,
 a.anchor,
 .small-section-header a,
@@ -240,6 +238,49 @@ pre.rust a,
 .content .fn .where,
 .content .where.fmt-newline {
 	color: var(--main-color);
+}
+
+.content span.enum, .content a.enum,
+.content span.struct, .content a.struct,
+.content span.union, .content a.union,
+.content span.primitive, .content a.primitive,
+.content span.type, .content a.type,
+.content span.foreigntype, .content a.foreigntype {
+	color: var(--type-link-color);
+}
+
+.content span.trait, .content a.trait,
+.content span.traitalias, .content a.traitalias {
+	color: var(--trait-link-color);
+}
+
+.content span.associatedtype, .content a.associatedtype,
+.content span.constant, .content a.constant,
+.content span.static, .content a.static {
+	color: var(--assoc-item-link-color);
+}
+
+.content span.fn, .content a.fn,
+.content .fnname {
+	color: var(--function-link-color);
+}
+
+.content span.attr, .content a.attr,
+.content span.derive, .content a.derive,
+.content span.macro, .content a.macro {
+	color: var(--macro-link-color);
+}
+
+.content span.mod, .content a.mod, .block a.current.mod {
+	color: var(--mod-link-color);
+}
+
+.content span.keyword, .content a.keyword {
+	color: var(--keyword-link-color);
+}
+
+a {
+	color: var(--link-color);
 }
 
 ol, ul {
@@ -347,9 +388,7 @@ img {
 }
 
 .source .content {
-	max-width: none;
 	overflow: visible;
-	margin-left: 0px;
 }
 
 .sub-container {
@@ -494,13 +533,6 @@ img {
 	border: none;
 }
 
-.location a:first-of-type {
-	font-weight: 500;
-}
-
-.block {
-	padding: 0;
-}
 .block ul, .block li {
 	padding: 0;
 	margin: 0;
@@ -609,16 +641,12 @@ h2.location a {
 .docblock-short {
 	overflow-wrap: break-word;
 	overflow-wrap: anywhere;
-}
-.docblock-short p {
-	display: inline;
 	overflow: hidden;
 	text-overflow: ellipsis;
-	margin: 0;
 }
 /* Wrap non-pre code blocks (`text`) but not (```text```). */
 .docblock > :not(pre) > code,
-.docblock-short > :not(pre) > code {
+.docblock-short > code {
 	white-space: pre-wrap;
 }
 
@@ -758,7 +786,6 @@ nav.sub form { display: inline; }
 
 a {
 	text-decoration: none;
-	background: transparent;
 }
 
 .small-section-header {
@@ -797,6 +824,7 @@ h2.small-section-header > .anchor {
 	content: '§';
 }
 
+.all-items a:hover,
 .docblock a:not(.srclink):not(.test-arrow):not(.scrape-help):hover,
 .docblock-short a:not(.srclink):not(.test-arrow):not(.scrape-help):hover, .item-info a {
 	text-decoration: underline;
@@ -1124,10 +1152,6 @@ so that we can apply CSS-filters to change the arrow color in themes */
 	font-size: 1rem;
 }
 
-td.summary-column {
-	width: 100%;
-}
-
 .summary {
 	padding-right: 0px;
 }
@@ -1369,27 +1393,19 @@ pre.rust {
 }
 
 #titles {
-	height: 35px;
+	display: flex;
+	flex-direction: row;
+	gap: 1px;
+	margin-bottom: 4px;
 }
 
 #titles > button {
-	float: left;
-	width: 33.3%;
 	text-align: center;
 	font-size: 1.125rem;
 	cursor: pointer;
 	border: 0;
 	border-top: 2px solid;
-}
-
-#titles > button:first-child:last-child {
-	margin-right: 1px;
-	width: calc(100% - 1px);
-}
-
-#titles > button:not(:last-child) {
-	margin-right: 1px;
-	width: calc(33.3% - 1px);
+	flex: 1;
 }
 
 #titles > button > div.count {
@@ -1534,15 +1550,8 @@ kbd {
 	cursor: default;
 }
 
-#main-content > ul {
-	padding-left: 10px;
-}
-#main-content > ul > li {
+ul.all-items > li {
 	list-style: none;
-}
-
-.non-exhaustive {
-	margin-bottom: 1em;
 }
 
 details.dir-entry {
@@ -1879,19 +1888,8 @@ in storage.js plus the media query with (min-width: 701px)
 		display: none !important;
 	}
 
-	.notable-traits {
-		position: absolute;
-		left: -22px;
-		top: 24px;
-	}
-
 	#titles > button > div.count {
-		float: left;
-		width: 100%;
-	}
-
-	#titles {
-		height: 50px;
+		display: block;
 	}
 
 	/* Because of ios, we need to actually have a full height sidebar title so the
@@ -2022,10 +2020,6 @@ in storage.js plus the media query with (min-width: 701px)
 }
 
 @media (max-width: 464px) {
-	#titles, #titles > button {
-		height: 73px;
-	}
-
 	#crate-search {
 		border-radius: 4px;
 	}
