@@ -16,6 +16,7 @@ use rustc_data_structures::undo_log::Rollback;
 use rustc_data_structures::unify as ut;
 use rustc_errors::{DiagnosticBuilder, ErrorGuaranteed};
 use rustc_hir::def_id::{DefId, LocalDefId};
+use rustc_hir::hir_id::OwnerId;
 use rustc_middle::infer::canonical::{Canonical, CanonicalVarValues};
 use rustc_middle::infer::unify_key::{ConstVarValue, ConstVariableValue};
 use rustc_middle::infer::unify_key::{ConstVariableOrigin, ConstVariableOriginKind, ToType};
@@ -580,12 +581,12 @@ impl<'tcx> TyCtxtInferExt<'tcx> for TyCtxt<'tcx> {
 }
 
 impl<'tcx> InferCtxtBuilder<'tcx> {
-    /// Used only by `rustc_typeck` during body type-checking/inference,
+    /// Used only by `rustc_hir_analysis` during body type-checking/inference,
     /// will initialize `in_progress_typeck_results` with fresh `TypeckResults`.
     /// Will also change the scope for opaque type defining use checks to the given owner.
-    pub fn with_fresh_in_progress_typeck_results(mut self, table_owner: LocalDefId) -> Self {
+    pub fn with_fresh_in_progress_typeck_results(mut self, table_owner: OwnerId) -> Self {
         self.fresh_typeck_results = Some(RefCell::new(ty::TypeckResults::new(table_owner)));
-        self.with_opaque_type_inference(DefiningAnchor::Bind(table_owner))
+        self.with_opaque_type_inference(DefiningAnchor::Bind(table_owner.def_id))
     }
 
     /// Whenever the `InferCtxt` should be able to handle defining uses of opaque types,
@@ -705,8 +706,8 @@ impl<'a, 'tcx> InferCtxt<'a, 'tcx> {
     #[instrument(skip(self), level = "debug")]
     pub fn try_unify_abstract_consts(
         &self,
-        a: ty::Unevaluated<'tcx, ()>,
-        b: ty::Unevaluated<'tcx, ()>,
+        a: ty::UnevaluatedConst<'tcx>,
+        b: ty::UnevaluatedConst<'tcx>,
         param_env: ty::ParamEnv<'tcx>,
     ) -> bool {
         // Reject any attempt to unify two unevaluated constants that contain inference
@@ -1690,7 +1691,7 @@ impl<'a, 'tcx> InferCtxt<'a, 'tcx> {
     pub fn try_const_eval_resolve(
         &self,
         param_env: ty::ParamEnv<'tcx>,
-        unevaluated: ty::Unevaluated<'tcx, ()>,
+        unevaluated: ty::UnevaluatedConst<'tcx>,
         ty: Ty<'tcx>,
         span: Option<Span>,
     ) -> Result<ty::Const<'tcx>, ErrorHandled> {
@@ -1725,7 +1726,7 @@ impl<'a, 'tcx> InferCtxt<'a, 'tcx> {
     pub fn const_eval_resolve(
         &self,
         mut param_env: ty::ParamEnv<'tcx>,
-        unevaluated: ty::Unevaluated<'tcx, ()>,
+        unevaluated: ty::UnevaluatedConst<'tcx>,
         span: Option<Span>,
     ) -> EvalToValTreeResult<'tcx> {
         let mut substs = self.resolve_vars_if_possible(unevaluated.substs);
@@ -1756,8 +1757,7 @@ impl<'a, 'tcx> InferCtxt<'a, 'tcx> {
         debug!(?param_env_erased);
         debug!(?substs_erased);
 
-        let unevaluated =
-            ty::Unevaluated { def: unevaluated.def, substs: substs_erased, promoted: () };
+        let unevaluated = ty::UnevaluatedConst { def: unevaluated.def, substs: substs_erased };
 
         // The return value is the evaluated value which doesn't contain any reference to inference
         // variables, thus we don't need to substitute back the original values.
