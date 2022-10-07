@@ -43,8 +43,11 @@ impl Stack {
     pub fn retain(&mut self, tags: &FxHashSet<SbTag>) {
         let mut first_removed = None;
 
-        let mut read_idx = 1;
-        let mut write_idx = 1;
+        // For stacks with a known bottom, we never consider removing the bottom-most tag, because
+        // that is the base tag which exists whether or not there are any pointers to the
+        // allocation.
+        let mut read_idx = if self.unknown_bottom.is_some() { 0 } else { 1 };
+        let mut write_idx = read_idx;
         while read_idx < self.borrows.len() {
             let left = self.borrows[read_idx - 1];
             let this = self.borrows[read_idx];
@@ -211,7 +214,7 @@ impl<'tcx> Stack {
         }
 
         // Couldn't find it in the stack; but if there is an unknown bottom it might be there.
-        let found = self.unknown_bottom.is_some_and(|&unknown_limit| {
+        let found = self.unknown_bottom.is_some_and(|unknown_limit| {
             tag.0 < unknown_limit.0 // unknown_limit is an upper bound for what can be in the unknown bottom.
         });
         if found { Ok(None) } else { Err(()) }

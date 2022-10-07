@@ -256,10 +256,6 @@ pub enum TokenKind {
     Eof,
 }
 
-// `TokenKind` is used a lot. Make sure it doesn't unintentionally get bigger.
-#[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
-rustc_data_structures::static_assert_size!(TokenKind, 16);
-
 #[derive(Clone, PartialEq, Encodable, Decodable, Debug, HashStable_Generic)]
 pub struct Token {
     pub kind: TokenKind,
@@ -349,17 +345,14 @@ impl Token {
     }
 
     pub fn is_op(&self) -> bool {
-        !matches!(
-            self.kind,
-            OpenDelim(..)
-                | CloseDelim(..)
-                | Literal(..)
-                | DocComment(..)
-                | Ident(..)
-                | Lifetime(..)
-                | Interpolated(..)
-                | Eof
-        )
+        match self.kind {
+            Eq | Lt | Le | EqEq | Ne | Ge | Gt | AndAnd | OrOr | Not | Tilde | BinOp(_)
+            | BinOpEq(_) | At | Dot | DotDot | DotDotDot | DotDotEq | Comma | Semi | Colon
+            | ModSep | RArrow | LArrow | FatArrow | Pound | Dollar | Question | SingleQuote => true,
+
+            OpenDelim(..) | CloseDelim(..) | Literal(..) | DocComment(..) | Ident(..)
+            | Lifetime(..) | Interpolated(..) | Eof => false,
+        }
     }
 
     pub fn is_like_plus(&self) -> bool {
@@ -728,6 +721,7 @@ impl Token {
 }
 
 impl PartialEq<TokenKind> for Token {
+    #[inline]
     fn eq(&self, rhs: &TokenKind) -> bool {
         self.kind == *rhs
     }
@@ -750,10 +744,6 @@ pub enum Nonterminal {
     NtPath(P<ast::Path>),
     NtVis(P<ast::Visibility>),
 }
-
-// `Nonterminal` is used a lot. Make sure it doesn't unintentionally get bigger.
-#[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
-rustc_data_structures::static_assert_size!(Nonterminal, 16);
 
 #[derive(Debug, Copy, Clone, PartialEq, Encodable, Decodable)]
 pub enum NonterminalKind {
@@ -892,4 +882,17 @@ where
     fn hash_stable(&self, _hcx: &mut CTX, _hasher: &mut StableHasher) {
         panic!("interpolated tokens should not be present in the HIR")
     }
+}
+
+// Some types are used a lot. Make sure they don't unintentionally get bigger.
+#[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
+mod size_asserts {
+    use super::*;
+    use rustc_data_structures::static_assert_size;
+    // These are in alphabetical order, which is easy to maintain.
+    static_assert_size!(Lit, 12);
+    static_assert_size!(LitKind, 2);
+    static_assert_size!(Nonterminal, 16);
+    static_assert_size!(Token, 24);
+    static_assert_size!(TokenKind, 16);
 }

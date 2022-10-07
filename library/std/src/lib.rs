@@ -251,6 +251,7 @@
 #![feature(doc_notable_trait)]
 #![feature(dropck_eyepatch)]
 #![feature(exhaustive_patterns)]
+#![feature(if_let_guard)]
 #![feature(intra_doc_pointers)]
 #![feature(lang_items)]
 #![feature(let_chains)]
@@ -291,7 +292,7 @@
 #![feature(hasher_prefixfree_extras)]
 #![feature(hashmap_internals)]
 #![feature(int_error_internals)]
-#![feature(is_some_with)]
+#![feature(is_some_and)]
 #![feature(maybe_uninit_slice)]
 #![feature(maybe_uninit_write_slice)]
 #![feature(nonnull_slice_from_raw_parts)]
@@ -350,6 +351,7 @@
 // Only used in tests/benchmarks:
 //
 // Only for const-ness:
+#![feature(const_collections_with_hasher)]
 #![feature(const_io_structs)]
 #![feature(const_ip)]
 #![feature(const_ipv4)]

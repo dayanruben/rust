@@ -41,6 +41,7 @@ use rustc_middle::ty::adjustment::{Adjust, Adjustment, AllowTwoPhase};
 use rustc_middle::ty::error::TypeError::FieldMisMatch;
 use rustc_middle::ty::subst::SubstsRef;
 use rustc_middle::ty::{self, AdtKind, Ty, TypeVisitable};
+use rustc_session::errors::ExprParenthesesNeeded;
 use rustc_session::parse::feature_err;
 use rustc_span::hygiene::DesugaringKind;
 use rustc_span::lev_distance::find_best_match_for_name;
@@ -394,7 +395,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                         if let Some(sp) =
                             tcx.sess.parse_sess.ambiguous_block_expr_parse.borrow().get(&sp)
                         {
-                            tcx.sess.parse_sess.expr_parentheses_needed(&mut err, *sp);
+                            err.subdiagnostic(ExprParenthesesNeeded::surrounding(*sp));
                         }
                         err.emit();
                         oprnd_t = tcx.ty_error();
@@ -541,7 +542,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 // been resolved or we errored. This is important as we can only check transmute
                 // on concrete types, but the output type may not be known yet (it would only
                 // be known if explicitly specified via turbofish).
-                self.deferred_transmute_checks.borrow_mut().push((from, to, expr.span));
+                self.deferred_transmute_checks.borrow_mut().push((from, to, expr.hir_id));
             }
             if !tcx.features().unsized_fn_params {
                 // We want to remove some Sized bounds from std functions,
@@ -1044,6 +1045,14 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             let rhs_ty = self.check_expr(&rhs);
             let (applicability, eq) = if self.can_coerce(rhs_ty, lhs_ty) {
                 (Applicability::MachineApplicable, true)
+            } else if let ExprKind::Binary(
+                Spanned { node: hir::BinOpKind::And | hir::BinOpKind::Or, .. },
+                _,
+                rhs_expr,
+            ) = lhs.kind
+            {
+                let actual_lhs_ty = self.check_expr(&rhs_expr);
+                (Applicability::MaybeIncorrect, self.can_coerce(rhs_ty, actual_lhs_ty))
             } else {
                 (Applicability::MaybeIncorrect, false)
             };
@@ -1066,9 +1075,9 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             }
             if eq {
                 err.span_suggestion_verbose(
-                    span,
+                    span.shrink_to_hi(),
                     "you might have meant to compare for equality",
-                    "==",
+                    '=',
                     applicability,
                 );
             }
@@ -1640,13 +1649,14 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                                     Err(_) => {
                                         // This should never happen, since we're just subtyping the
                                         // remaining_fields, but it's fine to emit this, I guess.
-                                        self.report_mismatched_types(
-                                            &cause,
-                                            target_ty,
-                                            fru_ty,
-                                            FieldMisMatch(variant.name, ident.name),
-                                        )
-                                        .emit();
+                                        self.err_ctxt()
+                                            .report_mismatched_types(
+                                                &cause,
+                                                target_ty,
+                                                fru_ty,
+                                                FieldMisMatch(variant.name, ident.name),
+                                            )
+                                            .emit();
                                     }
                                 }
                             }
@@ -1933,7 +1943,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             self.set_tainted_by_errors();
             return;
         }
-        let mut err = self.type_error_struct_with_diag(
+        let mut err = self.err_ctxt().type_error_struct_with_diag(
             field.ident.span,
             |actual| match ty.kind() {
                 ty::Adt(adt, ..) if adt.is_enum() => struct_span_err!(

@@ -40,27 +40,29 @@ fluent_messages! {
     attr => "../locales/en-US/attr.ftl",
     borrowck => "../locales/en-US/borrowck.ftl",
     builtin_macros => "../locales/en-US/builtin_macros.ftl",
+    compiletest => "../locales/en-US/compiletest.ftl",
     const_eval => "../locales/en-US/const_eval.ftl",
+    codegen_gcc => "../locales/en-US/codegen_gcc.ftl",
     driver => "../locales/en-US/driver.ftl",
     expand => "../locales/en-US/expand.ftl",
-    session => "../locales/en-US/session.ftl",
-    interface => "../locales/en-US/interface.ftl",
+    hir_analysis => "../locales/en-US/hir_analysis.ftl",
     infer => "../locales/en-US/infer.ftl",
+    interface => "../locales/en-US/interface.ftl",
     lint => "../locales/en-US/lint.ftl",
-    middle => "../locales/en-US/middle.ftl",
-    monomorphize => "../locales/en-US/monomorphize.ftl",
     metadata => "../locales/en-US/metadata.ftl",
+    middle => "../locales/en-US/middle.ftl",
+    mir_dataflow => "../locales/en-US/mir_dataflow.ftl",
+    monomorphize => "../locales/en-US/monomorphize.ftl",
     parser => "../locales/en-US/parser.ftl",
     passes => "../locales/en-US/passes.ftl",
     plugin_impl => "../locales/en-US/plugin_impl.ftl",
     privacy => "../locales/en-US/privacy.ftl",
     query_system => "../locales/en-US/query_system.ftl",
-    trait_selection => "../locales/en-US/trait_selection.ftl",
     save_analysis => "../locales/en-US/save_analysis.ftl",
-    ty_utils => "../locales/en-US/ty_utils.ftl",
-    typeck => "../locales/en-US/typeck.ftl",
-    mir_dataflow => "../locales/en-US/mir_dataflow.ftl",
+    session => "../locales/en-US/session.ftl",
     symbol_mangling => "../locales/en-US/symbol_mangling.ftl",
+    trait_selection => "../locales/en-US/trait_selection.ftl",
+    ty_utils => "../locales/en-US/ty_utils.ftl",
 }
 
 pub use fluent_generated::{self as fluent, DEFAULT_LOCALE_RESOURCES};
@@ -354,6 +356,17 @@ impl DiagnosticMessage {
 impl<S: Into<String>> From<S> for DiagnosticMessage {
     fn from(s: S) -> Self {
         DiagnosticMessage::Str(s.into())
+    }
+}
+
+/// A workaround for "good path" ICEs when formatting types in disables lints.
+///
+/// Delays formatting until `.into(): DiagnosticMessage` is used.
+pub struct DelayDm<F>(pub F);
+
+impl<F: FnOnce() -> String> From<DelayDm<F>> for DiagnosticMessage {
+    fn from(DelayDm(f): DelayDm<F>) -> Self {
+        DiagnosticMessage::from(f())
     }
 }
 

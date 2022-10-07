@@ -83,9 +83,9 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                 Res::Def(DefKind::TyParam, src_def_id) => {
                     if let Some(param_local_id) = param.def_id.as_local() {
                         let param_name = tcx.hir().ty_param_name(param_local_id);
-                        let param_type = tcx.infer_ctxt().enter(|infcx| {
-                            infcx.resolve_numeric_literals_with_default(tcx.type_of(param.def_id))
-                        });
+                        let infcx = tcx.infer_ctxt().build();
+                        let param_type =
+                            infcx.resolve_numeric_literals_with_default(tcx.type_of(param.def_id));
                         if param_type.is_suggestable(tcx, false) {
                             err.span_suggestion(
                                 tcx.def_span(src_def_id),
@@ -448,8 +448,8 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
         let infer_lifetimes =
             (gen_pos != GenericArgPosition::Type || infer_args) && !gen_args.has_lifetime_params();
 
-        if gen_pos != GenericArgPosition::Type && !gen_args.bindings.is_empty() {
-            Self::prohibit_assoc_ty_binding(tcx, gen_args.bindings[0].span);
+        if gen_pos != GenericArgPosition::Type && let Some(b) = gen_args.bindings.first() {
+            Self::prohibit_assoc_ty_binding(tcx, b.span);
         }
 
         let explicit_late_bound =
@@ -649,9 +649,8 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                     LATE_BOUND_LIFETIME_ARGUMENTS,
                     args.args[0].hir_id(),
                     multispan,
-                    |lint| {
-                        lint.build(msg).emit();
-                    },
+                    msg,
+                    |lint| lint,
                 );
             }
 

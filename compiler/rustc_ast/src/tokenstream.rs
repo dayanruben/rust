@@ -47,10 +47,6 @@ pub enum TokenTree {
     Delimited(DelimSpan, Delimiter, TokenStream),
 }
 
-// This type is used a lot. Make sure it doesn't unintentionally get bigger.
-#[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
-rustc_data_structures::static_assert_size!(TokenTree, 32);
-
 // Ensure all fields of `TokenTree` is `Send` and `Sync`.
 #[cfg(parallel_compiler)]
 fn _dummy()
@@ -308,13 +304,20 @@ pub struct AttributesData {
 #[derive(Clone, Debug, Default, Encodable, Decodable)]
 pub struct TokenStream(pub(crate) Lrc<Vec<TokenTree>>);
 
-// `TokenStream` is used a lot. Make sure it doesn't unintentionally get bigger.
-#[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
-rustc_data_structures::static_assert_size!(TokenStream, 8);
-
+/// Similar to `proc_macro::Spacing`, but for tokens.
+///
+/// Note that all `ast::TokenTree::Token` instances have a `Spacing`, but when
+/// we convert to `proc_macro::TokenTree` for proc macros only `Punct`
+/// `TokenTree`s have a `proc_macro::Spacing`.
 #[derive(Clone, Copy, Debug, PartialEq, Encodable, Decodable, HashStable_Generic)]
 pub enum Spacing {
+    /// The token is not immediately followed by an operator token (as
+    /// determined by `Token::is_op`). E.g. a `+` token is `Alone` in `+ =`,
+    /// `+/*foo*/=`, `+ident`, and `+()`.
     Alone,
+
+    /// The token is immediately followed by an operator token. E.g. a `+`
+    /// token is `Joint` in `+=` and `++`.
     Joint,
 }
 
@@ -663,4 +666,17 @@ impl DelimSpan {
     pub fn entire(self) -> Span {
         self.open.with_hi(self.close.hi())
     }
+}
+
+// Some types are used a lot. Make sure they don't unintentionally get bigger.
+#[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
+mod size_asserts {
+    use super::*;
+    use rustc_data_structures::static_assert_size;
+    // These are in alphabetical order, which is easy to maintain.
+    static_assert_size!(AttrTokenStream, 8);
+    static_assert_size!(AttrTokenTree, 32);
+    static_assert_size!(LazyAttrTokenStream, 8);
+    static_assert_size!(TokenStream, 8);
+    static_assert_size!(TokenTree, 32);
 }

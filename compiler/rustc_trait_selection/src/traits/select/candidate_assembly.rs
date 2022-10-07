@@ -6,6 +6,7 @@
 //!
 //! [rustc dev guide]:https://rustc-dev-guide.rust-lang.org/traits/resolution.html#candidate-assembly
 use hir::LangItem;
+use rustc_errors::DelayDm;
 use rustc_hir as hir;
 use rustc_hir::def_id::DefId;
 use rustc_infer::traits::ObligationCause;
@@ -173,7 +174,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
 
         debug!(?stack, ?candidates, "winnowed to {} candidates", candidates.len());
 
-        let needs_infer = stack.obligation.predicate.has_infer_types_or_consts();
+        let needs_infer = stack.obligation.predicate.has_non_region_infer();
 
         // If there are STILL multiple candidates, we can further
         // reduce the list by dropping duplicates -- including
@@ -825,13 +826,11 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
                                     DEREF_INTO_DYN_SUPERTRAIT,
                                     obligation.cause.body_id,
                                     obligation.cause.span,
-                                    |lint| {
-                                        lint.build(&format!(
-                                            "`{}` implements `Deref` with supertrait `{}` as output",
-                                            source,
-                                            deref_output_ty
-                                        )).emit();
-                                    },
+                                    DelayDm(|| format!(
+                                        "`{}` implements `Deref` with supertrait `{}` as output",
+                                        source, deref_output_ty
+                                    )),
+                                    |lint| lint,
                                 );
                                 return;
                             }
@@ -890,11 +889,11 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
         obligation: &TraitObligation<'tcx>,
         candidates: &mut SelectionCandidateSet<'tcx>,
     ) {
-        if obligation.has_param_types_or_consts() {
+        if obligation.has_non_region_param() {
             return;
         }
 
-        if obligation.has_infer_types_or_consts() {
+        if obligation.has_non_region_infer() {
             candidates.ambiguous = true;
             return;
         }
