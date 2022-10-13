@@ -1834,7 +1834,14 @@ impl<'tcx> Rvalue<'tcx> {
             | Rvalue::AddressOf(_, _)
             | Rvalue::Len(_)
             | Rvalue::Cast(
-                CastKind::Misc | CastKind::Pointer(_) | CastKind::PointerFromExposedAddress,
+                CastKind::IntToInt
+                | CastKind::FloatToInt
+                | CastKind::FloatToFloat
+                | CastKind::IntToFloat
+                | CastKind::FnPtrToPtr
+                | CastKind::PtrToPtr
+                | CastKind::Pointer(_)
+                | CastKind::PointerFromExposedAddress,
                 _,
                 _,
             )
@@ -2939,11 +2946,12 @@ impl Location {
 mod size_asserts {
     use super::*;
     use rustc_data_structures::static_assert_size;
-    // These are in alphabetical order, which is easy to maintain.
+    // tidy-alphabetical-start
     static_assert_size!(BasicBlockData<'_>, 144);
     static_assert_size!(LocalDecl<'_>, 56);
     static_assert_size!(Statement<'_>, 32);
     static_assert_size!(StatementKind<'_>, 16);
     static_assert_size!(Terminator<'_>, 112);
     static_assert_size!(TerminatorKind<'_>, 96);
+    // tidy-alphabetical-end
 }

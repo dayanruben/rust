@@ -284,7 +284,7 @@ pub(super) fn type_of(tcx: TyCtxt<'_>, def_id: DefId) -> Ty<'_> {
                     icx.to_ty(ty)
                 }
             }
-            ImplItemKind::TyAlias(ty) => {
+            ImplItemKind::Type(ty) => {
                 if tcx.impl_trait_ref(tcx.hir().get_parent_item(hir_id)).is_none() {
                     check_feature_inherent_assoc_ty(tcx, item.span);
                 }
@@ -340,10 +340,9 @@ pub(super) fn type_of(tcx: TyCtxt<'_>, def_id: DefId) -> Ty<'_> {
                     ..
                 }) => {
                     if in_trait {
-                        span_bug!(item.span, "impl-trait in trait has no default")
-                    } else {
-                        find_opaque_ty_constraints_for_rpit(tcx, def_id, owner)
+                        assert!(tcx.impl_defaultness(owner).has_value());
                     }
+                    find_opaque_ty_constraints_for_rpit(tcx, def_id, owner)
                 }
                 ItemKind::Trait(..)
                 | ItemKind::TraitAlias(..)

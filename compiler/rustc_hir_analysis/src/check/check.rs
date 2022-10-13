@@ -31,7 +31,6 @@ use rustc_span::{self, Span};
 use rustc_target::spec::abi::Abi;
 use rustc_trait_selection::traits::error_reporting::TypeErrCtxtExt as _;
 use rustc_trait_selection::traits::{self, ObligationCtxt};
-use rustc_ty_utils::representability::{self, Representability};
 
 use std::ops::ControlFlow;
 
@@ -381,7 +380,6 @@ fn check_struct(tcx: TyCtxt<'_>, def_id: LocalDefId) {
     let def = tcx.adt_def(def_id);
     let span = tcx.def_span(def_id);
     def.destructor(tcx); // force the destructor to be evaluated
-    check_representable(tcx, span, def_id);
 
     if def.repr().simd() {
         check_simd(tcx, span, def_id);
@@ -395,7 +393,6 @@ fn check_union(tcx: TyCtxt<'_>, def_id: LocalDefId) {
     let def = tcx.adt_def(def_id);
     let span = tcx.def_span(def_id);
     def.destructor(tcx); // force the destructor to be evaluated
-    check_representable(tcx, span, def_id);
     check_transparent(tcx, span, def);
     check_union_fields(tcx, span, def_id);
     check_packed(tcx, span, def);
@@ -525,23 +522,33 @@ fn check_static_inhabited<'tcx>(tcx: TyCtxt<'tcx>, def_id: LocalDefId) {
 
 /// Checks that an opaque type does not contain cycles and does not use `Self` or `T::Foo`
 /// projections that would result in "inheriting lifetimes".
-pub(super) fn check_opaque<'tcx>(
-    tcx: TyCtxt<'tcx>,
-    def_id: LocalDefId,
-    substs: SubstsRef<'tcx>,
-    origin: &hir::OpaqueTyOrigin,
-) {
-    let span = tcx.def_span(def_id);
-    check_opaque_for_inheriting_lifetimes(tcx, def_id, span);
-    if tcx.type_of(def_id).references_error() {
+fn check_opaque<'tcx>(tcx: TyCtxt<'tcx>, id: hir::ItemId) {
+    let item = tcx.hir().item(id);
+    let hir::ItemKind::OpaqueTy(hir::OpaqueTy { origin, .. }) = item.kind else {
+        tcx.sess.delay_span_bug(tcx.hir().span(id.hir_id()), "expected opaque item");
         return;
-    }
-    if check_opaque_for_cycles(tcx, def_id, substs, span, origin).is_err() {
-        return;
-    }
-    check_opaque_meets_bounds(tcx, def_id, substs, span, origin);
-}
+    };
 
+    // HACK(jynelson): trying to infer the type of `impl trait` breaks documenting
+    // `async-std` (and `pub async fn` in general).
+    // Since rustdoc doesn't care about the concrete type behind `impl Trait`, just don't look at it!
+    // See https://github.com/rust-lang/rust/issues/75100
+    if tcx.sess.opts.actually_rustdoc {
+        return;
+    }
+
+    let substs = InternalSubsts::identity_for_item(tcx, item.def_id.to_def_id());
+    let span = tcx.def_span(item.def_id.def_id);
+
+    check_opaque_for_inheriting_lifetimes(tcx, item.def_id.def_id, span);
+    if tcx.type_of(item.def_id.def_id).references_error() {
+        return;
+    }
+    if check_opaque_for_cycles(tcx, item.def_id.def_id, substs, span, &origin).is_err() {
+        return;
+    }
+    check_opaque_meets_bounds(tcx, item.def_id.def_id, substs, span, &origin);
+}
 /// Checks that an opaque type does not use `Self` or `T::Foo` projections that would result
 /// in "inheriting lifetimes".
 #[instrument(level = "debug", skip(tcx, span))]
@@ -708,10 +715,12 @@ pub(super) fn check_opaque_for_cycles<'tcx>(
 /// check those cases in the `param_env` of that function, which may have
 /// bounds not on this opaque type:
 ///
-/// type X<T> = impl Clone
+/// ```ignore (illustrative)
+/// type X<T> = impl Clone;
 /// fn f<T: Clone>(t: T) -> X<T> {
 ///     t
 /// }
+/// ```
 ///
 /// Without this check the above code is incorrectly accepted: we would ICE if
 /// some tried, for example, to clone an `Option<X<&mut ()>>`.
@@ -858,17 +867,17 @@ fn check_item_type<'tcx>(tcx: TyCtxt<'tcx>, id: hir::ItemId) {
             check_union(tcx, id.def_id.def_id);
         }
         DefKind::OpaqueTy => {
-            let item = tcx.hir().item(id);
-            let hir::ItemKind::OpaqueTy(hir::OpaqueTy { origin, .. }) = item.kind else {
-                return;
-            };
-            // HACK(jynelson): trying to infer the type of `impl trait` breaks documenting
-            // `async-std` (and `pub async fn` in general).
-            // Since rustdoc doesn't care about the concrete type behind `impl Trait`, just don't look at it!
-            // See https://github.com/rust-lang/rust/issues/75100
-            if !tcx.sess.opts.actually_rustdoc {
-                let substs = InternalSubsts::identity_for_item(tcx, item.def_id.to_def_id());
-                check_opaque(tcx, item.def_id.def_id, substs, &origin);
+            check_opaque(tcx, id);
+        }
+        DefKind::ImplTraitPlaceholder => {
+            let parent = tcx.impl_trait_in_trait_parent(id.def_id.to_def_id());
+            // Only check the validity of this opaque type if the function has a default body
+            if let hir::Node::TraitItem(hir::TraitItem {
+                kind: hir::TraitItemKind::Fn(_, hir::TraitFn::Provided(_)),
+                ..
+            }) = tcx.hir().get_by_def_id(parent.expect_local())
+            {
+                check_opaque(tcx, id);
             }
         }
         DefKind::TyAlias => {
@@ -1063,7 +1072,7 @@ fn check_impl_items_against_trait<'tcx>(
                     opt_trait_span,
                 );
             }
-            hir::ImplItemKind::TyAlias(impl_ty) => {
+            hir::ImplItemKind::Type(impl_ty) => {
                 let opt_trait_span = tcx.hir().span_if_local(ty_trait_item.def_id);
                 compare_ty_impl(
                     tcx,
@@ -1149,27 +1158,6 @@ fn check_impl_items_against_trait<'tcx>(
             );
         }
     }
-}
-
-/// Checks whether a type can be represented in memory. In particular, it
-/// identifies types that contain themselves without indirection through a
-/// pointer, which would mean their size is unbounded.
-pub(super) fn check_representable(tcx: TyCtxt<'_>, sp: Span, item_def_id: LocalDefId) -> bool {
-    let rty = tcx.type_of(item_def_id);
-
-    // Check that it is possible to represent this type. This call identifies
-    // (1) types that contain themselves and (2) types that contain a different
-    // recursive type. It is only necessary to throw an error on those that
-    // contain themselves. For case 2, there must be an inner type that will be
-    // caught by case 1.
-    match representability::ty_is_representable(tcx, rty, sp, None) {
-        Representability::SelfRecursive(spans) => {
-            recursive_type_with_infinite_size_error(tcx, item_def_id.to_def_id(), spans);
-            return false;
-        }
-        Representability::Representable | Representability::ContainsRecursive => (),
-    }
-    true
 }
 
 pub fn check_simd(tcx: TyCtxt<'_>, sp: Span, def_id: LocalDefId) {
@@ -1509,7 +1497,6 @@ fn check_enum<'tcx>(tcx: TyCtxt<'tcx>, vs: &'tcx [hir::Variant<'tcx>], def_id: L
 
     detect_discriminant_duplicate(tcx, def.discriminants(tcx).collect(), vs, sp);
 
-    check_representable(tcx, sp, def_id);
     check_transparent(tcx, sp, def);
 }
 

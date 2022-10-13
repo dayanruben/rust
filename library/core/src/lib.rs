@@ -152,6 +152,7 @@
 #![feature(core_panic)]
 #![feature(duration_consts_float)]
 #![feature(maybe_uninit_uninit_array)]
+#![feature(ptr_alignment_type)]
 #![feature(ptr_metadata)]
 #![feature(slice_ptr_get)]
 #![feature(slice_split_at_unchecked)]
@@ -326,8 +327,6 @@ pub mod cell;
 pub mod char;
 pub mod ffi;
 pub mod iter;
-#[unstable(feature = "once_cell", issue = "74465")]
-pub mod lazy;
 pub mod option;
 pub mod panic;
 pub mod panicking;
