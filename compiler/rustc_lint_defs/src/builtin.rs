@@ -1427,6 +1427,7 @@ declare_lint! {
     "trait-object types were treated as different depending on marker-trait order",
     @future_incompatible = FutureIncompatibleInfo {
         reference: "issue #56484 <https://github.com/rust-lang/rust/issues/56484>",
+        reason: FutureIncompatibilityReason::FutureReleaseErrorReportNow,
     };
 }
 
@@ -2878,7 +2879,7 @@ declare_lint! {
     /// ### Example
     ///
     /// ```rust
-    /// #![feature(naked_functions)]
+    /// #![feature(asm_experimental_arch, naked_functions)]
     ///
     /// use std::arch::asm;
     ///
@@ -3937,7 +3938,7 @@ declare_lint! {
     ///
     /// The compiler disables the automatic implementation if an explicit one
     /// exists for given type constructor. The exact rules governing this
-    /// are currently unsound and quite subtle and and will be modified in the future.
+    /// are currently unsound, quite subtle, and will be modified in the future.
     /// This change will cause the automatic implementation to be disabled in more
     /// cases, potentially breaking some code.
     pub SUSPICIOUS_AUTO_TRAIT_IMPLS,

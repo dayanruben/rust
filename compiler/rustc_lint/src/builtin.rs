@@ -3176,6 +3176,7 @@ declare_lint! {
     /// ### Example
     ///
     /// ```rust,compile_fail
+    /// # #![feature(asm_experimental_arch)]
     /// use std::arch::asm;
     ///
     /// fn main() {
@@ -3310,7 +3311,7 @@ declare_lint! {
     /// explicitly.
     ///
     /// To access a library from a binary target within the same crate,
-    /// use `your_crate_name::` as the path path instead of `lib::`:
+    /// use `your_crate_name::` as the path instead of `lib::`:
     ///
     /// ```rust,compile_fail
     /// // bar/src/lib.rs

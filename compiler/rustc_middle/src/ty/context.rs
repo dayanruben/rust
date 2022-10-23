@@ -56,7 +56,6 @@ use rustc_query_system::ich::StableHashingContext;
 use rustc_serialize::opaque::{FileEncodeResult, FileEncoder};
 use rustc_session::config::{CrateType, OutputFilenames};
 use rustc_session::cstore::CrateStoreDyn;
-use rustc_session::errors::TargetDataLayoutErrorsWrapper;
 use rustc_session::lint::Lint;
 use rustc_session::Limit;
 use rustc_session::Session;
@@ -199,9 +198,9 @@ impl<'tcx> CtxtInterners<'tcx> {
                 .intern(kind, |kind| {
                     let flags = super::flags::FlagComputation::for_kind(&kind);
 
-                    // It's impossible to hash inference regions (and will ICE), so we don't need to try to cache them.
+                    // It's impossible to hash inference variables (and will ICE), so we don't need to try to cache them.
                     // Without incremental, we rarely stable-hash types, so let's not do it proactively.
-                    let stable_hash = if flags.flags.intersects(TypeFlags::HAS_RE_INFER)
+                    let stable_hash = if flags.flags.intersects(TypeFlags::NEEDS_INFER)
                         || sess.opts.incremental.is_none()
                     {
                         Fingerprint::ZERO
@@ -539,12 +538,10 @@ pub struct TypeckResults<'tcx> {
     pub tainted_by_errors: Option<ErrorGuaranteed>,
 
     /// All the opaque types that have hidden types set
-    /// by this function. For return-position-impl-trait we also store the
-    /// type here, so that mir-borrowck can figure out hidden types,
+    /// by this function. We also store the
+    /// type here, so that mir-borrowck can use it as a hint for figuring out hidden types,
     /// even if they are only set in dead code (which doesn't show up in MIR).
-    /// For type-alias-impl-trait, this map is only used to prevent query cycles,
-    /// so the hidden types are all `None`.
-    pub concrete_opaque_types: VecMap<LocalDefId, Option<Ty<'tcx>>>,
+    pub concrete_opaque_types: VecMap<LocalDefId, ty::OpaqueHiddenType<'tcx>>,
 
     /// Tracks the minimum captures required for a closure;
     /// see `MinCaptureInformationMap` for more details.
@@ -1249,7 +1246,7 @@ impl<'tcx> TyCtxt<'tcx> {
         output_filenames: OutputFilenames,
     ) -> GlobalCtxt<'tcx> {
         let data_layout = TargetDataLayout::parse(&s.target).unwrap_or_else(|err| {
-            s.emit_fatal(TargetDataLayoutErrorsWrapper(err));
+            s.emit_fatal(err);
         });
         let interners = CtxtInterners::new(arena);
         let common_types = CommonTypes::new(
@@ -2826,6 +2823,11 @@ impl<'tcx> TyCtxt<'tcx> {
         })
     }
 
+    /// Emit a lint at the appropriate level for a hir node, with an associated span.
+    ///
+    /// Return value of the `decorate` closure is ignored, see [`struct_lint_level`] for a detailed explanation.
+    ///
+    /// [`struct_lint_level`]: rustc_middle::lint::struct_lint_level#decorate-signature
     pub fn struct_span_lint_hir(
         self,
         lint: &'static Lint,
@@ -2851,6 +2853,11 @@ impl<'tcx> TyCtxt<'tcx> {
         self.struct_lint_node(lint, id, decorator.msg(), |diag| decorator.decorate_lint(diag))
     }
 
+    /// Emit a lint at the appropriate level for a hir node.
+    ///
+    /// Return value of the `decorate` closure is ignored, see [`struct_lint_level`] for a detailed explanation.
+    ///
+    /// [`struct_lint_level`]: rustc_middle::lint::struct_lint_level#decorate-signature
     pub fn struct_lint_node(
         self,
         lint: &'static Lint,
@@ -2945,6 +2952,21 @@ impl<'tcx> TyCtxtAt<'tcx> {
     pub fn ty_error_with_message(self, msg: &str) -> Ty<'tcx> {
         self.tcx.ty_error_with_message(self.span, msg)
     }
+}
+
+/// Parameter attributes that can only be determined by examining the body of a function instead
+/// of just its signature.
+///
+/// These can be useful for optimization purposes when a function is directly called. We compute
+/// them and store them into the crate metadata so that downstream crates can make use of them.
+///
+/// Right now, we only have `read_only`, but `no_capture` and `no_alias` might be useful in the
+/// future.
+#[derive(Clone, Copy, PartialEq, Debug, Default, TyDecodable, TyEncodable, HashStable)]
+pub struct DeducedParamAttrs {
+    /// The parameter is marked immutable in the function and contains no `UnsafeCell` (i.e. its
+    /// type is freeze).
+    pub read_only: bool,
 }
 
 // We are comparing types with different invariant lifetimes, so `ptr::eq`

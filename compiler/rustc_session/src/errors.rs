@@ -1,12 +1,9 @@
 use std::num::NonZeroU32;
 
 use crate::cgu_reuse_tracker::CguReuse;
-use rustc_errors::{
-    fluent, DiagnosticBuilder, ErrorGuaranteed, Handler, IntoDiagnostic, MultiSpan,
-};
+use rustc_errors::MultiSpan;
 use rustc_macros::Diagnostic;
 use rustc_span::{Span, Symbol};
-use rustc_target::abi::TargetDataLayoutErrors;
 use rustc_target::spec::{SplitDebuginfo, StackProtector, TargetTriple};
 
 #[derive(Diagnostic)]
@@ -45,59 +42,6 @@ pub struct FeatureDiagnosticForIssue {
 #[help(session::feature_diagnostic_help)]
 pub struct FeatureDiagnosticHelp {
     pub feature: Symbol,
-}
-
-pub struct TargetDataLayoutErrorsWrapper<'a>(pub TargetDataLayoutErrors<'a>);
-
-impl IntoDiagnostic<'_, !> for TargetDataLayoutErrorsWrapper<'_> {
-    fn into_diagnostic(self, handler: &Handler) -> DiagnosticBuilder<'_, !> {
-        let mut diag;
-        match self.0 {
-            TargetDataLayoutErrors::InvalidAddressSpace { addr_space, err, cause } => {
-                diag = handler.struct_fatal(fluent::session::target_invalid_address_space);
-                diag.set_arg("addr_space", addr_space);
-                diag.set_arg("cause", cause);
-                diag.set_arg("err", err);
-                diag
-            }
-            TargetDataLayoutErrors::InvalidBits { kind, bit, cause, err } => {
-                diag = handler.struct_fatal(fluent::session::target_invalid_bits);
-                diag.set_arg("kind", kind);
-                diag.set_arg("bit", bit);
-                diag.set_arg("cause", cause);
-                diag.set_arg("err", err);
-                diag
-            }
-            TargetDataLayoutErrors::MissingAlignment { cause } => {
-                diag = handler.struct_fatal(fluent::session::target_missing_alignment);
-                diag.set_arg("cause", cause);
-                diag
-            }
-            TargetDataLayoutErrors::InvalidAlignment { cause, err } => {
-                diag = handler.struct_fatal(fluent::session::target_invalid_alignment);
-                diag.set_arg("cause", cause);
-                diag.set_arg("err", err);
-                diag
-            }
-            TargetDataLayoutErrors::InconsistentTargetArchitecture { dl, target } => {
-                diag = handler.struct_fatal(fluent::session::target_inconsistent_architecture);
-                diag.set_arg("dl", dl);
-                diag.set_arg("target", target);
-                diag
-            }
-            TargetDataLayoutErrors::InconsistentTargetPointerWidth { pointer_size, target } => {
-                diag = handler.struct_fatal(fluent::session::target_inconsistent_pointer_width);
-                diag.set_arg("pointer_size", pointer_size);
-                diag.set_arg("target", target);
-                diag
-            }
-            TargetDataLayoutErrors::InvalidBitsSize { err } => {
-                diag = handler.struct_fatal(fluent::session::target_invalid_bits_size);
-                diag.set_arg("err", err);
-                diag
-            }
-        }
-    }
 }
 
 #[derive(Diagnostic)]
@@ -202,22 +146,13 @@ pub struct CrateNameEmpty {
     pub span: Option<Span>,
 }
 
+#[derive(Diagnostic)]
+#[diag(session::invalid_character_in_create_name)]
 pub struct InvalidCharacterInCrateName<'a> {
+    #[primary_span]
     pub span: Option<Span>,
     pub character: char,
     pub crate_name: &'a str,
-}
-
-impl IntoDiagnostic<'_> for InvalidCharacterInCrateName<'_> {
-    fn into_diagnostic(self, sess: &Handler) -> DiagnosticBuilder<'_, ErrorGuaranteed> {
-        let mut diag = sess.struct_err(fluent::session::invalid_character_in_create_name);
-        if let Some(sp) = self.span {
-            diag.set_span(sp);
-        }
-        diag.set_arg("character", self.character);
-        diag.set_arg("crate_name", self.crate_name);
-        diag
-    }
 }
 
 #[derive(Subdiagnostic)]
@@ -233,4 +168,26 @@ impl ExprParenthesesNeeded {
     pub fn surrounding(s: Span) -> Self {
         ExprParenthesesNeeded { left: s.shrink_to_lo(), right: s.shrink_to_hi() }
     }
+}
+
+#[derive(Diagnostic)]
+#[diag(session::skipping_const_checks)]
+pub struct SkippingConstChecks {
+    #[subdiagnostic(eager)]
+    pub unleashed_features: Vec<UnleashedFeatureHelp>,
+}
+
+#[derive(Subdiagnostic)]
+pub enum UnleashedFeatureHelp {
+    #[help(session::unleashed_feature_help_named)]
+    Named {
+        #[primary_span]
+        span: Span,
+        gate: Symbol,
+    },
+    #[help(session::unleashed_feature_help_unnamed)]
+    Unnamed {
+        #[primary_span]
+        span: Span,
+    },
 }

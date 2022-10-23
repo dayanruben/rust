@@ -26,6 +26,7 @@ use crate::ty::util::Discr;
 pub use adt::*;
 pub use assoc::*;
 pub use generics::*;
+use hir::OpaqueTyOrigin;
 use rustc_ast as ast;
 use rustc_ast::node_id::NodeMap;
 use rustc_attr as attr;
@@ -77,7 +78,7 @@ pub use self::consts::{
 };
 pub use self::context::{
     tls, CanonicalUserType, CanonicalUserTypeAnnotation, CanonicalUserTypeAnnotations,
-    CtxtInterners, DelaySpanBugEmitted, FreeRegionInfo, GeneratorDiagnosticData,
+    CtxtInterners, DeducedParamAttrs, DelaySpanBugEmitted, FreeRegionInfo, GeneratorDiagnosticData,
     GeneratorInteriorTypeCause, GlobalCtxt, Lift, OnDiskCache, TyCtxt, TypeckResults, UserType,
     UserTypeAnnotationIndex,
 };
@@ -131,6 +132,7 @@ mod generics;
 mod impls_ty;
 mod instance;
 mod list;
+mod opaque_types;
 mod parameterized;
 mod rvalue_scopes;
 mod structural_impls;
@@ -681,7 +683,7 @@ pub enum PredicateKind<'tcx> {
     Coerce(CoercePredicate<'tcx>),
 
     /// Constant initializer must evaluate successfully.
-    ConstEvaluatable(ty::UnevaluatedConst<'tcx>),
+    ConstEvaluatable(ty::Const<'tcx>),
 
     /// Constants must be equal. The first component is the const that is expected.
     ConstEquate(Const<'tcx>, Const<'tcx>),
@@ -1299,6 +1301,106 @@ impl<'tcx> OpaqueHiddenType<'tcx> {
             other_span: other.span,
             sub: sub_diag,
         });
+    }
+
+    #[instrument(level = "debug", skip(tcx), ret)]
+    pub fn remap_generic_params_to_declaration_params(
+        self,
+        opaque_type_key: OpaqueTypeKey<'tcx>,
+        tcx: TyCtxt<'tcx>,
+        // typeck errors have subpar spans for opaque types, so delay error reporting until borrowck.
+        ignore_errors: bool,
+        origin: OpaqueTyOrigin,
+    ) -> Self {
+        let OpaqueTypeKey { def_id, substs } = opaque_type_key;
+
+        // Use substs to build up a reverse map from regions to their
+        // identity mappings. This is necessary because of `impl
+        // Trait` lifetimes are computed by replacing existing
+        // lifetimes with 'static and remapping only those used in the
+        // `impl Trait` return type, resulting in the parameters
+        // shifting.
+        let id_substs = InternalSubsts::identity_for_item(tcx, def_id.to_def_id());
+        debug!(?id_substs);
+
+        let map = substs.iter().zip(id_substs);
+
+        let map: FxHashMap<GenericArg<'tcx>, GenericArg<'tcx>> = match origin {
+            // HACK: The HIR lowering for async fn does not generate
+            // any `+ Captures<'x>` bounds for the `impl Future<...>`, so all async fns with lifetimes
+            // would now fail to compile. We should probably just make hir lowering fill this in properly.
+            OpaqueTyOrigin::AsyncFn(_) => map.collect(),
+            OpaqueTyOrigin::FnReturn(_) | OpaqueTyOrigin::TyAlias => {
+                // Opaque types may only use regions that are bound. So for
+                // ```rust
+                // type Foo<'a, 'b, 'c> = impl Trait<'a> + 'b;
+                // ```
+                // we may not use `'c` in the hidden type.
+                struct OpaqueTypeLifetimeCollector<'tcx> {
+                    lifetimes: FxHashSet<ty::Region<'tcx>>,
+                }
+
+                impl<'tcx> ty::TypeVisitor<'tcx> for OpaqueTypeLifetimeCollector<'tcx> {
+                    fn visit_region(&mut self, r: ty::Region<'tcx>) -> ControlFlow<Self::BreakTy> {
+                        self.lifetimes.insert(r);
+                        r.super_visit_with(self)
+                    }
+                }
+
+                let mut collector = OpaqueTypeLifetimeCollector { lifetimes: Default::default() };
+
+                for pred in tcx.bound_explicit_item_bounds(def_id.to_def_id()).transpose_iter() {
+                    let pred = pred.map_bound(|(pred, _)| *pred).subst(tcx, id_substs);
+
+                    trace!(pred=?pred.kind());
+
+                    // We only ignore opaque type substs if the opaque type is the outermost type.
+                    // The opaque type may be nested within itself via recursion in e.g.
+                    // type Foo<'a> = impl PartialEq<Foo<'a>>;
+                    // which thus mentions `'a` and should thus accept hidden types that borrow 'a
+                    // instead of requiring an additional `+ 'a`.
+                    match pred.kind().skip_binder() {
+                        ty::PredicateKind::Trait(TraitPredicate {
+                            trait_ref: ty::TraitRef { def_id: _, substs },
+                            constness: _,
+                            polarity: _,
+                        }) => {
+                            trace!(?substs);
+                            for subst in &substs[1..] {
+                                subst.visit_with(&mut collector);
+                            }
+                        }
+                        ty::PredicateKind::Projection(ty::ProjectionPredicate {
+                            projection_ty: ty::ProjectionTy { substs, item_def_id: _ },
+                            term,
+                        }) => {
+                            for subst in &substs[1..] {
+                                subst.visit_with(&mut collector);
+                            }
+                            term.visit_with(&mut collector);
+                        }
+                        _ => {
+                            pred.visit_with(&mut collector);
+                        }
+                    }
+                }
+                let lifetimes = collector.lifetimes;
+                trace!(?lifetimes);
+                map.filter(|(_, v)| {
+                    let ty::GenericArgKind::Lifetime(lt) = v.unpack() else {
+                        return true;
+                    };
+                    lifetimes.contains(&lt)
+                })
+                .collect()
+            }
+        };
+        debug!("map = {:#?}", map);
+
+        // Convert the type from the function into a type valid outside
+        // the function, by replacing invalid regions with 'static,
+        // after producing an error for each of them.
+        self.fold_with(&mut opaque_types::ReverseMapper::new(tcx, map, self.span, ignore_errors))
     }
 }
 
