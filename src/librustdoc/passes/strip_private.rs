@@ -22,8 +22,9 @@ pub(crate) fn strip_private(mut krate: clean::Crate, cx: &mut DocContext<'_>) ->
     // strip all private items
     {
         let mut stripper = Stripper {
+            tcx: cx.tcx,
             retained: &mut retained,
-            access_levels: &cx.cache.access_levels,
+            effective_visibilities: &cx.cache.effective_visibilities,
             update_retained: true,
             is_json_output,
         };
@@ -32,6 +33,7 @@ pub(crate) fn strip_private(mut krate: clean::Crate, cx: &mut DocContext<'_>) ->
 
     // strip all impls referencing private items
     let mut stripper = ImplStripper {
+        tcx: cx.tcx,
         retained: &retained,
         cache: &cx.cache,
         is_json_output,

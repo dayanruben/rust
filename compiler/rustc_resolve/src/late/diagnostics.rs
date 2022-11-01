@@ -38,8 +38,8 @@ type Res = def::Res<ast::NodeId>;
 /// A field or associated item from self type suggested in case of resolution failure.
 enum AssocSuggestion {
     Field,
-    MethodWithSelf,
-    AssocFn,
+    MethodWithSelf { called: bool },
+    AssocFn { called: bool },
     AssocType,
     AssocConst,
 }
@@ -48,8 +48,14 @@ impl AssocSuggestion {
     fn action(&self) -> &'static str {
         match self {
             AssocSuggestion::Field => "use the available field",
-            AssocSuggestion::MethodWithSelf => "call the method with the fully-qualified path",
-            AssocSuggestion::AssocFn => "call the associated function",
+            AssocSuggestion::MethodWithSelf { called: true } => {
+                "call the method with the fully-qualified path"
+            }
+            AssocSuggestion::MethodWithSelf { called: false } => {
+                "refer to the method with the fully-qualified path"
+            }
+            AssocSuggestion::AssocFn { called: true } => "call the associated function",
+            AssocSuggestion::AssocFn { called: false } => "refer to the associated function",
             AssocSuggestion::AssocConst => "use the associated `const`",
             AssocSuggestion::AssocType => "use the associated type",
         }
@@ -144,7 +150,7 @@ struct BaseError {
 #[derive(Debug)]
 enum TypoCandidate {
     Typo(TypoSuggestion),
-    Shadowed(Res),
+    Shadowed(Res, Option<Span>),
     None,
 }
 
@@ -152,7 +158,7 @@ impl TypoCandidate {
     fn to_opt_suggestion(self) -> Option<TypoSuggestion> {
         match self {
             TypoCandidate::Typo(sugg) => Some(sugg),
-            TypoCandidate::Shadowed(_) | TypoCandidate::None => None,
+            TypoCandidate::Shadowed(_, _) | TypoCandidate::None => None,
         }
     }
 }
@@ -516,7 +522,9 @@ impl<'a: 'ast, 'ast> LateResolutionVisitor<'a, '_, 'ast> {
         let typo_sugg =
             self.lookup_typo_candidate(path, source.namespace(), is_expected).to_opt_suggestion();
         if path.len() == 1 && self.self_type_is_available() {
-            if let Some(candidate) = self.lookup_assoc_candidate(ident, ns, is_expected) {
+            if let Some(candidate) =
+                self.lookup_assoc_candidate(ident, ns, is_expected, source.is_call())
+            {
                 let self_is_available = self.self_value_is_available(path[0].ident.span);
                 match candidate {
                     AssocSuggestion::Field => {
@@ -531,16 +539,21 @@ impl<'a: 'ast, 'ast> LateResolutionVisitor<'a, '_, 'ast> {
                             err.span_label(span, "a field by this name exists in `Self`");
                         }
                     }
-                    AssocSuggestion::MethodWithSelf if self_is_available => {
+                    AssocSuggestion::MethodWithSelf { called } if self_is_available => {
+                        let msg = if called {
+                            "you might have meant to call the method"
+                        } else {
+                            "you might have meant to refer to the method"
+                        };
                         err.span_suggestion(
                             span,
-                            "you might have meant to call the method",
+                            msg,
                             format!("self.{path_str}"),
                             Applicability::MachineApplicable,
                         );
                     }
-                    AssocSuggestion::MethodWithSelf
-                    | AssocSuggestion::AssocFn
+                    AssocSuggestion::MethodWithSelf { .. }
+                    | AssocSuggestion::AssocFn { .. }
                     | AssocSuggestion::AssocConst
                     | AssocSuggestion::AssocType => {
                         err.span_suggestion(
@@ -678,9 +691,20 @@ impl<'a: 'ast, 'ast> LateResolutionVisitor<'a, '_, 'ast> {
         let is_expected = &|res| source.is_expected(res);
         let ident_span = path.last().map_or(span, |ident| ident.ident.span);
         let typo_sugg = self.lookup_typo_candidate(path, source.namespace(), is_expected);
-        if let TypoCandidate::Shadowed(res) = typo_sugg
-            && let Some(id) = res.opt_def_id()
-            && let Some(sugg_span) = self.r.opt_span(id)
+        let is_in_same_file = &|sp1, sp2| {
+            let source_map = self.r.session.source_map();
+            let file1 = source_map.span_to_filename(sp1);
+            let file2 = source_map.span_to_filename(sp2);
+            file1 == file2
+        };
+        // print 'you might have meant' if the candidate is (1) is a shadowed name with
+        // accessible definition and (2) either defined in the same crate as the typo
+        // (could be in a different file) or introduced in the same file as the typo
+        // (could belong to a different crate)
+        if let TypoCandidate::Shadowed(res, Some(sugg_span)) = typo_sugg
+            && res
+                .opt_def_id()
+                .map_or(false, |id| id.is_local() || is_in_same_file(span, sugg_span))
         {
             err.span_label(
                 sugg_span,
@@ -771,10 +795,7 @@ impl<'a: 'ast, 'ast> LateResolutionVisitor<'a, '_, 'ast> {
             return false;
         }
         err.code(rustc_errors::error_code!(E0411));
-        err.span_label(
-            span,
-            "`Self` is only available in impls, traits, and type definitions".to_string(),
-        );
+        err.span_label(span, "`Self` is only available in impls, traits, and type definitions");
         if let Some(item_kind) = self.diagnostic_metadata.current_item {
             err.span_label(
                 item_kind.ident.span,
@@ -960,10 +981,7 @@ impl<'a: 'ast, 'ast> LateResolutionVisitor<'a, '_, 'ast> {
                         .collect();
                 if targets.len() == 1 {
                     let target = targets[0];
-                    return Some(TypoSuggestion::single_item_from_res(
-                        target.0.ident.name,
-                        target.1,
-                    ));
+                    return Some(TypoSuggestion::single_item_from_ident(target.0.ident, target.1));
                 }
             }
         }
@@ -1498,6 +1516,7 @@ impl<'a: 'ast, 'ast> LateResolutionVisitor<'a, '_, 'ast> {
         ident: Ident,
         ns: Namespace,
         filter_fn: FilterFn,
+        called: bool,
     ) -> Option<AssocSuggestion>
     where
         FilterFn: Fn(Res) -> bool,
@@ -1539,9 +1558,9 @@ impl<'a: 'ast, 'ast> LateResolutionVisitor<'a, '_, 'ast> {
                     return Some(match &assoc_item.kind {
                         ast::AssocItemKind::Const(..) => AssocSuggestion::AssocConst,
                         ast::AssocItemKind::Fn(box ast::Fn { sig, .. }) if sig.decl.has_self() => {
-                            AssocSuggestion::MethodWithSelf
+                            AssocSuggestion::MethodWithSelf { called }
                         }
-                        ast::AssocItemKind::Fn(..) => AssocSuggestion::AssocFn,
+                        ast::AssocItemKind::Fn(..) => AssocSuggestion::AssocFn { called },
                         ast::AssocItemKind::Type(..) => AssocSuggestion::AssocType,
                         ast::AssocItemKind::MacCall(_) => continue,
                     });
@@ -1560,10 +1579,12 @@ impl<'a: 'ast, 'ast> LateResolutionVisitor<'a, '_, 'ast> {
                 let res = binding.res();
                 if filter_fn(res) {
                     if self.r.has_self.contains(&res.def_id()) {
-                        return Some(AssocSuggestion::MethodWithSelf);
+                        return Some(AssocSuggestion::MethodWithSelf { called });
                     } else {
                         match res {
-                            Res::Def(DefKind::AssocFn, _) => return Some(AssocSuggestion::AssocFn),
+                            Res::Def(DefKind::AssocFn, _) => {
+                                return Some(AssocSuggestion::AssocFn { called });
+                            }
                             Res::Def(DefKind::AssocConst, _) => {
                                 return Some(AssocSuggestion::AssocConst);
                             }
@@ -1602,7 +1623,7 @@ impl<'a: 'ast, 'ast> LateResolutionVisitor<'a, '_, 'ast> {
                 // Locals and type parameters
                 for (ident, &res) in &rib.bindings {
                     if filter_fn(res) && ident.span.ctxt() == rib_ctxt {
-                        names.push(TypoSuggestion::typo_from_res(ident.name, res));
+                        names.push(TypoSuggestion::typo_from_ident(*ident, res));
                     }
                 }
 
@@ -1631,9 +1652,7 @@ impl<'a: 'ast, 'ast> LateResolutionVisitor<'a, '_, 'ast> {
                                             Res::Def(DefKind::Mod, crate_id.as_def_id());
 
                                         if filter_fn(crate_mod) {
-                                            Some(TypoSuggestion::typo_from_res(
-                                                ident.name, crate_mod,
-                                            ))
+                                            Some(TypoSuggestion::typo_from_ident(*ident, crate_mod))
                                         } else {
                                             None
                                         }
@@ -1652,7 +1671,7 @@ impl<'a: 'ast, 'ast> LateResolutionVisitor<'a, '_, 'ast> {
             // Add primitive types to the mix
             if filter_fn(Res::PrimTy(PrimTy::Bool)) {
                 names.extend(PrimTy::ALL.iter().map(|prim_ty| {
-                    TypoSuggestion::typo_from_res(prim_ty.name(), Res::PrimTy(*prim_ty))
+                    TypoSuggestion::typo_from_name(prim_ty.name(), Res::PrimTy(*prim_ty))
                 }))
             }
         } else {
@@ -1679,7 +1698,7 @@ impl<'a: 'ast, 'ast> LateResolutionVisitor<'a, '_, 'ast> {
                     return TypoCandidate::None;
                 };
                 if found == name {
-                    TypoCandidate::Shadowed(sugg.res)
+                    TypoCandidate::Shadowed(sugg.res, sugg.span)
                 } else {
                     TypoCandidate::Typo(sugg)
                 }

@@ -2112,6 +2112,8 @@ impl<'a> Parser<'a> {
             // HACK: This is needed so we can detect whether we're inside a macro,
             // where regular assumptions about what tokens can follow other tokens
             // don't necessarily apply.
+            && self.may_recover()
+            // FIXME(Nilstrieb): Remove this check once `may_recover` actually stops recovery
             && self.subparser_name.is_none()
         {
             // It is likely that the closure body is a block but where the
@@ -3142,6 +3144,8 @@ impl<'a> Parser<'a> {
                 && this.token.kind == token::Semi
             {
                 TrailingToken::Semi
+            } else if this.token.kind == token::Gt {
+                TrailingToken::Gt
             } else {
                 // FIXME - pass this through from the place where we know
                 // we need a comma, rather than assuming that `#[attr] expr,`
