@@ -880,8 +880,6 @@ so that we can apply CSS-filters to change the arrow color in themes */
 
 .search-results.active {
 	display: block;
-	/* prevent overhanging tabs from moving the first result */
-	clear: both;
 }
 
 .search-results .desc > span {
@@ -1092,7 +1090,7 @@ pre.rust .bool-val {
 pre.rust .self {
 	color: var(--code-highlight-self-color);
 }
-pre.rust .attribute {
+pre.rust .attr {
 	color: var(--code-highlight-attribute-color);
 }
 pre.rust .macro,
@@ -1872,15 +1870,8 @@ in storage.js
 	}
 
 	/* Display an alternating layout on tablets and phones */
-	.item-table {
+	.item-table, .item-row, .item-left, .item-right {
 		display: block;
-	}
-	.item-row {
-		display: flex;
-		flex-flow: column wrap;
-	}
-	.item-left, .item-right {
-		width: 100%;
 	}
 
 	/* Display an alternating layout on tablets and phones */
