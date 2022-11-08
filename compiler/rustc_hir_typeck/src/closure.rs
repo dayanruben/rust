@@ -10,6 +10,7 @@ use rustc_hir_analysis::astconv::AstConv;
 use rustc_infer::infer::type_variable::{TypeVariableOrigin, TypeVariableOriginKind};
 use rustc_infer::infer::LateBoundRegionConversionTime;
 use rustc_infer::infer::{InferOk, InferResult};
+use rustc_macros::{TypeFoldable, TypeVisitable};
 use rustc_middle::ty::subst::InternalSubsts;
 use rustc_middle::ty::visit::TypeVisitable;
 use rustc_middle::ty::{self, Ty};
@@ -22,7 +23,7 @@ use std::cmp;
 use std::iter;
 
 /// What signature do we *expect* the closure to have from context?
-#[derive(Debug)]
+#[derive(Debug, Clone, TypeFoldable, TypeVisitable)]
 struct ExpectedSig<'tcx> {
     /// Span that gave us this expectation, if we know that.
     cause_span: Option<Span>,
@@ -83,8 +84,6 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
 
         debug!(?bound_sig, ?liberated_sig);
 
-        let return_type_pre_known = !liberated_sig.output().is_ty_infer();
-
         let generator_types = check_fn(
             self,
             self.param_env.without_const(),
@@ -93,7 +92,6 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             expr.hir_id,
             body,
             gen,
-            return_type_pre_known,
         )
         .1;
 
@@ -244,9 +242,12 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             if expected_sig.is_none()
                 && let ty::PredicateKind::Projection(proj_predicate) = bound_predicate.skip_binder()
             {
-                expected_sig = self.deduce_sig_from_projection(
+                expected_sig = self.normalize_associated_types_in(
+                    obligation.cause.span,
+                    self.deduce_sig_from_projection(
                     Some(obligation.cause.span),
-                    bound_predicate.rebind(proj_predicate),
+                        bound_predicate.rebind(proj_predicate),
+                    ),
                 );
             }
 
