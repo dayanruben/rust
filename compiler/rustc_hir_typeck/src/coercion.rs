@@ -62,6 +62,7 @@ use rustc_span::{self, BytePos, DesugaringKind, Span};
 use rustc_target::spec::abi::Abi;
 use rustc_trait_selection::infer::InferCtxtExt as _;
 use rustc_trait_selection::traits::error_reporting::TypeErrCtxtExt as _;
+use rustc_trait_selection::traits::TraitEngineExt as _;
 use rustc_trait_selection::traits::{self, ObligationCause, ObligationCauseCode};
 
 use smallvec::{smallvec, SmallVec};
@@ -1038,7 +1039,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             let Ok(ok) = coerce.coerce(source, target) else {
                 return false;
             };
-            let mut fcx = traits::FulfillmentContext::new_in_snapshot();
+            let mut fcx = <dyn TraitEngine<'tcx>>::new_in_snapshot(self.tcx);
             fcx.register_predicate_obligations(self, ok.obligations);
             fcx.select_where_possible(&self).is_empty()
         })
@@ -1639,9 +1640,9 @@ impl<'tcx, 'exprs, E: AsCoercionSite> CoerceMany<'tcx, 'exprs, E> {
                 if visitor.ret_exprs.len() > 0 && let Some(expr) = expression {
                     self.note_unreachable_loop_return(&mut err, &expr, &visitor.ret_exprs);
                 }
-                err.emit_unless(unsized_return);
+                let reported = err.emit_unless(unsized_return);
 
-                self.final_ty = Some(fcx.tcx.ty_error());
+                self.final_ty = Some(fcx.tcx.ty_error_with_guaranteed(reported));
             }
         }
     }

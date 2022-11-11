@@ -1,20 +1,22 @@
+mod ambiguity;
 pub mod on_unimplemented;
 pub mod suggestions;
 
 use super::{
-    FulfillmentContext, FulfillmentError, FulfillmentErrorCode, MismatchedProjectionTypes,
-    Obligation, ObligationCause, ObligationCauseCode, OutputTypeParameterMismatch, Overflow,
-    PredicateObligation, SelectionContext, SelectionError, TraitNotObjectSafe,
+    FulfillmentError, FulfillmentErrorCode, MismatchedProjectionTypes, Obligation, ObligationCause,
+    ObligationCauseCode, OutputTypeParameterMismatch, Overflow, PredicateObligation,
+    SelectionContext, SelectionError, TraitNotObjectSafe,
 };
 use crate::infer::error_reporting::{TyCategory, TypeAnnotationNeeded as ErrorCode};
 use crate::infer::type_variable::{TypeVariableOrigin, TypeVariableOriginKind};
 use crate::infer::{self, InferCtxt, TyCtxtInferExt};
+use crate::traits::engine::TraitEngineExt as _;
 use crate::traits::query::evaluate_obligation::InferCtxtExt as _;
 use crate::traits::query::normalize::AtExt as _;
 use crate::traits::specialize::to_pretty_impl_header;
 use on_unimplemented::OnUnimplementedNote;
 use on_unimplemented::TypeErrCtxtExt as _;
-use rustc_data_structures::fx::FxHashMap;
+use rustc_data_structures::fx::{FxHashMap, FxIndexMap};
 use rustc_errors::{
     pluralize, struct_span_err, Applicability, Diagnostic, DiagnosticBuilder, ErrorGuaranteed,
     MultiSpan, Style,
@@ -351,7 +353,7 @@ impl<'tcx> InferCtxtExt<'tcx> for InferCtxt<'tcx> {
                     })
                     .to_predicate(self.tcx),
                 );
-                let mut fulfill_cx = FulfillmentContext::new_in_snapshot();
+                let mut fulfill_cx = <dyn TraitEngine<'tcx>>::new_in_snapshot(self.tcx);
                 fulfill_cx.register_predicate_obligation(self, obligation);
                 if fulfill_cx.select_all_or_error(self).is_empty() {
                     return Ok((
@@ -378,7 +380,7 @@ impl<'tcx> TypeErrCtxtExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
             index: Option<usize>, // None if this is an old error
         }
 
-        let mut error_map: FxHashMap<_, Vec<_>> = self
+        let mut error_map: FxIndexMap<_, Vec<_>> = self
             .reported_trait_errors
             .borrow()
             .iter()
@@ -535,15 +537,6 @@ impl<'tcx> TypeErrCtxtExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
         let mut span = obligation.cause.span;
 
         let mut err = match *error {
-            SelectionError::Ambiguous(ref impls) => {
-                let mut err = self.tcx.sess.struct_span_err(
-                    obligation.cause.span,
-                    &format!("multiple applicable `impl`s for `{}`", obligation.predicate),
-                );
-                self.annotate_source_of_ambiguity(&mut err, impls, obligation.predicate);
-                err.emit();
-                return;
-            }
             SelectionError::Unimplemented => {
                 // If this obligation was generated as a result of well-formedness checking, see if we
                 // can get a better error message by performing HIR-based well-formedness checking.
@@ -2144,12 +2137,25 @@ impl<'tcx> InferCtxtPrivExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
                     crate::traits::TraitQueryMode::Standard,
                 );
                 match selcx.select_from_obligation(&obligation) {
-                    Err(SelectionError::Ambiguous(impls)) if impls.len() > 1 => {
-                        self.annotate_source_of_ambiguity(&mut err, &impls, predicate);
+                    Ok(None) => {
+                        let impls = ambiguity::recompute_applicable_impls(self.infcx, &obligation);
+                        let has_non_region_infer =
+                            trait_ref.skip_binder().substs.types().any(|t| !t.is_ty_infer());
+                        // It doesn't make sense to talk about applicable impls if there are more
+                        // than a handful of them.
+                        if impls.len() > 1 && impls.len() < 5 && has_non_region_infer {
+                            self.annotate_source_of_ambiguity(&mut err, &impls, predicate);
+                        } else {
+                            if self.is_tainted_by_errors() {
+                                err.delay_as_bug();
+                                return;
+                            }
+                            err.note(&format!("cannot satisfy `{}`", predicate));
+                        }
                     }
                     _ => {
                         if self.is_tainted_by_errors() {
-                            err.cancel();
+                            err.delay_as_bug();
                             return;
                         }
                         err.note(&format!("cannot satisfy `{}`", predicate));
@@ -2441,7 +2447,6 @@ impl<'tcx> InferCtxtPrivExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
                 }
             }
         }
-        let msg = format!("multiple `impl`s satisfying `{}` found", predicate);
         let mut crate_names: Vec<_> = crates.iter().map(|n| format!("`{}`", n)).collect();
         crate_names.sort();
         crate_names.dedup();
@@ -2462,13 +2467,9 @@ impl<'tcx> InferCtxtPrivExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
             err.downgrade_to_delayed_bug();
             return;
         }
-        let post = if post.len() > 4 {
-            format!(
-                ":\n{}\nand {} more",
-                post.iter().map(|p| format!("- {}", p)).take(4).collect::<Vec<_>>().join("\n"),
-                post.len() - 4,
-            )
-        } else if post.len() > 1 || (post.len() == 1 && post[0].contains('\n')) {
+
+        let msg = format!("multiple `impl`s satisfying `{}` found", predicate);
+        let post = if post.len() > 1 || (post.len() == 1 && post[0].contains('\n')) {
             format!(":\n{}", post.iter().map(|p| format!("- {}", p)).collect::<Vec<_>>().join("\n"),)
         } else if post.len() == 1 {
             format!(": `{}`", post[0])
