@@ -616,6 +616,7 @@ pub const fn invalid_mut<T>(addr: usize) -> *mut T {
 #[inline]
 #[unstable(feature = "strict_provenance", issue = "95228")]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+#[allow(fuzzy_provenance_casts)] // this *is* the strict provenance API one should use instead
 pub fn from_exposed_addr<T>(addr: usize) -> *const T
 where
     T: Sized,
@@ -653,6 +654,7 @@ where
 #[inline]
 #[unstable(feature = "strict_provenance", issue = "95228")]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+#[allow(fuzzy_provenance_casts)] // this *is* the strict provenance API one should use instead
 pub fn from_exposed_addr_mut<T>(addr: usize) -> *mut T
 where
     T: Sized,
@@ -1574,10 +1576,14 @@ pub unsafe fn write_volatile<T>(dst: *mut T, src: T) {
 
 /// Align pointer `p`.
 ///
-/// Calculate offset (in terms of elements of `stride` stride) that has to be applied
+/// Calculate offset (in terms of elements of `size_of::<T>()` stride) that has to be applied
 /// to pointer `p` so that pointer `p` would get aligned to `a`.
 ///
-/// Note: This implementation has been carefully tailored to not panic. It is UB for this to panic.
+/// # Safety
+/// `a` must be a power of two.
+///
+/// # Notes
+/// This implementation has been carefully tailored to not panic. It is UB for this to panic.
 /// The only real change that can be made here is change of `INV_TABLE_MOD_16` and associated
 /// constants.
 ///
@@ -1587,7 +1593,7 @@ pub unsafe fn write_volatile<T>(dst: *mut T, src: T) {
 ///
 /// Any questions go to @nagisa.
 #[lang = "align_offset"]
-pub(crate) unsafe fn align_offset<T: Sized>(p: *const T, a: usize) -> usize {
+pub(crate) const unsafe fn align_offset<T: Sized>(p: *const T, a: usize) -> usize {
     // FIXME(#75598): Direct use of these intrinsics improves codegen significantly at opt-level <=
     // 1, where the method versions of these operations are not inlined.
     use intrinsics::{
@@ -1604,7 +1610,7 @@ pub(crate) unsafe fn align_offset<T: Sized>(p: *const T, a: usize) -> usize {
     ///
     /// Implementation of this function shall not panic. Ever.
     #[inline]
-    unsafe fn mod_inv(x: usize, m: usize) -> usize {
+    const unsafe fn mod_inv(x: usize, m: usize) -> usize {
         /// Multiplicative modular inverse table modulo 2⁴ = 16.
         ///
         /// Note, that this table does not contain values where inverse does not exist (i.e., for
@@ -1646,8 +1652,14 @@ pub(crate) unsafe fn align_offset<T: Sized>(p: *const T, a: usize) -> usize {
         inverse & m_minus_one
     }
 
-    let addr = p.addr();
     let stride = mem::size_of::<T>();
+
+    // SAFETY: This is just an inlined `p.addr()` (which is not
+    // a `const fn` so we cannot call it).
+    // During const eval, we hook this function to ensure that the pointer never
+    // has provenance, making this sound.
+    let addr: usize = unsafe { mem::transmute(p) };
+
     // SAFETY: `a` is a power-of-two, therefore non-zero.
     let a_minus_one = unsafe { unchecked_sub(a, 1) };
 

@@ -1648,6 +1648,8 @@ rustc_queries! {
     /// a generic type parameter will panic if you call this method on it:
     ///
     /// ```
+    /// use std::fmt::Debug;
+    ///
     /// pub trait Foo<T: Debug> {}
     /// ```
     ///
@@ -2074,17 +2076,6 @@ rustc_queries! {
 
     query normalize_opaque_types(key: &'tcx ty::List<ty::Predicate<'tcx>>) -> &'tcx ty::List<ty::Predicate<'tcx>> {
         desc { "normalizing opaque types in `{:?}`", key }
-    }
-
-    /// Checks whether a type is definitely uninhabited. This is
-    /// conservative: for some types that are uninhabited we return `false`,
-    /// but we only return `true` for types that are definitely uninhabited.
-    /// `ty.conservative_is_privately_uninhabited` implies that any value of type `ty`
-    /// will be `Abi::Uninhabited`. (Note that uninhabited types may have nonzero
-    /// size, to account for partial initialisation. See #49298 for details.)
-    query conservative_is_privately_uninhabited(key: ty::ParamEnvAnd<'tcx, Ty<'tcx>>) -> bool {
-        desc { "conservatively checking if `{}` is privately uninhabited", key.value }
-        remap_env_constness
     }
 
     query limits(key: ()) -> Limits {
