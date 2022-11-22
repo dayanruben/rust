@@ -94,9 +94,10 @@ pub use self::sty::{
     BoundVariableKind, CanonicalPolyFnSig, ClosureSubsts, ClosureSubstsParts, ConstVid,
     EarlyBoundRegion, ExistentialPredicate, ExistentialProjection, ExistentialTraitRef, FnSig,
     FreeRegion, GenSig, GeneratorSubsts, GeneratorSubstsParts, InlineConstSubsts,
-    InlineConstSubstsParts, ParamConst, ParamTy, PolyExistentialProjection,
-    PolyExistentialTraitRef, PolyFnSig, PolyGenSig, PolyTraitRef, ProjectionTy, Region, RegionKind,
-    RegionVid, TraitRef, TyKind, TypeAndMut, UpvarSubsts, VarianceDiagInfo,
+    InlineConstSubstsParts, ParamConst, ParamTy, PolyExistentialPredicate,
+    PolyExistentialProjection, PolyExistentialTraitRef, PolyFnSig, PolyGenSig, PolyTraitRef,
+    ProjectionTy, Region, RegionKind, RegionVid, TraitRef, TyKind, TypeAndMut, UpvarSubsts,
+    VarianceDiagInfo,
 };
 pub use self::trait_def::TraitDef;
 
@@ -851,6 +852,10 @@ impl<'tcx> TraitPredicate<'tcx> {
         }
     }
 
+    pub fn with_self_type(self, tcx: TyCtxt<'tcx>, self_ty: Ty<'tcx>) -> Self {
+        Self { trait_ref: self.trait_ref.with_self_type(tcx, self_ty), ..self }
+    }
+
     pub fn def_id(self) -> DefId {
         self.trait_ref.def_id
     }
@@ -1257,7 +1262,7 @@ impl<'tcx> InstantiatedPredicates<'tcx> {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, HashStable, TyEncodable, TyDecodable, Lift)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, HashStable, TyEncodable, TyDecodable, Lift)]
 #[derive(TypeFoldable, TypeVisitable)]
 pub struct OpaqueTypeKey<'tcx> {
     pub def_id: LocalDefId,
@@ -1332,6 +1337,9 @@ impl<'tcx> OpaqueHiddenType<'tcx> {
         let id_substs = InternalSubsts::identity_for_item(tcx, def_id.to_def_id());
         debug!(?id_substs);
 
+        // This zip may have several times the same lifetime in `substs` paired with a different
+        // lifetime from `id_substs`.  Simply `collect`ing the iterator is the correct behaviour:
+        // it will pick the last one, which is the one we introduced in the impl-trait desugaring.
         let map = substs.iter().zip(id_substs);
 
         let map: FxHashMap<GenericArg<'tcx>, GenericArg<'tcx>> = match origin {
@@ -1345,61 +1353,13 @@ impl<'tcx> OpaqueHiddenType<'tcx> {
                 // type Foo<'a, 'b, 'c> = impl Trait<'a> + 'b;
                 // ```
                 // we may not use `'c` in the hidden type.
-                struct OpaqueTypeLifetimeCollector<'tcx> {
-                    lifetimes: FxHashSet<ty::Region<'tcx>>,
-                }
+                let variances = tcx.variances_of(def_id);
+                debug!(?variances);
 
-                impl<'tcx> ty::TypeVisitor<'tcx> for OpaqueTypeLifetimeCollector<'tcx> {
-                    fn visit_region(&mut self, r: ty::Region<'tcx>) -> ControlFlow<Self::BreakTy> {
-                        self.lifetimes.insert(r);
-                        r.super_visit_with(self)
-                    }
-                }
-
-                let mut collector = OpaqueTypeLifetimeCollector { lifetimes: Default::default() };
-
-                for pred in tcx.bound_explicit_item_bounds(def_id.to_def_id()).transpose_iter() {
-                    let pred = pred.map_bound(|(pred, _)| *pred).subst(tcx, id_substs);
-
-                    trace!(pred=?pred.kind());
-
-                    // We only ignore opaque type substs if the opaque type is the outermost type.
-                    // The opaque type may be nested within itself via recursion in e.g.
-                    // type Foo<'a> = impl PartialEq<Foo<'a>>;
-                    // which thus mentions `'a` and should thus accept hidden types that borrow 'a
-                    // instead of requiring an additional `+ 'a`.
-                    match pred.kind().skip_binder() {
-                        ty::PredicateKind::Trait(TraitPredicate {
-                            trait_ref: ty::TraitRef { def_id: _, substs },
-                            constness: _,
-                            polarity: _,
-                        }) => {
-                            trace!(?substs);
-                            for subst in &substs[1..] {
-                                subst.visit_with(&mut collector);
-                            }
-                        }
-                        ty::PredicateKind::Projection(ty::ProjectionPredicate {
-                            projection_ty: ty::ProjectionTy { substs, item_def_id: _ },
-                            term,
-                        }) => {
-                            for subst in &substs[1..] {
-                                subst.visit_with(&mut collector);
-                            }
-                            term.visit_with(&mut collector);
-                        }
-                        _ => {
-                            pred.visit_with(&mut collector);
-                        }
-                    }
-                }
-                let lifetimes = collector.lifetimes;
-                trace!(?lifetimes);
                 map.filter(|(_, v)| {
-                    let ty::GenericArgKind::Lifetime(lt) = v.unpack() else {
-                        return true;
-                    };
-                    lifetimes.contains(&lt)
+                    let ty::GenericArgKind::Lifetime(lt) = v.unpack() else { return true };
+                    let ty::ReEarlyBound(ebr) = lt.kind() else { bug!() };
+                    variances[ebr.index as usize] == ty::Variance::Invariant
                 })
                 .collect()
             }
