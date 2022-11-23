@@ -702,6 +702,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 // code is looking for a self type of an unresolved
                 // inference variable.
                 | ty::PredicateKind::ClosureKind(..)
+                | ty::PredicateKind::Ambiguous
                 | ty::PredicateKind::TypeWellFormedFromEnv(..) => None,
             },
         )
@@ -1164,11 +1165,8 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             match *ty.kind() {
                 ty::Adt(adt_def, substs) if adt_def.has_ctor() => {
                     let variant = adt_def.non_enum_variant();
-                    let ctor_def_id = variant.ctor_def_id.unwrap();
-                    (
-                        Res::Def(DefKind::Ctor(CtorOf::Struct, variant.ctor_kind), ctor_def_id),
-                        Some(substs),
-                    )
+                    let (ctor_kind, ctor_def_id) = variant.ctor.unwrap();
+                    (Res::Def(DefKind::Ctor(CtorOf::Struct, ctor_kind), ctor_def_id), Some(substs))
                 }
                 _ => {
                     let mut err = tcx.sess.struct_span_err(

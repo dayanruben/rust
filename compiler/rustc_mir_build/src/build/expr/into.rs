@@ -108,7 +108,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
             ExprKind::Let { expr, ref pat } => {
                 let scope = this.local_scope();
                 let (true_block, false_block) = this.in_if_then_scope(scope, expr_span, |this| {
-                    this.lower_let_expr(block, &this.thir[expr], pat, scope, None, expr_span)
+                    this.lower_let_expr(block, &this.thir[expr], pat, scope, None, expr_span, true)
                 });
 
                 this.cfg.push_assign_constant(
@@ -358,10 +358,8 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                         .map(|(n, ty)| match fields_map.get(&n) {
                             Some(v) => v.clone(),
                             None => {
-                                let place_builder = place_builder.clone();
-                                this.consume_by_copy_or_move(
-                                    place_builder.field(n, *ty).into_place(this),
-                                )
+                                let place = place_builder.clone_project(PlaceElem::Field(n, *ty));
+                                this.consume_by_copy_or_move(place.to_place(this))
                             }
                         })
                         .collect()

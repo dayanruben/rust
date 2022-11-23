@@ -11,6 +11,7 @@ use rustc_hir as hir;
 use rustc_hir::def::{self, CtorKind, DefKind, Namespace};
 use rustc_hir::def_id::{DefId, DefIdSet, CRATE_DEF_ID, LOCAL_CRATE};
 use rustc_hir::definitions::{DefPathData, DefPathDataName, DisambiguatedDefPathData};
+use rustc_hir::LangItem;
 use rustc_session::config::TrimmedDefPaths;
 use rustc_session::cstore::{ExternCrate, ExternCrateSource};
 use rustc_session::Limit;
@@ -889,7 +890,7 @@ pub trait PrettyPrinter<'tcx>:
                                 // Group the return ty with its def id, if we had one.
                                 entry
                                     .return_ty
-                                    .map(|ty| (tcx.lang_items().fn_once_output().unwrap(), ty)),
+                                    .map(|ty| (tcx.require_lang_item(LangItem::FnOnce, None), ty)),
                             );
                         }
                         if let Some(trait_ref) = entry.fn_mut_trait_ref {
@@ -1487,12 +1488,12 @@ pub trait PrettyPrinter<'tcx>:
                             contents.variant.expect("destructed const of adt without variant idx");
                         let variant_def = &def.variant(variant_idx);
                         p!(print_value_path(variant_def.def_id, substs));
-                        match variant_def.ctor_kind {
-                            CtorKind::Const => {}
-                            CtorKind::Fn => {
+                        match variant_def.ctor_kind() {
+                            Some(CtorKind::Const) => {}
+                            Some(CtorKind::Fn) => {
                                 p!("(", comma_sep(fields), ")");
                             }
-                            CtorKind::Fictive => {
+                            None => {
                                 p!(" {{ ");
                                 let mut first = true;
                                 for (field_def, field) in iter::zip(&variant_def.fields, fields) {
@@ -2703,6 +2704,7 @@ define_print_and_forward_display! {
             ty::PredicateKind::TypeWellFormedFromEnv(ty) => {
                 p!("the type `", print(ty), "` is found in the environment")
             }
+            ty::PredicateKind::Ambiguous => p!("ambiguous"),
         }
     }
 

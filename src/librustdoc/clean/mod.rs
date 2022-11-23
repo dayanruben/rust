@@ -318,6 +318,7 @@ pub(crate) fn clean_predicate<'tcx>(
         | ty::PredicateKind::ObjectSafe(..)
         | ty::PredicateKind::ClosureKind(..)
         | ty::PredicateKind::ConstEquate(..)
+        | ty::PredicateKind::Ambiguous
         | ty::PredicateKind::TypeWellFormedFromEnv(..) => panic!("not user writable"),
     }
 }
@@ -1842,16 +1843,16 @@ pub(crate) fn clean_field_with_def_id(
 }
 
 pub(crate) fn clean_variant_def<'tcx>(variant: &ty::VariantDef, cx: &mut DocContext<'tcx>) -> Item {
-    let kind = match variant.ctor_kind {
-        CtorKind::Const => Variant::CLike(match variant.discr {
+    let kind = match variant.ctor_kind() {
+        Some(CtorKind::Const) => Variant::CLike(match variant.discr {
             ty::VariantDiscr::Explicit(def_id) => Some(Discriminant { expr: None, value: def_id }),
             ty::VariantDiscr::Relative(_) => None,
         }),
-        CtorKind::Fn => Variant::Tuple(
+        Some(CtorKind::Fn) => Variant::Tuple(
             variant.fields.iter().map(|field| clean_middle_field(field, cx)).collect(),
         ),
-        CtorKind::Fictive => Variant::Struct(VariantStruct {
-            struct_type: CtorKind::Fictive,
+        None => Variant::Struct(VariantStruct {
+            ctor_kind: None,
             fields: variant.fields.iter().map(|field| clean_middle_field(field, cx)).collect(),
         }),
     };
@@ -1865,7 +1866,7 @@ fn clean_variant_data<'tcx>(
 ) -> Variant {
     match variant {
         hir::VariantData::Struct(..) => Variant::Struct(VariantStruct {
-            struct_type: CtorKind::from_hir(variant),
+            ctor_kind: None,
             fields: variant.fields().iter().map(|x| clean_field(x, cx)).collect(),
         }),
         hir::VariantData::Tuple(..) => {
@@ -2060,7 +2061,7 @@ fn clean_maybe_renamed_item<'tcx>(
                 fields: variant_data.fields().iter().map(|x| clean_field(x, cx)).collect(),
             }),
             ItemKind::Struct(ref variant_data, generics) => StructItem(Struct {
-                struct_type: CtorKind::from_hir(variant_data),
+                ctor_kind: variant_data.ctor_kind(),
                 generics: clean_generics(generics, cx),
                 fields: variant_data.fields().iter().map(|x| clean_field(x, cx)).collect(),
             }),

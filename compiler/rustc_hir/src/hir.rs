@@ -2913,20 +2913,29 @@ impl<'hir> VariantData<'hir> {
         }
     }
 
-    /// Return the `LocalDefId` of this variant's constructor, if it has one.
-    pub fn ctor_def_id(&self) -> Option<LocalDefId> {
+    pub fn ctor(&self) -> Option<(CtorKind, HirId, LocalDefId)> {
         match *self {
-            VariantData::Struct(_, _) => None,
-            VariantData::Tuple(_, _, def_id) | VariantData::Unit(_, def_id) => Some(def_id),
+            VariantData::Tuple(_, hir_id, def_id) => Some((CtorKind::Fn, hir_id, def_id)),
+            VariantData::Unit(hir_id, def_id) => Some((CtorKind::Const, hir_id, def_id)),
+            VariantData::Struct(..) => None,
         }
     }
 
+    #[inline]
+    pub fn ctor_kind(&self) -> Option<CtorKind> {
+        self.ctor().map(|(kind, ..)| kind)
+    }
+
     /// Return the `HirId` of this variant's constructor, if it has one.
+    #[inline]
     pub fn ctor_hir_id(&self) -> Option<HirId> {
-        match *self {
-            VariantData::Struct(_, _) => None,
-            VariantData::Tuple(_, hir_id, _) | VariantData::Unit(hir_id, _) => Some(hir_id),
-        }
+        self.ctor().map(|(_, hir_id, _)| hir_id)
+    }
+
+    /// Return the `LocalDefId` of this variant's constructor, if it has one.
+    #[inline]
+    pub fn ctor_def_id(&self) -> Option<LocalDefId> {
+        self.ctor().map(|(.., def_id)| def_id)
     }
 }
 
@@ -3585,9 +3594,16 @@ mod size_asserts {
     static_assert_size!(Res, 12);
     static_assert_size!(Stmt<'_>, 32);
     static_assert_size!(StmtKind<'_>, 16);
+    // tidy-alphabetical-end
+    // FIXME: move the tidy directive to the end after the next bootstrap bump
+    #[cfg(bootstrap)]
     static_assert_size!(TraitItem<'_>, 88);
+    #[cfg(not(bootstrap))]
+    static_assert_size!(TraitItem<'_>, 80);
+    #[cfg(bootstrap)]
     static_assert_size!(TraitItemKind<'_>, 48);
+    #[cfg(not(bootstrap))]
+    static_assert_size!(TraitItemKind<'_>, 40);
     static_assert_size!(Ty<'_>, 48);
     static_assert_size!(TyKind<'_>, 32);
-    // tidy-alphabetical-end
 }
