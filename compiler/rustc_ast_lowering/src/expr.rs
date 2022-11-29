@@ -149,7 +149,7 @@ impl<'hir> LoweringContext<'_, 'hir> {
                     *capture_clause,
                     *closure_node_id,
                     None,
-                    block.span,
+                    e.span,
                     hir::AsyncGeneratorKind::Block,
                     |this| this.with_new_scopes(|this| this.lower_block_expr(block)),
                 ),
@@ -569,12 +569,12 @@ impl<'hir> LoweringContext<'_, 'hir> {
         }
     }
 
-    /// Lower an `async` construct to a generator that is then wrapped so it implements `Future`.
+    /// Lower an `async` construct to a generator that implements `Future`.
     ///
     /// This results in:
     ///
     /// ```text
-    /// std::future::from_generator(static move? |_task_context| -> <ret_ty> {
+    /// std::future::identity_future(static move? |_task_context| -> <ret_ty> {
     ///     <body>
     /// })
     /// ```
@@ -589,12 +589,14 @@ impl<'hir> LoweringContext<'_, 'hir> {
     ) -> hir::ExprKind<'hir> {
         let output = ret_ty.unwrap_or_else(|| hir::FnRetTy::DefaultReturn(self.lower_span(span)));
 
-        // Resume argument type. We let the compiler infer this to simplify the lowering. It is
-        // fully constrained by `future::from_generator`.
+        // Resume argument type: `ResumeTy`
+        let unstable_span =
+            self.mark_span_with_reason(DesugaringKind::Async, span, self.allow_gen_future.clone());
+        let resume_ty = hir::QPath::LangItem(hir::LangItem::ResumeTy, unstable_span, None);
         let input_ty = hir::Ty {
             hir_id: self.next_id(),
-            kind: hir::TyKind::Infer,
-            span: self.lower_span(span),
+            kind: hir::TyKind::Path(resume_ty),
+            span: unstable_span,
         };
 
         // The closure/generator `FnDecl` takes a single (resume) argument of type `input_ty`.
@@ -603,6 +605,7 @@ impl<'hir> LoweringContext<'_, 'hir> {
             output,
             c_variadic: false,
             implicit_self: hir::ImplicitSelfKind::None,
+            lifetime_elision_allowed: false,
         });
 
         // Lower the argument pattern/ident. The ident is used again in the `.await` lowering.
@@ -677,16 +680,24 @@ impl<'hir> LoweringContext<'_, 'hir> {
 
         let generator = hir::Expr { hir_id, kind: generator_kind, span: self.lower_span(span) };
 
-        // `future::from_generator`:
-        let gen_future = self.expr_lang_item_path(
+        // FIXME(swatinem):
+        // For some reason, the async block needs to flow through *any*
+        // call (like the identity function), as otherwise type and lifetime
+        // inference have a hard time figuring things out.
+        // Without this, we would get:
+        // E0720 in src/test/ui/impl-trait/in-trait/default-body-with-rpit.rs
+        // E0700 in src/test/ui/self/self_lifetime-async.rs
+
+        // `future::identity_future`:
+        let identity_future = self.expr_lang_item_path(
             unstable_span,
-            hir::LangItem::FromGenerator,
+            hir::LangItem::IdentityFuture,
             AttrVec::new(),
             None,
         );
 
-        // `future::from_generator(generator)`:
-        hir::ExprKind::Call(self.arena.alloc(gen_future), arena_vec![self; generator])
+        // `future::identity_future(generator)`:
+        hir::ExprKind::Call(self.arena.alloc(identity_future), arena_vec![self; generator])
     }
 
     /// Desugar `<expr>.await` into:
@@ -907,7 +918,7 @@ impl<'hir> LoweringContext<'_, 'hir> {
 
         let bound_generic_params = self.lower_lifetime_binder(closure_id, generic_params);
         // Lower outside new scope to preserve `is_in_loop_condition`.
-        let fn_decl = self.lower_fn_decl(decl, None, fn_decl_span, FnDeclKind::Closure, None);
+        let fn_decl = self.lower_fn_decl(decl, closure_id, fn_decl_span, FnDeclKind::Closure, None);
 
         let c = self.arena.alloc(hir::Closure {
             def_id: self.local_def_id(closure_id),
@@ -990,7 +1001,7 @@ impl<'hir> LoweringContext<'_, 'hir> {
             }
 
             // Transform `async |x: u8| -> X { ... }` into
-            // `|x: u8| future_from_generator(|| -> X { ... })`.
+            // `|x: u8| identity_future(|| -> X { ... })`.
             let body_id = this.lower_fn_body(&outer_decl, |this| {
                 let async_ret_ty = if let FnRetTy::Ty(ty) = &decl.output {
                     let itctx = ImplTraitContext::Disallowed(ImplTraitPosition::AsyncBlock);
@@ -1017,7 +1028,7 @@ impl<'hir> LoweringContext<'_, 'hir> {
         // have to conserve the state of being inside a loop condition for the
         // closure argument types.
         let fn_decl =
-            self.lower_fn_decl(&outer_decl, None, fn_decl_span, FnDeclKind::Closure, None);
+            self.lower_fn_decl(&outer_decl, closure_id, fn_decl_span, FnDeclKind::Closure, None);
 
         let c = self.arena.alloc(hir::Closure {
             def_id: self.local_def_id(closure_id),

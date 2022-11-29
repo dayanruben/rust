@@ -666,15 +666,17 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
         let tcx = self.infcx.tcx;
 
         // Find out if the predicates show that the type is a Fn or FnMut
-        let find_fn_kind_from_did =
-            |predicates: ty::EarlyBinder<&[(ty::Predicate<'tcx>, Span)]>, substs| {
-                predicates.0.iter().find_map(|(pred, _)| {
+        let find_fn_kind_from_did = |predicates: ty::EarlyBinder<
+            &[(ty::Predicate<'tcx>, Span)],
+        >,
+                                     substs| {
+            predicates.0.iter().find_map(|(pred, _)| {
                     let pred = if let Some(substs) = substs {
                         predicates.rebind(*pred).subst(tcx, substs).kind().skip_binder()
                     } else {
                         pred.kind().skip_binder()
                     };
-                    if let ty::PredicateKind::Trait(pred) = pred && pred.self_ty() == ty {
+                    if let ty::PredicateKind::Clause(ty::Clause::Trait(pred)) = pred && pred.self_ty() == ty {
                     if Some(pred.def_id()) == tcx.lang_items().fn_trait() {
                         return Some(hir::Mutability::Not);
                     } else if Some(pred.def_id()) == tcx.lang_items().fn_mut_trait() {
@@ -683,7 +685,7 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
                 }
                     None
                 })
-            };
+        };
 
         // If the type is opaque/param/closure, and it is Fn or FnMut, let's suggest (mutably)
         // borrowing the type, since `&mut F: FnMut` iff `F: FnMut` and similarly for `Fn`.
@@ -714,19 +716,12 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
                 let moved_place = &self.move_data.move_paths[move_out.path].place;
                 let move_spans = self.move_spans(moved_place.as_ref(), move_out.source);
                 let move_span = move_spans.args_or_use();
-                let suggestion = if borrow_level == hir::Mutability::Mut {
-                    "&mut ".to_string()
-                } else {
-                    "&".to_string()
-                };
+                let suggestion = borrow_level.ref_prefix_str().to_owned();
                 (move_span.shrink_to_lo(), suggestion)
             })
             .collect();
         err.multipart_suggestion_verbose(
-            &format!(
-                "consider {}borrowing {value_name}",
-                if borrow_level == hir::Mutability::Mut { "mutably " } else { "" }
-            ),
+            format!("consider {}borrowing {value_name}", borrow_level.mutably_str()),
             sugg,
             Applicability::MaybeIncorrect,
         );
@@ -737,13 +732,15 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
         let tcx = self.infcx.tcx;
         // Try to find predicates on *generic params* that would allow copying `ty`
         let infcx = tcx.infer_ctxt().build();
-        if infcx
-            .type_implements_trait(
-                tcx.lang_items().clone_trait().unwrap(),
-                [tcx.erase_regions(ty)],
-                self.param_env,
-            )
-            .must_apply_modulo_regions()
+
+        if let Some(clone_trait_def) = tcx.lang_items().clone_trait()
+            && infcx
+                .type_implements_trait(
+                    clone_trait_def,
+                    [tcx.erase_regions(ty)],
+                    self.param_env,
+                )
+                .must_apply_modulo_regions()
         {
             err.span_suggestion_verbose(
                 span.shrink_to_hi(),
@@ -784,13 +781,15 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
         let predicates: Result<Vec<_>, _> = errors
             .into_iter()
             .map(|err| match err.obligation.predicate.kind().skip_binder() {
-                PredicateKind::Trait(predicate) => match predicate.self_ty().kind() {
-                    ty::Param(param_ty) => Ok((
-                        generics.type_param(param_ty, tcx),
-                        predicate.trait_ref.print_only_trait_path().to_string(),
-                    )),
-                    _ => Err(()),
-                },
+                PredicateKind::Clause(ty::Clause::Trait(predicate)) => {
+                    match predicate.self_ty().kind() {
+                        ty::Param(param_ty) => Ok((
+                            generics.type_param(param_ty, tcx),
+                            predicate.trait_ref.print_only_trait_path().to_string(),
+                        )),
+                        _ => Err(()),
+                    }
+                }
                 _ => Err(()),
             })
             .collect();
@@ -2673,7 +2672,7 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
                             if let hir::TyKind::Rptr(lifetime, _) = &fn_decl.inputs[index].kind {
                                 // With access to the lifetime, we can get
                                 // the span of it.
-                                arguments.push((*argument, lifetime.span));
+                                arguments.push((*argument, lifetime.ident.span));
                             } else {
                                 bug!("ty type is a ref but hir type is not");
                             }
@@ -2692,7 +2691,7 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
                 let mut return_span = fn_decl.output.span();
                 if let hir::FnRetTy::Return(ty) = &fn_decl.output {
                     if let hir::TyKind::Rptr(lifetime, _) = ty.kind {
-                        return_span = lifetime.span;
+                        return_span = lifetime.ident.span;
                     }
                 }
 

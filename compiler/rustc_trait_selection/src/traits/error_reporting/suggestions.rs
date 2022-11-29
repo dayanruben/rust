@@ -1,11 +1,7 @@
-use super::{
-    DefIdOrName, Obligation, ObligationCause, ObligationCauseCode, PredicateObligation,
-    SelectionContext,
-};
+use super::{DefIdOrName, Obligation, ObligationCause, ObligationCauseCode, PredicateObligation};
 
 use crate::autoderef::Autoderef;
 use crate::infer::InferCtxt;
-use crate::traits::normalize_to;
 
 use hir::def::CtorOf;
 use hir::HirId;
@@ -23,7 +19,7 @@ use rustc_hir::lang_items::LangItem;
 use rustc_hir::{AsyncGeneratorKind, GeneratorKind, Node};
 use rustc_infer::infer::error_reporting::TypeErrCtxt;
 use rustc_infer::infer::type_variable::{TypeVariableOrigin, TypeVariableOriginKind};
-use rustc_infer::infer::LateBoundRegionConversionTime;
+use rustc_infer::infer::{InferOk, LateBoundRegionConversionTime};
 use rustc_middle::hir::map;
 use rustc_middle::ty::{
     self, suggest_arbitrary_trait_bound, suggest_constraining_type_param, AdtKind, DefIdTree,
@@ -810,7 +806,7 @@ impl<'tcx> TypeErrCtxtExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
         err: &mut Diagnostic,
         trait_pred: ty::PolyTraitPredicate<'tcx>,
     ) -> bool {
-        if let ty::PredicateKind::Trait(trait_pred) = obligation.predicate.kind().skip_binder()
+        if let ty::PredicateKind::Clause(ty::Clause::Trait(trait_pred)) = obligation.predicate.kind().skip_binder()
             && Some(trait_pred.def_id()) == self.tcx.lang_items().sized_trait()
         {
             // Don't suggest calling to turn an unsized type into a sized type
@@ -839,7 +835,7 @@ impl<'tcx> TypeErrCtxtExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
             }
             ty::Opaque(def_id, substs) => {
                 self.tcx.bound_item_bounds(def_id).subst(self.tcx, substs).iter().find_map(|pred| {
-                    if let ty::PredicateKind::Projection(proj) = pred.kind().skip_binder()
+                    if let ty::PredicateKind::Clause(ty::Clause::Projection(proj)) = pred.kind().skip_binder()
                     && Some(proj.projection_ty.item_def_id) == self.tcx.lang_items().fn_once_output()
                     // args tuple will always be substs[1]
                     && let ty::Tuple(args) = proj.projection_ty.substs.type_at(1).kind()
@@ -873,7 +869,7 @@ impl<'tcx> TypeErrCtxtExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
             }
             ty::Param(_) => {
                 obligation.param_env.caller_bounds().iter().find_map(|pred| {
-                    if let ty::PredicateKind::Projection(proj) = pred.kind().skip_binder()
+                    if let ty::PredicateKind::Clause(ty::Clause::Projection(proj)) = pred.kind().skip_binder()
                     && Some(proj.projection_ty.item_def_id) == self.tcx.lang_items().fn_once_output()
                     && proj.projection_ty.self_ty() == found
                     // args tuple will always be substs[1]
@@ -1059,7 +1055,7 @@ impl<'tcx> TypeErrCtxtExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
                 {
                     (
                         mk_result(old_pred.map_bound(|trait_pred| (trait_pred, *ty))),
-                        matches!(mutability, hir::Mutability::Mut),
+                        mutability.is_mut(),
                     )
                 } else {
                     (false, false)
@@ -1256,7 +1252,7 @@ impl<'tcx> TypeErrCtxtExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
                     );
                     // FIXME: account for associated `async fn`s.
                     if let hir::Expr { span, kind: hir::ExprKind::Call(base, _), .. } = expr {
-                        if let ty::PredicateKind::Trait(pred) =
+                        if let ty::PredicateKind::Clause(ty::Clause::Trait(pred)) =
                             obligation.predicate.kind().skip_binder()
                         {
                             err.span_label(
@@ -1340,15 +1336,16 @@ impl<'tcx> TypeErrCtxtExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
                     obligation.param_env,
                     trait_pred_and_suggested_ty,
                 );
-                let suggested_ty_would_satisfy_obligation =
-                    self.predicate_must_hold_modulo_regions(&new_obligation);
+                let suggested_ty_would_satisfy_obligation = self
+                    .evaluate_obligation_no_overflow(&new_obligation)
+                    .must_apply_modulo_regions();
                 if suggested_ty_would_satisfy_obligation {
                     let sp = self
                         .tcx
                         .sess
                         .source_map()
                         .span_take_while(span, |c| c.is_whitespace() || *c == '&');
-                    if points_at_arg && mutability == hir::Mutability::Not && refs_number > 0 {
+                    if points_at_arg && mutability.is_not() && refs_number > 0 {
                         err.span_suggestion_verbose(
                             sp,
                             "consider changing this borrow's mutability",
@@ -1683,9 +1680,7 @@ impl<'tcx> TypeErrCtxtExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
         ) -> Ty<'tcx> {
             let inputs = trait_ref.skip_binder().substs.type_at(1);
             let sig = match inputs.kind() {
-                ty::Tuple(inputs)
-                    if infcx.tcx.fn_trait_kind_from_lang_item(trait_ref.def_id()).is_some() =>
-                {
+                ty::Tuple(inputs) if infcx.tcx.is_fn_trait(trait_ref.def_id()) => {
                     infcx.tcx.mk_fn_sig(
                         inputs.iter(),
                         infcx.next_ty_var(TypeVariableOrigin {
@@ -1755,8 +1750,8 @@ impl<'tcx> TypeErrCtxtExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
         if let ObligationCauseCode::ExprBindingObligation(def_id, _, _, idx) = cause
             && let predicates = self.tcx.predicates_of(def_id).instantiate_identity(self.tcx)
             && let Some(pred) = predicates.predicates.get(*idx)
-            && let ty::PredicateKind::Trait(trait_pred) = pred.kind().skip_binder()
-            && ty::ClosureKind::from_def_id(self.tcx, trait_pred.def_id()).is_some()
+            && let ty::PredicateKind::Clause(ty::Clause::Trait(trait_pred)) = pred.kind().skip_binder()
+            && self.tcx.is_fn_trait(trait_pred.def_id())
         {
             let expected_self =
                 self.tcx.anonymize_late_bound_regions(pred.kind().rebind(trait_pred.self_ty()));
@@ -1769,9 +1764,8 @@ impl<'tcx> TypeErrCtxtExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
             let other_pred = std::iter::zip(&predicates.predicates, &predicates.spans)
                 .enumerate()
                 .find(|(other_idx, (pred, _))| match pred.kind().skip_binder() {
-                    ty::PredicateKind::Trait(trait_pred)
-                        if ty::ClosureKind::from_def_id(self.tcx, trait_pred.def_id())
-                            .is_some()
+                    ty::PredicateKind::Clause(ty::Clause::Trait(trait_pred))
+                        if self.tcx.is_fn_trait(trait_pred.def_id())
                             && other_idx != idx
                             // Make sure that the self type matches
                             // (i.e. constraining this closure)
@@ -1885,13 +1879,9 @@ impl<'tcx> TypeErrCtxtExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
         //
         // - `BuiltinDerivedObligation` with a generator witness (B)
         // - `BuiltinDerivedObligation` with a generator (B)
-        // - `BuiltinDerivedObligation` with `std::future::GenFuture` (B)
-        // - `BuiltinDerivedObligation` with `impl std::future::Future` (B)
         // - `BuiltinDerivedObligation` with `impl std::future::Future` (B)
         // - `BuiltinDerivedObligation` with a generator witness (A)
         // - `BuiltinDerivedObligation` with a generator (A)
-        // - `BuiltinDerivedObligation` with `std::future::GenFuture` (A)
-        // - `BuiltinDerivedObligation` with `impl std::future::Future` (A)
         // - `BuiltinDerivedObligation` with `impl std::future::Future` (A)
         // - `BindingObligation` with `impl_send (Send requirement)
         //
@@ -1900,7 +1890,7 @@ impl<'tcx> TypeErrCtxtExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
         // bound was introduced. At least one generator should be present for this diagnostic to be
         // modified.
         let (mut trait_ref, mut target_ty) = match obligation.predicate.kind().skip_binder() {
-            ty::PredicateKind::Trait(p) => (Some(p), Some(p.self_ty())),
+            ty::PredicateKind::Clause(ty::Clause::Trait(p)) => (Some(p), Some(p.self_ty())),
             _ => (None, None),
         };
         let mut generator = None;
@@ -1999,11 +1989,6 @@ impl<'tcx> TypeErrCtxtExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
             .as_local()
             .and_then(|def_id| hir.maybe_body_owned_by(def_id))
             .map(|body_id| hir.body(body_id));
-        let is_async = self
-            .tcx
-            .generator_kind(generator_did)
-            .map(|generator_kind| matches!(generator_kind, hir::GeneratorKind::Async(..)))
-            .unwrap_or(false);
         let mut visitor = AwaitsVisitor::default();
         if let Some(body) = generator_body {
             visitor.visit_body(body);
@@ -2080,6 +2065,7 @@ impl<'tcx> TypeErrCtxtExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
 
         debug!(?interior_or_upvar_span);
         if let Some(interior_or_upvar_span) = interior_or_upvar_span {
+            let is_async = self.tcx.generator_is_async(generator_did);
             let typeck_results = match generator_data {
                 GeneratorData::Local(typeck_results) => Some(typeck_results),
                 GeneratorData::Foreign(_) => None,
@@ -2624,30 +2610,24 @@ impl<'tcx> TypeErrCtxtExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
                     }
                 };
 
-                let from_generator = tcx.require_lang_item(LangItem::FromGenerator, None);
+                let identity_future = tcx.require_lang_item(LangItem::IdentityFuture, None);
 
                 // Don't print the tuple of capture types
                 'print: {
                     if !is_upvar_tys_infer_tuple {
                         let msg = format!("required because it appears within the type `{}`", ty);
                         match ty.kind() {
-                            ty::Adt(def, _) => {
-                                // `gen_future` is used in all async functions; it doesn't add any additional info.
-                                if self.tcx.is_diagnostic_item(sym::gen_future, def.did()) {
-                                    break 'print;
-                                }
-                                match self.tcx.opt_item_ident(def.did()) {
-                                    Some(ident) => err.span_note(ident.span, &msg),
-                                    None => err.note(&msg),
-                                }
-                            }
+                            ty::Adt(def, _) => match self.tcx.opt_item_ident(def.did()) {
+                                Some(ident) => err.span_note(ident.span, &msg),
+                                None => err.note(&msg),
+                            },
                             ty::Opaque(def_id, _) => {
-                                // Avoid printing the future from `core::future::from_generator`, it's not helpful
-                                if tcx.parent(*def_id) == from_generator {
+                                // Avoid printing the future from `core::future::identity_future`, it's not helpful
+                                if tcx.parent(*def_id) == identity_future {
                                     break 'print;
                                 }
 
-                                // If the previous type is `from_generator`, this is the future generated by the body of an async function.
+                                // If the previous type is `identity_future`, this is the future generated by the body of an async function.
                                 // Avoid printing it twice (it was already printed in the `ty::Generator` arm below).
                                 let is_future = tcx.ty_is_opaque_future(ty);
                                 debug!(
@@ -2657,8 +2637,8 @@ impl<'tcx> TypeErrCtxtExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
                                 );
                                 if is_future
                                     && obligated_types.last().map_or(false, |ty| match ty.kind() {
-                                        ty::Opaque(last_def_id, _) => {
-                                            tcx.parent(*last_def_id) == from_generator
+                                        ty::Generator(last_def_id, ..) => {
+                                            tcx.generator_is_async(*last_def_id)
                                         }
                                         _ => false,
                                     })
@@ -2684,7 +2664,7 @@ impl<'tcx> TypeErrCtxtExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
                                 let sp = self.tcx.def_span(def_id);
 
                                 // Special-case this to say "async block" instead of `[static generator]`.
-                                let kind = tcx.generator_kind(def_id).unwrap();
+                                let kind = tcx.generator_kind(def_id).unwrap().descr();
                                 err.span_note(
                                     sp,
                                     &format!("required because it's used within this {}", kind),
@@ -2986,13 +2966,12 @@ impl<'tcx> TypeErrCtxtExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
                         self.tcx.mk_substs_trait(trait_pred.self_ty(), []),
                     )
                 });
-                let projection_ty = normalize_to(
-                    &mut SelectionContext::new(self),
-                    obligation.param_env,
-                    obligation.cause.clone(),
-                    projection_ty,
-                    &mut vec![],
-                );
+                let InferOk { value: projection_ty, .. } = self
+                    .partially_normalize_associated_types_in(
+                        obligation.cause.clone(),
+                        obligation.param_env,
+                        projection_ty,
+                    );
 
                 debug!(
                     normalized_projection_type = ?self.resolve_vars_if_possible(projection_ty)

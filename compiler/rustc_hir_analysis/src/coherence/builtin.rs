@@ -128,11 +128,11 @@ fn visit_implementation_of_copy(tcx: TyCtxt<'_>, impl_did: LocalDefId) {
                             .or_default()
                             .push(error.obligation.cause.span);
                     }
-                    if let ty::PredicateKind::Trait(ty::TraitPredicate {
+                    if let ty::PredicateKind::Clause(ty::Clause::Trait(ty::TraitPredicate {
                         trait_ref,
                         polarity: ty::ImplPolarity::Positive,
                         ..
-                    }) = error_predicate.kind().skip_binder()
+                    })) = error_predicate.kind().skip_binder()
                     {
                         let ty = trait_ref.self_ty();
                         if let ty::Param(_) = ty.kind() {
@@ -370,7 +370,7 @@ pub fn coerce_unsized_info<'tcx>(tcx: TyCtxt<'tcx>, impl_did: DefId) -> CoerceUn
     let check_mutbl = |mt_a: ty::TypeAndMut<'tcx>,
                        mt_b: ty::TypeAndMut<'tcx>,
                        mk_ptr: &dyn Fn(Ty<'tcx>) -> Ty<'tcx>| {
-        if (mt_a.mutbl, mt_b.mutbl) == (hir::Mutability::Not, hir::Mutability::Mut) {
+        if mt_a.mutbl < mt_b.mutbl {
             infcx
                 .err_ctxt()
                 .report_mismatched_types(

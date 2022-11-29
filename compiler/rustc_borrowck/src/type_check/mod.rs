@@ -2013,8 +2013,8 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
                         );
 
                         let outlives_predicate =
-                            tcx.mk_predicate(Binder::dummy(ty::PredicateKind::TypeOutlives(
-                                ty::OutlivesPredicate(self_ty, *region),
+                            tcx.mk_predicate(Binder::dummy(ty::PredicateKind::Clause(
+                                ty::Clause::TypeOutlives(ty::OutlivesPredicate(self_ty, *region)),
                             )));
                         self.prove_predicate(
                             outlives_predicate,
@@ -2588,7 +2588,6 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
             }
 
             // For closures, we have some **extra requirements** we
-            //
             // have to check. In particular, in their upvars and
             // signatures, closures often reference various regions
             // from the surrounding function -- we call those the

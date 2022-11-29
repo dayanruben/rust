@@ -264,6 +264,7 @@ symbols! {
         Relaxed,
         Release,
         Result,
+        ResumeTy,
         Return,
         Right,
         Rust,
@@ -728,7 +729,6 @@ symbols! {
         frem_fast,
         from,
         from_desugaring,
-        from_generator,
         from_iter,
         from_method,
         from_output,
@@ -779,6 +779,7 @@ symbols! {
         i64,
         i8,
         ident,
+        identity_future,
         if_let,
         if_let_guard,
         if_while_or_patterns,
@@ -2050,8 +2051,8 @@ impl Symbol {
 }
 
 impl Ident {
-    // Returns `true` for reserved identifiers used internally for elided lifetimes,
-    // unnamed method parameters, crate root module, error recovery etc.
+    /// Returns `true` for reserved identifiers used internally for elided lifetimes,
+    /// unnamed method parameters, crate root module, error recovery etc.
     pub fn is_special(self) -> bool {
         self.name.is_special()
     }

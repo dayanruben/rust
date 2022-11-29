@@ -377,12 +377,8 @@ fn link_rlib<'a>(
                 find_native_static_library(name.as_str(), lib.verbatim, &lib_search_paths, sess);
             if sess.opts.unstable_opts.packed_bundled_libs && flavor == RlibFlavor::Normal {
                 let filename = lib.filename.unwrap();
-                let lib_path = find_native_static_library(
-                    filename.as_str(),
-                    Some(true),
-                    &lib_search_paths,
-                    sess,
-                );
+                let lib_path =
+                    find_native_static_library(filename.as_str(), true, &lib_search_paths, sess);
                 let src = read(lib_path)
                     .map_err(|e| sess.emit_fatal(errors::ReadFileError { message: e }))?;
                 let (data, _) = create_wrapper_file(sess, b".bundled_lib".to_vec(), &src);
@@ -465,7 +461,7 @@ fn collate_raw_dylibs<'a, 'b>(
 
     for lib in used_libraries {
         if lib.kind == NativeLibKind::RawDylib {
-            let ext = if matches!(lib.verbatim, Some(true)) { "" } else { ".dll" };
+            let ext = if lib.verbatim { "" } else { ".dll" };
             let name = format!("{}{}", lib.name.expect("unnamed raw-dylib library"), ext);
             let imports = dylib_table.entry(name.clone()).or_default();
             for import in &lib.dll_imports {
@@ -676,8 +672,7 @@ fn link_dwarf_object<'a>(
             thorin::MissingReferencedObjectBehaviour::Skip,
         )?;
 
-        let output = package.finish()?.write()?;
-        let mut output_stream = BufWriter::new(
+        let output_stream = BufWriter::new(
             OpenOptions::new()
                 .read(true)
                 .write(true)
@@ -685,8 +680,10 @@ fn link_dwarf_object<'a>(
                 .truncate(true)
                 .open(dwp_out_filename)?,
         );
-        output_stream.write_all(&output)?;
-        output_stream.flush()?;
+        let mut output_stream = object::write::StreamingBuffer::new(output_stream);
+        package.finish()?.emit(&mut output_stream)?;
+        output_stream.result()?;
+        output_stream.into_inner().flush()?;
 
         Ok(())
     }) {
@@ -1178,7 +1175,7 @@ pub fn ignored_for_lto(sess: &Session, info: &CrateInfo, cnum: CrateNum) -> bool
         && (info.compiler_builtins == Some(cnum) || info.is_no_builtins.contains(&cnum))
 }
 
-// This functions tries to determine the appropriate linker (and corresponding LinkerFlavor) to use
+/// This functions tries to determine the appropriate linker (and corresponding LinkerFlavor) to use
 pub fn linker_and_flavor(sess: &Session) -> (PathBuf, LinkerFlavor) {
     fn infer_from(
         sess: &Session,
@@ -1334,7 +1331,7 @@ fn print_native_static_libs(sess: &Session, all_native_libs: &[NativeLib]) {
                 NativeLibKind::Static { bundle: Some(false), .. }
                 | NativeLibKind::Dylib { .. }
                 | NativeLibKind::Unspecified => {
-                    let verbatim = lib.verbatim.unwrap_or(false);
+                    let verbatim = lib.verbatim;
                     if sess.target.is_like_msvc {
                         Some(format!("{}{}", name, if verbatim { "" } else { ".lib" }))
                     } else if sess.target.linker_flavor.is_gnu() {
@@ -2305,7 +2302,7 @@ fn add_native_libs_from_crate(
         _ => &codegen_results.crate_info.native_libraries[&cnum],
     };
 
-    let mut last = (None, NativeLibKind::Unspecified, None);
+    let mut last = (None, NativeLibKind::Unspecified, false);
     for lib in native_libs {
         let Some(name) = lib.name else {
             continue;
@@ -2322,7 +2319,7 @@ fn add_native_libs_from_crate(
         };
 
         let name = name.as_str();
-        let verbatim = lib.verbatim.unwrap_or(false);
+        let verbatim = lib.verbatim;
         match lib.kind {
             NativeLibKind::Static { bundle, whole_archive } => {
                 if link_static {

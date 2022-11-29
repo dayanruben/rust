@@ -238,7 +238,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
             param_env: obligation.param_env,
             cause: obligation.cause.clone(),
             recursion_depth: obligation.recursion_depth,
-            predicate: self.infcx().resolve_vars_if_possible(obligation.predicate),
+            predicate: self.infcx.resolve_vars_if_possible(obligation.predicate),
         };
 
         if obligation.predicate.skip_binder().self_ty().is_ty_var() {
@@ -282,10 +282,10 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
                 self.assemble_builtin_bound_candidates(copy_conditions, &mut candidates);
             } else if lang_items.discriminant_kind_trait() == Some(def_id) {
                 // `DiscriminantKind` is automatically implemented for every type.
-                candidates.vec.push(DiscriminantKindCandidate);
+                candidates.vec.push(BuiltinCandidate { has_nested: false });
             } else if lang_items.pointee_trait() == Some(def_id) {
                 // `Pointee` is automatically implemented for every type.
-                candidates.vec.push(PointeeCandidate);
+                candidates.vec.push(BuiltinCandidate { has_nested: false });
             } else if lang_items.sized_trait() == Some(def_id) {
                 // Sized is never implementable by end-users, it is
                 // always automatically computed.
@@ -312,7 +312,12 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
                     self.assemble_builtin_bound_candidates(clone_conditions, &mut candidates);
                 }
 
-                self.assemble_generator_candidates(obligation, &mut candidates);
+                if lang_items.gen_trait() == Some(def_id) {
+                    self.assemble_generator_candidates(obligation, &mut candidates);
+                } else if lang_items.future_trait() == Some(def_id) {
+                    self.assemble_future_candidates(obligation, &mut candidates);
+                }
+
                 self.assemble_closure_candidates(obligation, &mut candidates);
                 self.assemble_fn_pointer_candidates(obligation, &mut candidates);
                 self.assemble_candidates_from_impls(obligation, &mut candidates);
@@ -400,10 +405,6 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
         obligation: &TraitObligation<'tcx>,
         candidates: &mut SelectionCandidateSet<'tcx>,
     ) {
-        if self.tcx().lang_items().gen_trait() != Some(obligation.predicate.def_id()) {
-            return;
-        }
-
         // Okay to skip binder because the substs on generator types never
         // touch bound regions, they just capture the in-scope
         // type/region parameters.
@@ -422,6 +423,21 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
         }
     }
 
+    fn assemble_future_candidates(
+        &mut self,
+        obligation: &TraitObligation<'tcx>,
+        candidates: &mut SelectionCandidateSet<'tcx>,
+    ) {
+        let self_ty = obligation.self_ty().skip_binder();
+        if let ty::Generator(did, ..) = self_ty.kind() {
+            if self.tcx().generator_is_async(*did) {
+                debug!(?self_ty, ?obligation, "assemble_future_candidates",);
+
+                candidates.vec.push(FutureCandidate);
+            }
+        }
+    }
+
     /// Checks for the artificial impl that the compiler will create for an obligation like `X :
     /// FnMut<..>` where `X` is a closure type.
     ///
@@ -433,7 +449,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
         obligation: &TraitObligation<'tcx>,
         candidates: &mut SelectionCandidateSet<'tcx>,
     ) {
-        let Some(kind) = self.tcx().fn_trait_kind_from_lang_item(obligation.predicate.def_id()) else {
+        let Some(kind) = self.tcx().fn_trait_kind_from_def_id(obligation.predicate.def_id()) else {
             return;
         };
 
@@ -471,7 +487,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
         candidates: &mut SelectionCandidateSet<'tcx>,
     ) {
         // We provide impl of all fn traits for fn pointers.
-        if self.tcx().fn_trait_kind_from_lang_item(obligation.predicate.def_id()).is_none() {
+        if !self.tcx().is_fn_trait(obligation.predicate.def_id()) {
             return;
         }
 
@@ -671,9 +687,9 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
 
             debug!(?poly_trait_ref, "assemble_candidates_from_object_ty");
 
-            let poly_trait_predicate = self.infcx().resolve_vars_if_possible(obligation.predicate);
+            let poly_trait_predicate = self.infcx.resolve_vars_if_possible(obligation.predicate);
             let placeholder_trait_predicate =
-                self.infcx().replace_bound_vars_with_placeholders(poly_trait_predicate);
+                self.infcx.replace_bound_vars_with_placeholders(poly_trait_predicate);
 
             // Count only those upcast versions that match the trait-ref
             // we are looking for. Specifically, do not only check for the
@@ -713,12 +729,8 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
         // <ty as Deref>
         let trait_ref = tcx.mk_trait_ref(tcx.lang_items().deref_trait()?, [ty]);
 
-        let obligation = traits::Obligation::new(
-            tcx,
-            cause.clone(),
-            param_env,
-            ty::Binder::dummy(trait_ref).without_const(),
-        );
+        let obligation =
+            traits::Obligation::new(tcx, cause.clone(), param_env, ty::Binder::dummy(trait_ref));
         if !self.infcx.predicate_may_hold(&obligation) {
             return None;
         }
@@ -926,7 +938,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
             return;
         }
 
-        let self_ty = self.infcx().shallow_resolve(obligation.self_ty());
+        let self_ty = self.infcx.shallow_resolve(obligation.self_ty());
         match self_ty.skip_binder().kind() {
             ty::Opaque(..)
             | ty::Dynamic(..)
@@ -993,7 +1005,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
         obligation: &TraitObligation<'tcx>,
         candidates: &mut SelectionCandidateSet<'tcx>,
     ) {
-        let self_ty = self.infcx().shallow_resolve(obligation.self_ty().skip_binder());
+        let self_ty = self.infcx.shallow_resolve(obligation.self_ty().skip_binder());
         match self_ty.kind() {
             ty::Tuple(_) => {
                 candidates.vec.push(BuiltinCandidate { has_nested: false });

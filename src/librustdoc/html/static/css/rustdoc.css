@@ -242,7 +242,6 @@ h1 a,
 }
 
 .content span.fn, .content a.fn,
-.content .fnname,
 .content span.method, .content a.method,
 .content span.tymethod, .content a.tymethod {
 	color: var(--function-link-color);
@@ -784,8 +783,7 @@ table,
 	margin-top: 0;
 	white-space: nowrap;
 	/* flex layout allows shrinking the <select> appropriately if it becomes too large */
-	display: inline-flex;
-	max-width: 100%;
+	display: flex;
 	/* make things look like in a line, despite the fact that we're using a layout
 	with boxes (i.e. from the flex layout) */
 	align-items: baseline;
@@ -950,7 +948,6 @@ so that we can apply CSS-filters to change the arrow color in themes */
 #help dt {
 	float: left;
 	clear: left;
-	display: block;
 	margin-right: 0.5rem;
 }
 #help span.top, #help span.bottom {
@@ -1140,7 +1137,6 @@ pre.rust .doccomment {
 .example-wrap .tooltip {
 	position: absolute;
 	display: block;
-	cursor: pointer;
 	left: -25px;
 	top: 5px;
 }
@@ -1330,8 +1326,8 @@ a.test-arrow:hover {
 	border-bottom: 1px solid;
 	display: flex;
 	height: 40px;
-	justify-content: center;
-	align-items: center;
+	justify-content: stretch;
+	align-items: stretch;
 	z-index: 10;
 }
 #source-sidebar {
@@ -1344,6 +1340,13 @@ a.test-arrow:hover {
 	border-bottom: 1px solid var(--border-color);
 	margin-bottom: 6px;
 }
+#source-sidebar div.files > a:hover, details.dir-entry summary:hover,
+#source-sidebar div.files > a:focus, details.dir-entry summary:focus {
+	background-color: var(--source-sidebar-background-hover);
+}
+#source-sidebar div.files > a.selected {
+	background-color: var(--source-sidebar-background-selected);
+}
 #sidebar-toggle > button {
 	font-size: inherit;
 	font-weight: bold;
@@ -1352,13 +1355,7 @@ a.test-arrow:hover {
 	text-align: center;
 	border: none;
 	outline: none;
-	position: absolute;
-	top: 0;
-	bottom: 0;
-	left: 0;
-	right: 0;
-	/* work around button layout strangeness: https://stackoverflow.com/q/7271561 */
-	width: 100%;
+	flex: 1 1;
 	/* iOS button gradient: https://stackoverflow.com/q/5438567 */
 	-webkit-appearance: none;
 	opacity: 1;
@@ -1514,6 +1511,7 @@ details.rustdoc-toggle > summary.hideme > span {
 }
 
 details.rustdoc-toggle > summary::before {
+	background-image: url("toggle-plus-1092eb4930d581b0.svg");
 	content: "";
 	cursor: pointer;
 	width: 16px;
@@ -1601,14 +1599,6 @@ details.rustdoc-toggle[open] > summary.hideme > span {
 details.rustdoc-toggle[open] > summary::before,
 details.rustdoc-toggle[open] > summary.hideme::before {
 	background-image: url("toggle-minus-31bbd6e4c77f5c96.svg");
-}
-
-details.rustdoc-toggle > summary::before {
-	background-image: url("toggle-plus-1092eb4930d581b0.svg");
-}
-
-details.rustdoc-toggle[open] > summary::before,
-details.rustdoc-toggle[open] > summary.hideme::before {
 	width: 16px;
 	height: 16px;
 	background-repeat: no-repeat;

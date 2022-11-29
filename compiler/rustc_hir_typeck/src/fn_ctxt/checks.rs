@@ -1734,22 +1734,14 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         let hir = self.tcx.hir();
         let hir::Node::Expr(expr) = hir.get(hir_id) else { return false; };
 
-        // Skip over mentioning async lang item
-        if Some(def_id) == self.tcx.lang_items().from_generator_fn()
-            && error.obligation.cause.span.desugaring_kind()
-                == Some(rustc_span::DesugaringKind::Async)
-        {
-            return false;
-        }
-
         let Some(unsubstituted_pred) =
             self.tcx.predicates_of(def_id).instantiate_identity(self.tcx).predicates.into_iter().nth(idx)
             else { return false; };
 
         let generics = self.tcx.generics_of(def_id);
         let predicate_substs = match unsubstituted_pred.kind().skip_binder() {
-            ty::PredicateKind::Trait(pred) => pred.trait_ref.substs,
-            ty::PredicateKind::Projection(pred) => pred.projection_ty.substs,
+            ty::PredicateKind::Clause(ty::Clause::Trait(pred)) => pred.trait_ref.substs,
+            ty::PredicateKind::Clause(ty::Clause::Projection(pred)) => pred.projection_ty.substs,
             _ => ty::List::empty(),
         };
 
@@ -2097,7 +2089,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             && let maybe_trait_item_def_id = assoc_item.trait_item_def_id.unwrap_or(def_id)
             && let maybe_trait_def_id = self.tcx.parent(maybe_trait_item_def_id)
             // Just an easy way to check "trait_def_id == Fn/FnMut/FnOnce"
-            && let Some(call_kind) = ty::ClosureKind::from_def_id(self.tcx, maybe_trait_def_id)
+            && let Some(call_kind) = self.tcx.fn_trait_kind_from_def_id(maybe_trait_def_id)
             && let Some(callee_ty) = callee_ty
         {
             let callee_ty = callee_ty.peel_refs();
@@ -2121,9 +2113,9 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                         for (predicate, span) in
                             std::iter::zip(instantiated.predicates, instantiated.spans)
                         {
-                            if let ty::PredicateKind::Trait(pred) = predicate.kind().skip_binder()
+                            if let ty::PredicateKind::Clause(ty::Clause::Trait(pred)) = predicate.kind().skip_binder()
                                 && pred.self_ty().peel_refs() == callee_ty
-                                && ty::ClosureKind::from_def_id(self.tcx, pred.def_id()).is_some()
+                                && self.tcx.is_fn_trait(pred.def_id())
                             {
                                 err.span_note(span, "callable defined here");
                                 return;
@@ -2157,11 +2149,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                             self.tcx,
                             traits::ObligationCause::dummy(),
                             self.param_env,
-                            ty::Binder::dummy(ty::TraitPredicate {
-                                trait_ref,
-                                constness: ty::BoundConstness::NotConst,
-                                polarity: ty::ImplPolarity::Positive,
-                            }),
+                            ty::Binder::dummy(trait_ref),
                         );
                         match SelectionContext::new(&self).select(&obligation) {
                             Ok(Some(traits::ImplSource::UserDefined(impl_source))) => {

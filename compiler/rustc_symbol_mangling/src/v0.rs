@@ -575,6 +575,7 @@ impl<'tcx> Printer<'tcx> for &mut SymbolMangler<'tcx> {
             // a path), even for it we still need to encode a placeholder, as
             // the path could refer back to e.g. an `impl` using the constant.
             ty::ConstKind::Unevaluated(_)
+            | ty::ConstKind::Expr(_)
             | ty::ConstKind::Param(_)
             | ty::ConstKind::Infer(_)
             | ty::ConstKind::Bound(..)
@@ -621,7 +622,7 @@ impl<'tcx> Printer<'tcx> for &mut SymbolMangler<'tcx> {
                 });
 
                 match inner_ty.kind() {
-                    ty::Str if *mutbl == hir::Mutability::Not => {
+                    ty::Str if mutbl.is_not() => {
                         match ct.kind() {
                             ty::ConstKind::Value(valtree) => {
                                 let slice =

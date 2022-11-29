@@ -74,7 +74,7 @@ use rustc_middle::dep_graph::DepContext;
 use rustc_middle::ty::print::with_no_trimmed_paths;
 use rustc_middle::ty::relate::{self, RelateResult, TypeRelation};
 use rustc_middle::ty::{
-    self, error::TypeError, Binder, List, Region, Ty, TyCtxt, TypeFoldable, TypeSuperVisitable,
+    self, error::TypeError, List, Region, Ty, TyCtxt, TypeFoldable, TypeSuperVisitable,
     TypeVisitable,
 };
 use rustc_span::{sym, symbol::kw, BytePos, DesugaringKind, Pos, Span};
@@ -339,33 +339,28 @@ pub fn unexpected_hidden_region_diagnostic<'tcx>(
 }
 
 impl<'tcx> InferCtxt<'tcx> {
-    pub fn get_impl_future_output_ty(&self, ty: Ty<'tcx>) -> Option<Binder<'tcx, Ty<'tcx>>> {
-        if let ty::Opaque(def_id, substs) = ty.kind() {
-            let future_trait = self.tcx.require_lang_item(LangItem::Future, None);
-            // Future::Output
-            let item_def_id = self.tcx.associated_item_def_ids(future_trait)[0];
+    pub fn get_impl_future_output_ty(&self, ty: Ty<'tcx>) -> Option<Ty<'tcx>> {
+        let ty::Opaque(def_id, substs) = *ty.kind() else { return None; };
 
-            let bounds = self.tcx.bound_explicit_item_bounds(*def_id);
+        let future_trait = self.tcx.require_lang_item(LangItem::Future, None);
+        let item_def_id = self.tcx.associated_item_def_ids(future_trait)[0];
 
-            for (predicate, _) in bounds.subst_iter_copied(self.tcx, substs) {
-                let output = predicate
+        self.tcx.bound_explicit_item_bounds(def_id).subst_iter_copied(self.tcx, substs).find_map(
+            |(predicate, _)| {
+                predicate
                     .kind()
                     .map_bound(|kind| match kind {
-                        ty::PredicateKind::Projection(projection_predicate)
+                        ty::PredicateKind::Clause(ty::Clause::Projection(projection_predicate))
                             if projection_predicate.projection_ty.item_def_id == item_def_id =>
                         {
                             projection_predicate.term.ty()
                         }
                         _ => None,
                     })
-                    .transpose();
-                if output.is_some() {
-                    // We don't account for multiple `Future::Output = Ty` constraints.
-                    return output;
-                }
-            }
-        }
-        None
+                    .no_bound_vars()
+                    .flatten()
+            },
+        )
     }
 }
 
@@ -1677,40 +1672,34 @@ impl<'tcx> TypeErrCtxt<'_, 'tcx> {
             }
         };
 
-        match terr {
-            // Ignore msg for object safe coercion
-            // since E0038 message will be printed
-            TypeError::ObjectUnsafeCoercion(_) => {}
-            _ => {
-                let mut label_or_note = |span: Span, msg: &str| {
-                    if (prefer_label && is_simple_error) || &[span] == diag.span.primary_spans() {
-                        diag.span_label(span, msg);
-                    } else {
-                        diag.span_note(span, msg);
-                    }
-                };
-                if let Some((sp, msg)) = secondary_span {
-                    if swap_secondary_and_primary {
-                        let terr = if let Some(infer::ValuePairs::Terms(infer::ExpectedFound {
-                            expected,
-                            ..
-                        })) = values
-                        {
-                            format!("expected this to be `{}`", expected)
-                        } else {
-                            terr.to_string()
-                        };
-                        label_or_note(sp, &terr);
-                        label_or_note(span, &msg);
-                    } else {
-                        label_or_note(span, &terr.to_string());
-                        label_or_note(sp, &msg);
-                    }
-                } else {
-                    label_or_note(span, &terr.to_string());
-                }
+        let mut label_or_note = |span: Span, msg: &str| {
+            if (prefer_label && is_simple_error) || &[span] == diag.span.primary_spans() {
+                diag.span_label(span, msg);
+            } else {
+                diag.span_note(span, msg);
             }
         };
+        if let Some((sp, msg)) = secondary_span {
+            if swap_secondary_and_primary {
+                let terr = if let Some(infer::ValuePairs::Terms(infer::ExpectedFound {
+                    expected,
+                    ..
+                })) = values
+                {
+                    format!("expected this to be `{}`", expected)
+                } else {
+                    terr.to_string()
+                };
+                label_or_note(sp, &terr);
+                label_or_note(span, &msg);
+            } else {
+                label_or_note(span, &terr.to_string());
+                label_or_note(sp, &msg);
+            }
+        } else {
+            label_or_note(span, &terr.to_string());
+        }
+
         if let Some((expected, found)) = expected_found {
             let (expected_label, found_label, exp_found) = match exp_found {
                 Mismatch::Variable(ef) => (
@@ -1879,9 +1868,6 @@ impl<'tcx> TypeErrCtxt<'_, 'tcx> {
                             &sort_string(values.found),
                         );
                     }
-                }
-                TypeError::ObjectUnsafeCoercion(_) => {
-                    diag.note_unsuccessful_coercion(found, expected);
                 }
                 _ => {
                     debug!(
@@ -2055,8 +2041,8 @@ impl<'tcx> TypeErrCtxt<'_, 'tcx> {
         }
 
         match (
-            self.get_impl_future_output_ty(exp_found.expected).map(Binder::skip_binder),
-            self.get_impl_future_output_ty(exp_found.found).map(Binder::skip_binder),
+            self.get_impl_future_output_ty(exp_found.expected),
+            self.get_impl_future_output_ty(exp_found.found),
         ) {
             (Some(exp), Some(found)) if self.same_type_modulo_infer(exp, found) => match cause
                 .code()
@@ -3127,7 +3113,6 @@ impl<'tcx> ObligationCauseExt<'tcx> for ObligationCause<'tcx> {
                 TypeError::IntrinsicCast => {
                     Error0308("cannot coerce intrinsics to function pointers")
                 }
-                TypeError::ObjectUnsafeCoercion(did) => Error0038(did),
                 _ => Error0308("mismatched types"),
             },
         }
