@@ -4,14 +4,12 @@ use rustc_expand::base::{self, DummyResult};
 use rustc_session::errors::report_lit_error;
 use rustc_span::symbol::Symbol;
 
-use std::string::String;
-
 pub fn expand_concat(
     cx: &mut base::ExtCtxt<'_>,
     sp: rustc_span::Span,
     tts: TokenStream,
 ) -> Box<dyn base::MacResult + 'static> {
-    let Some(es) = base::get_exprs_from_tts(cx, sp, tts) else {
+    let Some(es) = base::get_exprs_from_tts(cx, tts) else {
         return DummyResult::any(sp);
     };
     let mut accumulator = String::new();
