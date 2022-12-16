@@ -16,6 +16,7 @@ use rustc_session::config::TrimmedDefPaths;
 use rustc_session::cstore::{ExternCrate, ExternCrateSource};
 use rustc_session::Limit;
 use rustc_span::symbol::{kw, Ident, Symbol};
+use rustc_span::FileNameDisplayPreference;
 use rustc_target::abi::Size;
 use rustc_target::spec::abi::Abi;
 use smallvec::SmallVec;
@@ -718,17 +719,17 @@ pub trait PrettyPrinter<'tcx>:
             ty::Foreign(def_id) => {
                 p!(print_def_path(def_id, &[]));
             }
-            ty::Projection(ref data) => {
+            ty::Alias(ty::Projection, ref data) => {
                 if !(self.should_print_verbose() || NO_QUERIES.with(|q| q.get()))
-                    && self.tcx().def_kind(data.item_def_id) == DefKind::ImplTraitPlaceholder
+                    && self.tcx().def_kind(data.def_id) == DefKind::ImplTraitPlaceholder
                 {
-                    return self.pretty_print_opaque_impl_type(data.item_def_id, data.substs);
+                    return self.pretty_print_opaque_impl_type(data.def_id, data.substs);
                 } else {
                     p!(print(data))
                 }
             }
             ty::Placeholder(placeholder) => p!(write("Placeholder({:?})", placeholder)),
-            ty::Opaque(def_id, substs) => {
+            ty::Alias(ty::Opaque, ty::AliasTy { def_id, substs, .. }) => {
                 // FIXME(eddyb) print this with `print_def_path`.
                 // We use verbose printing in 'NO_QUERIES' mode, to
                 // avoid needing to call `predicates_of`. This should
@@ -743,7 +744,9 @@ pub trait PrettyPrinter<'tcx>:
                 let parent = self.tcx().parent(def_id);
                 match self.tcx().def_kind(parent) {
                     DefKind::TyAlias | DefKind::AssocTy => {
-                        if let ty::Opaque(d, _) = *self.tcx().type_of(parent).kind() {
+                        if let ty::Alias(ty::Opaque, ty::AliasTy { def_id: d, .. }) =
+                            *self.tcx().type_of(parent).kind()
+                        {
                             if d == def_id {
                                 // If the type alias directly starts with the `impl` of the
                                 // opaque type we're printing, then skip the `::{opaque#1}`.
@@ -816,11 +819,16 @@ pub trait PrettyPrinter<'tcx>:
                             p!("@", print_def_path(did.to_def_id(), substs));
                         } else {
                             let span = self.tcx().def_span(did);
+                            let preference = if FORCE_TRIMMED_PATH.with(|flag| flag.get()) {
+                                FileNameDisplayPreference::Short
+                            } else {
+                                FileNameDisplayPreference::Remapped
+                            };
                             p!(write(
                                 "@{}",
                                 // This may end up in stderr diagnostics but it may also be emitted
                                 // into MIR. Hence we use the remapped path if available
-                                self.tcx().sess.source_map().span_to_embeddable_string(span)
+                                self.tcx().sess.source_map().span_to_string(span, preference)
                             ));
                         }
                     } else {
@@ -1019,8 +1027,8 @@ pub trait PrettyPrinter<'tcx>:
                         // Skip printing `<[generator@] as Generator<_>>::Return` from async blocks,
                         // unless we can find out what generator return type it comes from.
                         let term = if let Some(ty) = term.skip_binder().ty()
-                            && let ty::Projection(proj) = ty.kind()
-                            && let Some(assoc) = tcx.opt_associated_item(proj.item_def_id)
+                            && let ty::Alias(ty::Projection, proj) = ty.kind()
+                            && let Some(assoc) = tcx.opt_associated_item(proj.def_id)
                             && assoc.trait_container(tcx) == tcx.lang_items().gen_trait()
                             && assoc.name == rustc_span::sym::Return
                         {
@@ -2653,7 +2661,7 @@ define_print_and_forward_display! {
     }
 
     ty::ExistentialProjection<'tcx> {
-        let name = cx.tcx().associated_item(self.item_def_id).name;
+        let name = cx.tcx().associated_item(self.def_id).name;
         p!(write("{} = ", name), print(self.term))
     }
 
@@ -2740,8 +2748,8 @@ define_print_and_forward_display! {
       }
     }
 
-    ty::ProjectionTy<'tcx> {
-        p!(print_def_path(self.item_def_id, self.substs));
+    ty::AliasTy<'tcx> {
+        p!(print_def_path(self.def_id, self.substs));
     }
 
     ty::ClosureKind {

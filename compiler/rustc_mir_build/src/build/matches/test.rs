@@ -758,8 +758,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
         let downcast_place = match_pair.place.downcast(adt_def, variant_index); // `(x as Variant)`
         let consequent_match_pairs = subpatterns.iter().map(|subpattern| {
             // e.g., `(x as Variant).0`
-            let place = downcast_place
-                .clone_project(PlaceElem::Field(subpattern.field, subpattern.pattern.ty));
+            let place = downcast_place.clone().field(self, subpattern.field);
             // e.g., `(x as Variant).0 @ P1`
             MatchPair::new(place, &subpattern.pattern, self)
         });
@@ -838,8 +837,6 @@ fn trait_method<'tcx>(
     method_name: Symbol,
     substs: impl IntoIterator<Item = impl Into<GenericArg<'tcx>>>,
 ) -> ConstantKind<'tcx> {
-    let substs = tcx.mk_substs(substs.into_iter().map(Into::into));
-
     // The unhygienic comparison here is acceptable because this is only
     // used on known traits.
     let item = tcx
