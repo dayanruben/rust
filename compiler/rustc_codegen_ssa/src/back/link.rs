@@ -253,7 +253,7 @@ pub fn each_linked_rlib(
     };
     for &cnum in crates {
         match fmts.get(cnum.as_usize() - 1) {
-            Some(&Linkage::NotLinked | &Linkage::IncludedFromDylib) => continue,
+            Some(&Linkage::NotLinked | &Linkage::Dynamic | &Linkage::IncludedFromDylib) => continue,
             Some(_) => {}
             None => return Err(errors::LinkRlibError::MissingFormat),
         }
@@ -722,7 +722,7 @@ fn link_natively<'a>(
 
     linker::disable_localization(&mut cmd);
 
-    for &(ref k, ref v) in sess.target.link_env.as_ref() {
+    for (k, v) in sess.target.link_env.as_ref() {
         cmd.env(k.as_ref(), v.as_ref());
     }
     for k in sess.target.link_env_remove.as_ref() {
