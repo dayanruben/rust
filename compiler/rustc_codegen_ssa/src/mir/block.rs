@@ -637,7 +637,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
         self.set_debug_loc(bx, terminator.source_info);
 
         // Obtain the panic entry point.
-        let (fn_abi, llfn) = common::build_langcall(bx, Some(span), LangItem::PanicNoUnwind);
+        let (fn_abi, llfn) = common::build_langcall(bx, Some(span), LangItem::PanicCannotUnwind);
 
         // Codegen the actual panic invoke/call.
         let merging_succ = helper.do_call(self, bx, fn_abi, llfn, &[], None, None, &[], false);
@@ -663,12 +663,12 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
         enum AssertIntrinsic {
             Inhabited,
             ZeroValid,
-            UninitValid,
+            MemUninitializedValid,
         }
         let panic_intrinsic = intrinsic.and_then(|i| match i {
             sym::assert_inhabited => Some(AssertIntrinsic::Inhabited),
             sym::assert_zero_valid => Some(AssertIntrinsic::ZeroValid),
-            sym::assert_uninit_valid => Some(AssertIntrinsic::UninitValid),
+            sym::assert_mem_uninitialized_valid => Some(AssertIntrinsic::MemUninitializedValid),
             _ => None,
         });
         if let Some(intrinsic) = panic_intrinsic {
@@ -679,7 +679,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
             let do_panic = match intrinsic {
                 Inhabited => layout.abi.is_uninhabited(),
                 ZeroValid => !bx.tcx().permits_zero_init(layout),
-                UninitValid => !bx.tcx().permits_uninit_init(layout),
+                MemUninitializedValid => !bx.tcx().permits_uninit_init(layout),
             };
             Some(if do_panic {
                 let msg_str = with_no_visible_paths!({
@@ -698,11 +698,10 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                     })
                 });
                 let msg = bx.const_str(&msg_str);
-                let location = self.get_caller_location(bx, source_info).immediate();
 
                 // Obtain the panic entry point.
                 let (fn_abi, llfn) =
-                    common::build_langcall(bx, Some(source_info.span), LangItem::Panic);
+                    common::build_langcall(bx, Some(source_info.span), LangItem::PanicNounwind);
 
                 // Codegen the actual panic invoke/call.
                 helper.do_call(
@@ -710,7 +709,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                     bx,
                     fn_abi,
                     llfn,
-                    &[msg.0, msg.1, location],
+                    &[msg.0, msg.1],
                     target.as_ref().map(|bb| (ReturnDest::Nothing, *bb)),
                     cleanup,
                     &[],
@@ -1665,7 +1664,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
             let llpersonality = self.cx.eh_personality();
             bx.cleanup_landing_pad(llpersonality);
 
-            let (fn_abi, fn_ptr) = common::build_langcall(&bx, None, LangItem::PanicNoUnwind);
+            let (fn_abi, fn_ptr) = common::build_langcall(&bx, None, LangItem::PanicCannotUnwind);
             let fn_ty = bx.fn_decl_backend_type(&fn_abi);
 
             let llret = bx.call(fn_ty, Some(&fn_abi), fn_ptr, &[], None);

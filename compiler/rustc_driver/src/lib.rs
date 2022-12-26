@@ -653,7 +653,7 @@ fn print_crate_info(
     for req in &sess.opts.prints {
         match *req {
             TargetList => {
-                let mut targets = rustc_target::spec::TARGETS.iter().copied().collect::<Vec<_>>();
+                let mut targets = rustc_target::spec::TARGETS.to_vec();
                 targets.sort_unstable();
                 println!("{}", targets.join("\n"));
             }
@@ -1199,10 +1199,13 @@ static DEFAULT_HOOK: LazyLock<Box<dyn Fn(&panic::PanicInfo<'_>) + Sync + Send + 
             };
 
             // Invoke the default handler, which prints the actual panic message and optionally a backtrace
-            (*DEFAULT_HOOK)(info);
+            // Don't do this for `ExplicitBug`, which has an unhelpful message and backtrace.
+            if !info.payload().is::<rustc_errors::ExplicitBug>() {
+                (*DEFAULT_HOOK)(info);
 
-            // Separate the output with an empty line
-            eprintln!();
+                // Separate the output with an empty line
+                eprintln!();
+            }
 
             // Print the ICE message
             report_ice(info, BUG_REPORT_URL);

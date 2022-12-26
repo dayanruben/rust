@@ -42,7 +42,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
             throw_unsup_format!("Miri supports pthread_join only with retval==NULL");
         }
 
-        let thread_id = this.read_scalar(thread)?.to_machine_usize(this)?;
+        let thread_id = this.read_machine_usize(thread)?;
         this.join_thread_exclusive(thread_id.try_into().expect("thread ID should fit in u32"))?;
 
         Ok(0)
@@ -51,7 +51,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
     fn pthread_detach(&mut self, thread: &OpTy<'tcx, Provenance>) -> InterpResult<'tcx, i32> {
         let this = self.eval_context_mut();
 
-        let thread_id = this.read_scalar(thread)?.to_machine_usize(this)?;
+        let thread_id = this.read_machine_usize(thread)?;
         this.detach_thread(
             thread_id.try_into().expect("thread ID should fit in u32"),
             /*allow_terminated_joined*/ false,
@@ -84,7 +84,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
 
         // Comparing with `>=` to account for null terminator.
         if name.len() >= max_name_len {
-            return this.eval_libc("ERANGE");
+            return Ok(this.eval_libc("ERANGE"));
         }
 
         this.set_thread_name(thread, name);
@@ -107,7 +107,7 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
         let name = this.get_thread_name(thread).to_owned();
         let (success, _written) = this.write_c_str(&name, name_out, len)?;
 
-        if success { Ok(Scalar::from_u32(0)) } else { this.eval_libc("ERANGE") }
+        Ok(if success { Scalar::from_u32(0) } else { this.eval_libc("ERANGE") })
     }
 
     fn sched_yield(&mut self) -> InterpResult<'tcx, i32> {

@@ -335,7 +335,7 @@ pub trait TypeErrCtxtExt<'tcx> {
         err: &mut Diagnostic,
         trait_pred: ty::PolyTraitPredicate<'tcx>,
     );
-    fn function_argument_obligation(
+    fn note_function_argument_obligation(
         &self,
         arg_hir_id: HirId,
         err: &mut Diagnostic,
@@ -1291,29 +1291,25 @@ impl<'tcx> TypeErrCtxtExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
 
         if let ObligationCauseCode::AwaitableExpr(hir_id) = obligation.cause.code().peel_derives() {
             let hir = self.tcx.hir();
-            if let Some(node) = hir_id.and_then(|hir_id| hir.find(hir_id)) {
-                if let hir::Node::Expr(expr) = node {
-                    // FIXME: use `obligation.predicate.kind()...trait_ref.self_ty()` to see if we have `()`
-                    // and if not maybe suggest doing something else? If we kept the expression around we
-                    // could also check if it is an fn call (very likely) and suggest changing *that*, if
-                    // it is from the local crate.
-                    err.span_suggestion(
-                        span,
-                        "remove the `.await`",
-                        "",
-                        Applicability::MachineApplicable,
-                    );
-                    // FIXME: account for associated `async fn`s.
-                    if let hir::Expr { span, kind: hir::ExprKind::Call(base, _), .. } = expr {
-                        if let ty::PredicateKind::Clause(ty::Clause::Trait(pred)) =
-                            obligation.predicate.kind().skip_binder()
-                        {
-                            err.span_label(
-                                *span,
-                                &format!("this call returns `{}`", pred.self_ty()),
-                            );
-                        }
-                        if let Some(typeck_results) = &self.typeck_results
+            if let Some(hir::Node::Expr(expr)) = hir_id.and_then(|hir_id| hir.find(hir_id)) {
+                // FIXME: use `obligation.predicate.kind()...trait_ref.self_ty()` to see if we have `()`
+                // and if not maybe suggest doing something else? If we kept the expression around we
+                // could also check if it is an fn call (very likely) and suggest changing *that*, if
+                // it is from the local crate.
+                err.span_suggestion(
+                    span,
+                    "remove the `.await`",
+                    "",
+                    Applicability::MachineApplicable,
+                );
+                // FIXME: account for associated `async fn`s.
+                if let hir::Expr { span, kind: hir::ExprKind::Call(base, _), .. } = expr {
+                    if let ty::PredicateKind::Clause(ty::Clause::Trait(pred)) =
+                        obligation.predicate.kind().skip_binder()
+                    {
+                        err.span_label(*span, &format!("this call returns `{}`", pred.self_ty()));
+                    }
+                    if let Some(typeck_results) = &self.typeck_results
                             && let ty = typeck_results.expr_ty_adjusted(base)
                             && let ty::FnDef(def_id, _substs) = ty.kind()
                             && let Some(hir::Node::Item(hir::Item { ident, span, vis_span, .. })) =
@@ -1339,7 +1335,6 @@ impl<'tcx> TypeErrCtxtExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
                                 );
                             }
                         }
-                    }
                 }
             }
         }
@@ -2909,7 +2904,7 @@ impl<'tcx> TypeErrCtxtExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
                 ref parent_code,
                 ..
             } => {
-                self.function_argument_obligation(
+                self.note_function_argument_obligation(
                     arg_hir_id,
                     err,
                     parent_code,
@@ -3141,23 +3136,20 @@ impl<'tcx> TypeErrCtxtExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
             );
         }
     }
-    fn function_argument_obligation(
+    fn note_function_argument_obligation(
         &self,
         arg_hir_id: HirId,
         err: &mut Diagnostic,
         parent_code: &ObligationCauseCode<'tcx>,
         param_env: ty::ParamEnv<'tcx>,
-        predicate: ty::Predicate<'tcx>,
+        failed_pred: ty::Predicate<'tcx>,
         call_hir_id: HirId,
     ) {
         let tcx = self.tcx;
         let hir = tcx.hir();
-        if let Some(Node::Expr(expr)) = hir.find(arg_hir_id) {
-            let parent_id = hir.get_parent_item(arg_hir_id);
-            let typeck_results: &TypeckResults<'tcx> = match &self.typeck_results {
-                Some(t) if t.hir_owner == parent_id => t,
-                _ => self.tcx.typeck(parent_id.def_id),
-            };
+        if let Some(Node::Expr(expr)) = hir.find(arg_hir_id)
+            && let Some(typeck_results) = &self.typeck_results
+        {
             if let hir::Expr { kind: hir::ExprKind::Block(..), .. } = expr {
                 let expr = expr.peel_blocks();
                 let ty = typeck_results.expr_ty_adjusted_opt(expr).unwrap_or(tcx.ty_error());
@@ -3182,37 +3174,29 @@ impl<'tcx> TypeErrCtxtExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
             let mut type_diffs = vec![];
 
             if let ObligationCauseCode::ExprBindingObligation(def_id, _, _, idx) = parent_code.deref()
-                && let predicates = self.tcx.predicates_of(def_id).instantiate_identity(self.tcx)
-                && let Some(pred) = predicates.predicates.get(*idx)
+                && let Some(node_substs) = typeck_results.node_substs_opt(call_hir_id)
+                && let where_clauses = self.tcx.predicates_of(def_id).instantiate(self.tcx, node_substs)
+                && let Some(where_pred) = where_clauses.predicates.get(*idx)
             {
-                if let Ok(trait_pred) = pred.kind().try_map_bound(|pred| match pred {
-                    ty::PredicateKind::Clause(ty::Clause::Trait(trait_pred)) => Ok(trait_pred),
-                    _ => Err(()),
-                })
-                    && let Ok(trait_predicate) = predicate.kind().try_map_bound(|pred| match pred {
-                        ty::PredicateKind::Clause(ty::Clause::Trait(trait_pred)) => Ok(trait_pred),
-                        _ => Err(()),
-                    })
+                if let Some(where_pred) = where_pred.to_opt_poly_trait_pred()
+                    && let Some(failed_pred) = failed_pred.to_opt_poly_trait_pred()
                 {
                     let mut c = CollectAllMismatches {
                         infcx: self.infcx,
                         param_env,
                         errors: vec![],
                     };
-                    if let Ok(_) = c.relate(trait_pred, trait_predicate) {
+                    if let Ok(_) = c.relate(where_pred, failed_pred) {
                         type_diffs = c.errors;
                     }
-                } else if let ty::PredicateKind::Clause(
-                    ty::Clause::Projection(proj)
-                ) = pred.kind().skip_binder()
-                    && let ty::PredicateKind::Clause(
-                        ty::Clause::Projection(projection)
-                    ) = predicate.kind().skip_binder()
+                } else if let Some(where_pred) = where_pred.to_opt_poly_projection_pred()
+                    && let Some(failed_pred) = failed_pred.to_opt_poly_projection_pred()
+                    && let Some(found) = failed_pred.skip_binder().term.ty()
                 {
                     type_diffs = vec![
                         Sorts(ty::error::ExpectedFound {
-                            expected: self.tcx.mk_ty(ty::Alias(ty::Projection, proj.projection_ty)),
-                            found: projection.term.ty().unwrap(),
+                            expected: self.tcx.mk_ty(ty::Alias(ty::Projection, where_pred.skip_binder().projection_ty)),
+                            found,
                         }),
                     ];
                 }
@@ -3227,9 +3211,9 @@ impl<'tcx> TypeErrCtxtExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
                 // If the expression we're calling on is a binding, we want to point at the
                 // `let` when talking about the type. Otherwise we'll point at every part
                 // of the method chain with the type.
-                self.point_at_chain(binding_expr, typeck_results, type_diffs, param_env, err);
+                self.point_at_chain(binding_expr, &typeck_results, type_diffs, param_env, err);
             } else {
-                self.point_at_chain(expr, typeck_results, type_diffs, param_env, err);
+                self.point_at_chain(expr, &typeck_results, type_diffs, param_env, err);
             }
         }
         let call_node = hir.find(call_hir_id);
@@ -3483,7 +3467,7 @@ fn hint_missing_borrow<'tcx>(
 
     let arg_spans = fn_decl.inputs.iter().map(|ty| ty.span);
 
-    fn get_deref_type_and_refs<'tcx>(mut ty: Ty<'tcx>) -> (Ty<'tcx>, usize) {
+    fn get_deref_type_and_refs(mut ty: Ty<'_>) -> (Ty<'_>, usize) {
         let mut refs = 0;
 
         while let ty::Ref(_, new_ty, _) = ty.kind() {

@@ -1,9 +1,11 @@
 use rustc_span::Symbol;
 use rustc_target::spec::abi::Abi;
 
+use crate::machine::SIGRTMAX;
 use crate::*;
 use shims::foreign_items::EmulateByNameResult;
 use shims::unix::fs::EvalContextExt as _;
+use shims::unix::linux::fd::EvalContextExt as _;
 use shims::unix::linux::sync::futex;
 use shims::unix::sync::EvalContextExt as _;
 use shims::unix::thread::EvalContextExt as _;
@@ -41,6 +43,35 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
                     this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
                 let result = this.sync_file_range(fd, offset, nbytes, flags)?;
                 this.write_scalar(result, dest)?;
+            }
+            "epoll_create1" => {
+                let [flag] = this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
+                let result = this.epoll_create1(flag)?;
+                this.write_scalar(result, dest)?;
+            }
+            "epoll_ctl" => {
+                let [epfd, op, fd, event] =
+                    this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
+                let result = this.epoll_ctl(epfd, op, fd, event)?;
+                this.write_scalar(result, dest)?;
+            }
+            "eventfd" => {
+                let [val, flag] =
+                    this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
+                let result = this.eventfd(val, flag)?;
+                this.write_scalar(result, dest)?;
+            }
+            "socketpair" => {
+                let [domain, type_, protocol, sv] =
+                    this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
+
+                let result = this.socketpair(domain, type_, protocol, sv)?;
+                this.write_scalar(result, dest)?;
+            }
+            "__libc_current_sigrtmax" => {
+                let [] = this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
+
+                this.write_scalar(Scalar::from_i32(SIGRTMAX), dest)?;
             }
 
             // Threading
@@ -88,18 +119,18 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
                 // argument, we have to also check all arguments *before* it to ensure that they
                 // have the right type.
 
-                let sys_getrandom = this.eval_libc("SYS_getrandom")?.to_machine_usize(this)?;
+                let sys_getrandom = this.eval_libc("SYS_getrandom").to_machine_usize(this)?;
 
-                let sys_statx = this.eval_libc("SYS_statx")?.to_machine_usize(this)?;
+                let sys_statx = this.eval_libc("SYS_statx").to_machine_usize(this)?;
 
-                let sys_futex = this.eval_libc("SYS_futex")?.to_machine_usize(this)?;
+                let sys_futex = this.eval_libc("SYS_futex").to_machine_usize(this)?;
 
                 if args.is_empty() {
                     throw_ub_format!(
                         "incorrect number of arguments for syscall: got 0, expected at least 1"
                     );
                 }
-                match this.read_scalar(&args[0])?.to_machine_usize(this)? {
+                match this.read_machine_usize(&args[0])? {
                     // `libc::syscall(NR_GETRANDOM, buf.as_mut_ptr(), buf.len(), GRND_NONBLOCK)`
                     // is called if a `HashMap` is created the regular way (e.g. HashMap<K, V>).
                     id if id == sys_getrandom => {
@@ -147,10 +178,10 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
                 let [pid, cpusetsize, mask] =
                     this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
                 this.read_scalar(pid)?.to_i32()?;
-                this.read_scalar(cpusetsize)?.to_machine_usize(this)?;
+                this.read_machine_usize(cpusetsize)?;
                 this.deref_operand(mask)?;
                 // FIXME: we just return an error; `num_cpus` then falls back to `sysconf`.
-                let einval = this.eval_libc("EINVAL")?;
+                let einval = this.eval_libc("EINVAL");
                 this.set_last_error(einval)?;
                 this.write_scalar(Scalar::from_i32(-1), dest)?;
             }
@@ -179,7 +210,7 @@ fn getrandom<'tcx>(
     dest: &PlaceTy<'tcx, Provenance>,
 ) -> InterpResult<'tcx> {
     let ptr = this.read_pointer(ptr)?;
-    let len = this.read_scalar(len)?.to_machine_usize(this)?;
+    let len = this.read_machine_usize(len)?;
 
     // The only supported flags are GRND_RANDOM and GRND_NONBLOCK,
     // neither of which have any effect on our current PRNG.

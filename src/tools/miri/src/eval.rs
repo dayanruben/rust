@@ -143,6 +143,8 @@ pub struct MiriConfig {
     pub gc_interval: u32,
     /// The number of CPUs to be reported by miri.
     pub num_cpus: u32,
+    /// Requires Miri to emulate pages of a certain size
+    pub page_size: Option<u64>,
 }
 
 impl Default for MiriConfig {
@@ -176,6 +178,7 @@ impl Default for MiriConfig {
             external_so_file: None,
             gc_interval: 10_000,
             num_cpus: 1,
+            page_size: None,
         }
     }
 }
@@ -233,7 +236,7 @@ impl MainThreadState {
                     this.machine.main_fn_ret_place.unwrap().ptr,
                     this.machine.layouts.isize,
                 );
-                let exit_code = this.read_scalar(&ret_place.into())?.to_machine_isize(this)?;
+                let exit_code = this.read_machine_isize(&ret_place.into())?;
                 // Need to call this ourselves since we are not going to return to the scheduler
                 // loop, and we want the main thread TLS to not show up as memory leaks.
                 this.terminate_active_thread()?;
