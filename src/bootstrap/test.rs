@@ -11,6 +11,7 @@ use std::iter;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use crate::builder::crate_description;
 use crate::builder::{Builder, Compiler, Kind, RunConfig, ShouldRun, Step};
 use crate::cache::Interned;
 use crate::compile;
@@ -1142,6 +1143,40 @@ help: to skip test's attempt to check tidiness, pass `--exclude src/tools/tidy` 
     }
 }
 
+/// Runs tidy's own tests.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub struct TidySelfTest;
+
+impl Step for TidySelfTest {
+    type Output = ();
+    const DEFAULT: bool = true;
+    const ONLY_HOSTS: bool = true;
+
+    fn should_run(run: ShouldRun<'_>) -> ShouldRun<'_> {
+        run.alias("tidyselftest")
+    }
+
+    fn make_run(run: RunConfig<'_>) {
+        run.builder.ensure(TidySelfTest);
+    }
+
+    fn run(self, builder: &Builder<'_>) {
+        let bootstrap_host = builder.config.build;
+        let compiler = builder.compiler(0, bootstrap_host);
+        let cargo = tool::prepare_tool_cargo(
+            builder,
+            compiler,
+            Mode::ToolBootstrap,
+            bootstrap_host,
+            "test",
+            "src/tools/tidy",
+            SourceType::InTree,
+            &[],
+        );
+        try_run(builder, &mut cargo.into());
+    }
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct ExpandYamlAnchors;
 
@@ -2154,8 +2189,12 @@ impl Step for Crate {
         }
 
         builder.info(&format!(
-            "{} {:?} stage{} ({} -> {})",
-            test_kind, self.crates, compiler.stage, &compiler.host, target
+            "{}{} stage{} ({} -> {})",
+            test_kind,
+            crate_description(&self.crates),
+            compiler.stage,
+            &compiler.host,
+            target
         ));
         let _time = util::timeit(&builder);
         try_run(builder, &mut cargo.into());

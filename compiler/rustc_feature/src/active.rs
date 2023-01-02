@@ -160,8 +160,6 @@ declare_features! (
     (active, intrinsics, "1.0.0", None, None),
     /// Allows using `#[lang = ".."]` attribute for linking items to special compiler logic.
     (active, lang_items, "1.0.0", None, None),
-    /// Allows the `multiple_supertrait_upcastable` lint.
-    (active, multiple_supertrait_upcastable, "CURRENT_RUSTC_VERSION", None, None),
     /// Allows using `#[omit_gdb_pretty_printer_section]`.
     (active, omit_gdb_pretty_printer_section, "1.5.0", None, None),
     /// Allows using `#[prelude_import]` on glob `use` items.
@@ -385,7 +383,7 @@ declare_features! (
     /// Allows `#[doc(masked)]`.
     (active, doc_masked, "1.21.0", Some(44027), None),
     /// Allows `dyn* Trait` objects.
-    (incomplete, dyn_star, "1.65.0", Some(91611), None),
+    (incomplete, dyn_star, "1.65.0", Some(102425), None),
     /// Allows `X..Y` patterns.
     (active, exclusive_range_pattern, "1.11.0", Some(37854), None),
     /// Allows exhaustive pattern matching on types that contain uninhabited types.
