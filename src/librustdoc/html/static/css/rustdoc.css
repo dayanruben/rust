@@ -538,8 +538,6 @@ ul.block, .block li {
 	overflow: initial;
 	text-align: right;
 	-webkit-user-select: none;
-	-moz-user-select: none;
-	-ms-user-select: none;
 	user-select: none;
 	padding: 14px 8px;
 	color: var(--src-line-numbers-span-color);
@@ -1369,7 +1367,7 @@ kbd {
 	vertical-align: middle;
 	border: solid 1px var(--border-color);
 	border-radius: 3px;
-	color: var(--kbd--color);
+	color: var(--kbd-color);
 	background-color: var(--kbd-background);
 	box-shadow: inset 0 -1px 0 var(--kbd-box-shadow-color);
 }
