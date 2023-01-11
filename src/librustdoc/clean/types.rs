@@ -62,8 +62,6 @@ pub(crate) enum ItemId {
     Auto { trait_: DefId, for_: DefId },
     /// Identifier that is used for blanket implementations.
     Blanket { impl_id: DefId, for_: DefId },
-    /// Identifier for primitive types.
-    Primitive(PrimitiveType, CrateNum),
 }
 
 impl ItemId {
@@ -73,7 +71,6 @@ impl ItemId {
             ItemId::Auto { for_: id, .. }
             | ItemId::Blanket { for_: id, .. }
             | ItemId::DefId(id) => id.is_local(),
-            ItemId::Primitive(_, krate) => krate == LOCAL_CRATE,
         }
     }
 
@@ -98,7 +95,6 @@ impl ItemId {
             ItemId::Auto { for_: id, .. }
             | ItemId::Blanket { for_: id, .. }
             | ItemId::DefId(id) => id.krate,
-            ItemId::Primitive(_, krate) => krate,
         }
     }
 }
@@ -707,15 +703,13 @@ impl Item {
         let def_id = match self.item_id {
             // Anything but DefId *shouldn't* matter, but return a reasonable value anyway.
             ItemId::Auto { .. } | ItemId::Blanket { .. } => return None,
-            // Primitives and Keywords are written in the source code as private modules.
-            // The modules need to be private so that nobody actually uses them, but the
-            // keywords and primitives that they are documenting are public.
-            ItemId::Primitive(..) => return Some(Visibility::Public),
             ItemId::DefId(def_id) => def_id,
         };
 
         match *self.kind {
-            // Explication on `ItemId::Primitive` just above.
+            // Primitives and Keywords are written in the source code as private modules.
+            // The modules need to be private so that nobody actually uses them, but the
+            // keywords and primitives that they are documenting are public.
             ItemKind::KeywordItem | ItemKind::PrimitiveItem(_) => return Some(Visibility::Public),
             // Variant fields inherit their enum's visibility.
             StructFieldItem(..) if is_field_vis_inherited(tcx, def_id) => {
@@ -2493,6 +2487,17 @@ impl Import {
 
     pub(crate) fn new_glob(source: ImportSource, should_be_displayed: bool) -> Self {
         Self { kind: ImportKind::Glob, source, should_be_displayed }
+    }
+
+    pub(crate) fn imported_item_is_doc_hidden(&self, tcx: TyCtxt<'_>) -> bool {
+        match self.source.did {
+            Some(did) => tcx
+                .get_attrs(did, sym::doc)
+                .filter_map(ast::Attribute::meta_item_list)
+                .flatten()
+                .has_word(sym::hidden),
+            None => false,
+        }
     }
 }
 

@@ -1,4 +1,3 @@
-// ignore-tidy-filelength
 //! Error Reporting Code for the inference engine
 //!
 //! Because of the way inference, and in particular region inference,
@@ -311,7 +310,7 @@ pub fn unexpected_hidden_region_diagnostic<'tcx>(
             // Ugh. This is a painful case: the hidden region is not one
             // that we can easily summarize or explain. This can happen
             // in a case like
-            // `src/test/ui/multiple-lifetimes/ordinary-bounds-unsuited.rs`:
+            // `tests/ui/multiple-lifetimes/ordinary-bounds-unsuited.rs`:
             //
             // ```
             // fn upper_bounds<'a, 'b>(a: Ordinary<'a>, b: Ordinary<'b>) -> impl Trait<'a, 'b> {
@@ -1396,7 +1395,7 @@ impl<'tcx> TypeErrCtxt<'_, 'tcx> {
     /// `swap_secondary_and_primary` is used to make projection errors in particular nicer by using
     /// the message in `secondary_span` as the primary label, and apply the message that would
     /// otherwise be used for the primary label on the `secondary_span` `Span`. This applies on
-    /// E0271, like `src/test/ui/issues/issue-39970.stderr`.
+    /// E0271, like `tests/ui/issues/issue-39970.stderr`.
     #[instrument(
         level = "debug",
         skip(self, diag, secondary_span, swap_secondary_and_primary, prefer_label)
@@ -1429,8 +1428,8 @@ impl<'tcx> TypeErrCtxt<'_, 'tcx> {
         impl<'tcx> OpaqueTypesVisitor<'tcx> {
             fn visit_expected_found(
                 tcx: TyCtxt<'tcx>,
-                expected: Ty<'tcx>,
-                found: Ty<'tcx>,
+                expected: impl TypeVisitable<'tcx>,
+                found: impl TypeVisitable<'tcx>,
                 ignore_span: Span,
             ) -> Self {
                 let mut types_visitor = OpaqueTypesVisitor {
@@ -1569,6 +1568,11 @@ impl<'tcx> TypeErrCtxt<'_, 'tcx> {
                             }
                             _ => (false, Mismatch::Fixed("type")),
                         }
+                    }
+                    ValuePairs::Sigs(infer::ExpectedFound { expected, found }) => {
+                        OpaqueTypesVisitor::visit_expected_found(self.tcx, expected, found, span)
+                            .report(diag);
+                        (false, Mismatch::Fixed("signature"))
                     }
                     ValuePairs::TraitRefs(_) | ValuePairs::PolyTraitRefs(_) => {
                         (false, Mismatch::Fixed("trait"))
@@ -2040,6 +2044,17 @@ impl<'tcx> TypeErrCtxt<'_, 'tcx> {
                     }
                     ret => ret,
                 }
+            }
+            infer::Sigs(exp_found) => {
+                let exp_found = self.resolve_vars_if_possible(exp_found);
+                if exp_found.references_error() {
+                    return None;
+                }
+                let (exp, fnd) = self.cmp_fn_sig(
+                    &ty::Binder::dummy(exp_found.expected),
+                    &ty::Binder::dummy(exp_found.found),
+                );
+                Some((exp, fnd, None, None))
             }
         }
     }

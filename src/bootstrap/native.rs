@@ -24,6 +24,8 @@ use crate::util::get_clang_cl_resource_dir;
 use crate::util::{self, exe, output, t, up_to_date};
 use crate::{CLang, GitRepo};
 
+use build_helper::ci::CiEnv;
+
 #[derive(Clone)]
 pub struct LlvmResult {
     /// Path to llvm-config binary.
@@ -217,7 +219,7 @@ pub(crate) fn is_ci_llvm_available(config: &Config, asserts: bool) -> bool {
         return false;
     }
 
-    if crate::util::CiEnv::is_ci() {
+    if CiEnv::is_ci() {
         // We assume we have access to git, so it's okay to unconditionally pass
         // `true` here.
         let llvm_sha = detect_llvm_sha(config, true);
@@ -905,7 +907,7 @@ impl Step for TestHelpers {
     type Output = ();
 
     fn should_run(run: ShouldRun<'_>) -> ShouldRun<'_> {
-        run.path("src/test/auxiliary/rust_test_helpers.c")
+        run.path("tests/auxiliary/rust_test_helpers.c")
     }
 
     fn make_run(run: RunConfig<'_>) {
@@ -927,7 +929,7 @@ impl Step for TestHelpers {
             self.target
         };
         let dst = builder.test_helpers_out(target);
-        let src = builder.src.join("src/test/auxiliary/rust_test_helpers.c");
+        let src = builder.src.join("tests/auxiliary/rust_test_helpers.c");
         if up_to_date(&src, &dst.join("librust_test_helpers.a")) {
             return;
         }
@@ -956,7 +958,7 @@ impl Step for TestHelpers {
             .opt_level(0)
             .warnings(false)
             .debug(false)
-            .file(builder.src.join("src/test/auxiliary/rust_test_helpers.c"))
+            .file(builder.src.join("tests/auxiliary/rust_test_helpers.c"))
             .compile("rust_test_helpers");
     }
 }

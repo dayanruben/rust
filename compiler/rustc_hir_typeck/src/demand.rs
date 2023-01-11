@@ -57,6 +57,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             || self.suggest_boxing_when_appropriate(err, expr, expected, expr_ty)
             || self.suggest_block_to_brackets_peeling_refs(err, expr, expr_ty, expected)
             || self.suggest_copied_or_cloned(err, expr, expr_ty, expected)
+            || self.suggest_clone_for_ref(err, expr, expr_ty, expected)
             || self.suggest_into(err, expr, expr_ty, expected)
             || self.suggest_floating_point_literal(err, expr, expected);
         if !suggested {
@@ -83,6 +84,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         self.note_need_for_fn_pointer(err, expected, expr_ty);
         self.note_internal_mutation_in_method(err, expr, expected, expr_ty);
         self.check_for_range_as_method_call(err, expr, expr_ty, expected);
+        self.check_for_binding_assigned_block_without_tail_expression(err, expr, expr_ty, expected);
     }
 
     /// Requires that the two types unify, and prints an error message if
@@ -301,11 +303,12 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 // Get the evaluated type *after* calling the method call, so that the influence
                 // of the arguments can be reflected in the receiver type. The receiver
                 // expression has the type *before* theis analysis is done.
-                let ty = match self.lookup_probe(
+                let ty = match self.lookup_probe_for_diagnostic(
                     segment.ident,
                     rcvr_ty,
                     expr,
                     probe::ProbeScope::TraitsInScope,
+                    None,
                 ) {
                     Ok(pick) => pick.self_ty,
                     Err(_) => rcvr_ty,
@@ -555,19 +558,19 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         let Some(self_ty) = self.typeck_results.borrow().expr_ty_adjusted_opt(base) else { return; };
 
         let Ok(pick) = self
-            .probe_for_name(
-                probe::Mode::MethodCall,
+            .lookup_probe_for_diagnostic(
                 path.ident,
-                probe::IsSuggestion(true),
                 self_ty,
-                deref.hir_id,
+                deref,
                 probe::ProbeScope::TraitsInScope,
+                None,
             ) else {
                 return;
             };
         let in_scope_methods = self.probe_for_name_many(
             probe::Mode::MethodCall,
             path.ident,
+            Some(expected),
             probe::IsSuggestion(true),
             self_ty,
             deref.hir_id,
@@ -579,6 +582,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         let all_methods = self.probe_for_name_many(
             probe::Mode::MethodCall,
             path.ident,
+            Some(expected),
             probe::IsSuggestion(true),
             self_ty,
             deref.hir_id,
@@ -1378,7 +1382,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                         }
                     }
                     // If we've reached our target type with just removing `&`, then just print now.
-                    if steps == 0 {
+                    if steps == 0 && !remove.trim().is_empty() {
                         return Some((
                             prefix_span,
                             format!("consider removing the `{}`", remove.trim()),
@@ -1437,6 +1441,9 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                         } else {
                             (prefix_span, format!("{}{}", prefix, "*".repeat(steps)))
                         };
+                        if suggestion.trim().is_empty() {
+                            return None;
+                        }
 
                         return Some((
                             span,
@@ -1827,7 +1834,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
     pub fn check_for_range_as_method_call(
         &self,
         err: &mut Diagnostic,
-        expr: &hir::Expr<'_>,
+        expr: &hir::Expr<'tcx>,
         checked_ty: Ty<'tcx>,
         expected_ty: Ty<'tcx>,
     ) {
@@ -1845,10 +1852,14 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             return;
         }
         let mut expr = end.expr;
+        let mut expectation = Some(expected_ty);
         while let hir::ExprKind::MethodCall(_, rcvr, ..) = expr.kind {
             // Getting to the root receiver and asserting it is a fn call let's us ignore cases in
-            // `src/test/ui/methods/issues/issue-90315.stderr`.
+            // `tests/ui/methods/issues/issue-90315.stderr`.
             expr = rcvr;
+            // If we have more than one layer of calls, then the expected ty
+            // cannot guide the method probe.
+            expectation = None;
         }
         let hir::ExprKind::Call(method_name, _) = expr.kind else { return; };
         let ty::Adt(adt, _) = checked_ty.kind() else { return; };
@@ -1864,13 +1875,12 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         let hir::ExprKind::Path(hir::QPath::Resolved(None, p)) = method_name.kind else { return; };
         let [hir::PathSegment { ident, .. }] = p.segments else { return; };
         let self_ty = self.typeck_results.borrow().expr_ty(start.expr);
-        let Ok(_pick) = self.probe_for_name(
-            probe::Mode::MethodCall,
+        let Ok(_pick) = self.lookup_probe_for_diagnostic(
             *ident,
-            probe::IsSuggestion(true),
             self_ty,
-            expr.hir_id,
+            expr,
             probe::ProbeScope::AllTraits,
+            expectation,
         ) else { return; };
         let mut sugg = ".";
         let mut span = start.expr.span.between(end.expr.span);
@@ -1886,5 +1896,49 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             sugg,
             Applicability::MachineApplicable,
         );
+    }
+
+    /// Identify when the type error is because `()` is found in a binding that was assigned a
+    /// block without a tail expression.
+    fn check_for_binding_assigned_block_without_tail_expression(
+        &self,
+        err: &mut Diagnostic,
+        expr: &hir::Expr<'_>,
+        checked_ty: Ty<'tcx>,
+        expected_ty: Ty<'tcx>,
+    ) {
+        if !checked_ty.is_unit() {
+            return;
+        }
+        let hir::ExprKind::Path(hir::QPath::Resolved(None, path)) = expr.kind else { return; };
+        let hir::def::Res::Local(hir_id) = path.res else { return; };
+        let Some(hir::Node::Pat(pat)) = self.tcx.hir().find(hir_id) else {
+            return;
+        };
+        let Some(hir::Node::Local(hir::Local {
+            ty: None,
+            init: Some(init),
+            ..
+        })) = self.tcx.hir().find_parent(pat.hir_id) else { return; };
+        let hir::ExprKind::Block(block, None) = init.kind else { return; };
+        if block.expr.is_some() {
+            return;
+        }
+        let [.., stmt] = block.stmts else {
+            err.span_label(block.span, "this empty block is missing a tail expression");
+            return;
+        };
+        let hir::StmtKind::Semi(tail_expr) = stmt.kind else { return; };
+        let Some(ty) = self.node_ty_opt(tail_expr.hir_id) else { return; };
+        if self.can_eq(self.param_env, expected_ty, ty).is_ok() {
+            err.span_suggestion_short(
+                stmt.span.with_lo(tail_expr.span.hi()),
+                "remove this semicolon",
+                "",
+                Applicability::MachineApplicable,
+            );
+        } else {
+            err.span_label(block.span, "this block is missing a tail expression");
+        }
     }
 }

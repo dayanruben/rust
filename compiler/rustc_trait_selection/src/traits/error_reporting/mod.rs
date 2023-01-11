@@ -771,7 +771,11 @@ impl<'tcx> TypeErrCtxtExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
                                 ),
                             }
                         };
-
+                        self.check_for_binding_assigned_block_without_tail_expression(
+                            &obligation,
+                            &mut err,
+                            trait_predicate,
+                        );
                         if self.suggest_add_reference_to_arg(
                             &obligation,
                             &mut err,
@@ -867,6 +871,11 @@ impl<'tcx> TypeErrCtxtExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
                                 trait_predicate,
                                 span,
                             );
+                        }
+
+                        if self.suggest_add_clone_to_arg(&obligation, &mut err, trait_predicate) {
+                            err.emit();
+                            return;
                         }
 
                         if self.suggest_impl_trait(&mut err, span, &obligation, trait_predicate) {
@@ -1093,15 +1102,19 @@ impl<'tcx> TypeErrCtxtExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
                     }
 
                     ty::PredicateKind::Clause(ty::Clause::RegionOutlives(..))
-                    | ty::PredicateKind::Clause(ty::Clause::Projection(..))
                     | ty::PredicateKind::Clause(ty::Clause::TypeOutlives(..)) => {
-                        let predicate = self.resolve_vars_if_possible(obligation.predicate);
-                        struct_span_err!(
-                            self.tcx.sess,
+                        span_bug!(
                             span,
-                            E0280,
-                            "the requirement `{}` is not satisfied",
-                            predicate
+                            "outlives clauses should not error outside borrowck. obligation: `{:?}`",
+                            obligation
+                        )
+                    }
+
+                    ty::PredicateKind::Clause(ty::Clause::Projection(..)) => {
+                        span_bug!(
+                            span,
+                            "projection clauses should be implied from elsewhere. obligation: `{:?}`",
+                            obligation
                         )
                     }
 
@@ -1168,7 +1181,7 @@ impl<'tcx> TypeErrCtxtExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
                     }
 
                     ty::PredicateKind::WellFormed(ty) => {
-                        if self.tcx.sess.opts.unstable_opts.trait_solver != TraitSolver::Chalk {
+                        if self.tcx.sess.opts.unstable_opts.trait_solver == TraitSolver::Classic {
                             // WF predicates cannot themselves make
                             // errors. They can only block due to
                             // ambiguity; otherwise, they always
@@ -1180,7 +1193,7 @@ impl<'tcx> TypeErrCtxtExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
                             // which bounds actually failed to hold.
                             self.tcx.sess.struct_span_err(
                                 span,
-                                &format!("the type `{}` is not well-formed (chalk)", ty),
+                                &format!("the type `{}` is not well-formed", ty),
                             )
                         }
                     }
@@ -2266,23 +2279,7 @@ impl<'tcx> InferCtxtPrivExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
                 if let (Some(body_id), Some(ty::subst::GenericArgKind::Type(_))) =
                     (body_id, subst.map(|subst| subst.unpack()))
                 {
-                    struct FindExprBySpan<'hir> {
-                        span: Span,
-                        result: Option<&'hir hir::Expr<'hir>>,
-                    }
-
-                    impl<'v> hir::intravisit::Visitor<'v> for FindExprBySpan<'v> {
-                        fn visit_expr(&mut self, ex: &'v hir::Expr<'v>) {
-                            if self.span == ex.span {
-                                self.result = Some(ex);
-                            } else {
-                                hir::intravisit::walk_expr(self, ex);
-                            }
-                        }
-                    }
-
-                    let mut expr_finder = FindExprBySpan { span, result: None };
-
+                    let mut expr_finder = FindExprBySpan::new(span);
                     expr_finder.visit_expr(&self.tcx.hir().body(body_id).value);
 
                     if let Some(hir::Expr {
@@ -2766,6 +2763,36 @@ impl<'tcx> InferCtxtPrivExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
             }
         }
         false
+    }
+}
+
+/// Crude way of getting back an `Expr` from a `Span`.
+pub struct FindExprBySpan<'hir> {
+    pub span: Span,
+    pub result: Option<&'hir hir::Expr<'hir>>,
+    pub ty_result: Option<&'hir hir::Ty<'hir>>,
+}
+
+impl<'hir> FindExprBySpan<'hir> {
+    fn new(span: Span) -> Self {
+        Self { span, result: None, ty_result: None }
+    }
+}
+
+impl<'v> Visitor<'v> for FindExprBySpan<'v> {
+    fn visit_expr(&mut self, ex: &'v hir::Expr<'v>) {
+        if self.span == ex.span {
+            self.result = Some(ex);
+        } else {
+            hir::intravisit::walk_expr(self, ex);
+        }
+    }
+    fn visit_ty(&mut self, ty: &'v hir::Ty<'v>) {
+        if self.span == ty.span {
+            self.ty_result = Some(ty);
+        } else {
+            hir::intravisit::walk_ty(self, ty);
+        }
     }
 }
 
