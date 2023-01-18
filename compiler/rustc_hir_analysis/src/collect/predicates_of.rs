@@ -87,7 +87,8 @@ fn gather_explicit_predicates_of(tcx: TyCtxt<'_>, def_id: DefId) -> ty::GenericP
         Node::Item(item) => match item.kind {
             ItemKind::Impl(ref impl_) => {
                 if impl_.defaultness.is_default() {
-                    is_default_impl_trait = tcx.impl_trait_ref(def_id).map(ty::Binder::dummy);
+                    is_default_impl_trait =
+                        tcx.impl_trait_ref(def_id).map(|t| ty::Binder::dummy(t.subst_identity()));
                 }
                 &impl_.generics
             }
@@ -162,8 +163,7 @@ fn gather_explicit_predicates_of(tcx: TyCtxt<'_>, def_id: DefId) -> ty::GenericP
 
                 let mut bounds = Bounds::default();
                 // Params are implicitly sized unless a `?Sized` bound is found
-                <dyn AstConv<'_>>::add_implicitly_sized(
-                    &icx,
+                icx.astconv().add_implicitly_sized(
                     &mut bounds,
                     param_ty,
                     &[],
@@ -211,22 +211,16 @@ fn gather_explicit_predicates_of(tcx: TyCtxt<'_>, def_id: DefId) -> ty::GenericP
                 }
 
                 let mut bounds = Bounds::default();
-                <dyn AstConv<'_>>::add_bounds(
-                    &icx,
-                    ty,
-                    bound_pred.bounds.iter(),
-                    &mut bounds,
-                    bound_vars,
-                );
+                icx.astconv().add_bounds(ty, bound_pred.bounds.iter(), &mut bounds, bound_vars);
                 predicates.extend(bounds.predicates());
             }
 
             hir::WherePredicate::RegionPredicate(region_pred) => {
-                let r1 = <dyn AstConv<'_>>::ast_region_to_region(&icx, &region_pred.lifetime, None);
+                let r1 = icx.astconv().ast_region_to_region(&region_pred.lifetime, None);
                 predicates.extend(region_pred.bounds.iter().map(|bound| {
                     let (r2, span) = match bound {
                         hir::GenericBound::Outlives(lt) => {
-                            (<dyn AstConv<'_>>::ast_region_to_region(&icx, lt, None), lt.ident.span)
+                            (icx.astconv().ast_region_to_region(lt, None), lt.ident.span)
                         }
                         _ => bug!(),
                     };
@@ -253,12 +247,12 @@ fn gather_explicit_predicates_of(tcx: TyCtxt<'_>, def_id: DefId) -> ty::GenericP
 
     // Subtle: before we store the predicates into the tcx, we
     // sort them so that predicates like `T: Foo<Item=U>` come
-    // before uses of `U`.  This avoids false ambiguity errors
+    // before uses of `U`. This avoids false ambiguity errors
     // in trait checking. See `setup_constraining_predicates`
     // for details.
     if let Node::Item(&Item { kind: ItemKind::Impl { .. }, .. }) = node {
         let self_ty = tcx.type_of(def_id);
-        let trait_ref = tcx.impl_trait_ref(def_id);
+        let trait_ref = tcx.impl_trait_ref(def_id).map(ty::EarlyBinder::subst_identity);
         cgp::setup_constraining_predicates(
             tcx,
             &mut predicates,
@@ -279,7 +273,7 @@ fn gather_explicit_predicates_of(tcx: TyCtxt<'_>, def_id: DefId) -> ty::GenericP
         debug!(?lifetimes);
         for (arg, duplicate) in std::iter::zip(lifetimes, ast_generics.params) {
             let hir::GenericArg::Lifetime(arg) = arg else { bug!() };
-            let orig_region = <dyn AstConv<'_>>::ast_region_to_region(&icx, &arg, None);
+            let orig_region = icx.astconv().ast_region_to_region(&arg, None);
             if !matches!(orig_region.kind(), ty::ReEarlyBound(..)) {
                 // Only early-bound regions can point to the original generic parameter.
                 continue;
@@ -527,14 +521,9 @@ pub(super) fn super_predicates_that_define_assoc_type(
         // Convert the bounds that follow the colon, e.g., `Bar + Zed` in `trait Foo: Bar + Zed`.
         let self_param_ty = tcx.types.self_param;
         let superbounds1 = if let Some(assoc_name) = assoc_name {
-            <dyn AstConv<'_>>::compute_bounds_that_match_assoc_type(
-                &icx,
-                self_param_ty,
-                bounds,
-                assoc_name,
-            )
+            icx.astconv().compute_bounds_that_match_assoc_type(self_param_ty, bounds, assoc_name)
         } else {
-            <dyn AstConv<'_>>::compute_bounds(&icx, self_param_ty, bounds)
+            icx.astconv().compute_bounds(self_param_ty, bounds)
         };
 
         let superbounds1 = superbounds1.predicates();

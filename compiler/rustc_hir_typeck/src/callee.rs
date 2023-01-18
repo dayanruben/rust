@@ -8,6 +8,7 @@ use rustc_errors::{struct_span_err, Applicability, Diagnostic, ErrorGuaranteed, 
 use rustc_hir as hir;
 use rustc_hir::def::{self, CtorKind, Namespace, Res};
 use rustc_hir::def_id::DefId;
+use rustc_hir_analysis::autoderef::Autoderef;
 use rustc_infer::{
     infer,
     traits::{self, Obligation},
@@ -25,7 +26,6 @@ use rustc_span::def_id::LocalDefId;
 use rustc_span::symbol::{sym, Ident};
 use rustc_span::Span;
 use rustc_target::spec::abi;
-use rustc_trait_selection::autoderef::Autoderef;
 use rustc_trait_selection::infer::InferCtxtExt as _;
 use rustc_trait_selection::traits::error_reporting::DefIdOrName;
 use rustc_trait_selection::traits::query::evaluate_obligation::InferCtxtExt as _;
@@ -375,14 +375,12 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 if self.tcx.has_attr(def_id, sym::rustc_evaluate_where_clauses) {
                     let predicates = self.tcx.predicates_of(def_id);
                     let predicates = predicates.instantiate(self.tcx, subst);
-                    for (predicate, predicate_span) in
-                        predicates.predicates.iter().zip(&predicates.spans)
-                    {
+                    for (predicate, predicate_span) in predicates {
                         let obligation = Obligation::new(
                             self.tcx,
                             ObligationCause::dummy_with_span(callee_expr.span),
                             self.param_env,
-                            *predicate,
+                            predicate,
                         );
                         let result = self.evaluate_obligation(&obligation);
                         self.tcx
@@ -391,7 +389,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                                 callee_expr.span,
                                 &format!("evaluate({:?}) = {:?}", predicate, result),
                             )
-                            .span_label(*predicate_span, "predicate")
+                            .span_label(predicate_span, "predicate")
                             .emit();
                     }
                 }
@@ -659,8 +657,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         };
 
         if !self.maybe_suggest_bad_array_definition(&mut err, call_expr, callee_expr) {
-            if let Some((maybe_def, output_ty, _)) =
-                self.extract_callable_info(callee_expr, callee_ty)
+            if let Some((maybe_def, output_ty, _)) = self.extract_callable_info(callee_ty)
                 && !self.type_is_sized_modulo_regions(self.param_env, output_ty, callee_expr.span)
             {
                 let descr = match maybe_def {

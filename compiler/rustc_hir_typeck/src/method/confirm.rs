@@ -4,6 +4,9 @@ use crate::{callee, FnCtxt};
 use rustc_hir as hir;
 use rustc_hir::def_id::DefId;
 use rustc_hir::GenericArg;
+use rustc_hir_analysis::astconv::generics::{
+    check_generic_arg_count_for_call, create_substs_for_generic_args,
+};
 use rustc_hir_analysis::astconv::{AstConv, CreateSubstsForGenericArgsCtxt, IsMethodCall};
 use rustc_infer::infer::{self, InferOk};
 use rustc_middle::traits::{ObligationCauseCode, UnifyReceiverContext};
@@ -16,7 +19,6 @@ use rustc_middle::ty::{InternalSubsts, UserSubsts, UserType};
 use rustc_span::{Span, DUMMY_SP};
 use rustc_trait_selection::traits;
 
-use std::iter;
 use std::ops::Deref;
 
 struct ConfirmContext<'a, 'tcx> {
@@ -98,7 +100,7 @@ impl<'a, 'tcx> ConfirmContext<'a, 'tcx> {
         let filler_substs = rcvr_substs
             .extend_to(self.tcx, pick.item.def_id, |def, _| self.tcx.mk_param_from_def(def));
         let illegal_sized_bound = self.predicates_require_illegal_sized_bound(
-            &self.tcx.predicates_of(pick.item.def_id).instantiate(self.tcx, filler_substs),
+            self.tcx.predicates_of(pick.item.def_id).instantiate(self.tcx, filler_substs),
         );
 
         // Unify the (adjusted) self type with what the method expects.
@@ -331,7 +333,7 @@ impl<'a, 'tcx> ConfirmContext<'a, 'tcx> {
         // variables.
         let generics = self.tcx.generics_of(pick.item.def_id);
 
-        let arg_count_correct = <dyn AstConv<'_>>::check_generic_arg_count_for_call(
+        let arg_count_correct = check_generic_arg_count_for_call(
             self.tcx,
             self.span,
             pick.item.def_id,
@@ -369,8 +371,7 @@ impl<'a, 'tcx> ConfirmContext<'a, 'tcx> {
             ) -> subst::GenericArg<'tcx> {
                 match (&param.kind, arg) {
                     (GenericParamDefKind::Lifetime, GenericArg::Lifetime(lt)) => {
-                        <dyn AstConv<'_>>::ast_region_to_region(self.cfcx.fcx, lt, Some(param))
-                            .into()
+                        self.cfcx.fcx.astconv().ast_region_to_region(lt, Some(param)).into()
                     }
                     (GenericParamDefKind::Type { .. }, GenericArg::Type(ty)) => {
                         self.cfcx.to_ty(ty).raw.into()
@@ -399,7 +400,7 @@ impl<'a, 'tcx> ConfirmContext<'a, 'tcx> {
             }
         }
 
-        let substs = <dyn AstConv<'_>>::create_substs_for_generic_args(
+        let substs = create_substs_for_generic_args(
             self.tcx,
             pick.item.def_id,
             parent_substs,
@@ -563,7 +564,7 @@ impl<'a, 'tcx> ConfirmContext<'a, 'tcx> {
 
     fn predicates_require_illegal_sized_bound(
         &self,
-        predicates: &ty::InstantiatedPredicates<'tcx>,
+        predicates: ty::InstantiatedPredicates<'tcx>,
     ) -> Option<Span> {
         let sized_def_id = self.tcx.lang_items().sized_trait()?;
 
@@ -573,10 +574,11 @@ impl<'a, 'tcx> ConfirmContext<'a, 'tcx> {
                 ty::PredicateKind::Clause(ty::Clause::Trait(trait_pred))
                     if trait_pred.def_id() == sized_def_id =>
                 {
-                    let span = iter::zip(&predicates.predicates, &predicates.spans)
+                    let span = predicates
+                        .iter()
                         .find_map(
                             |(p, span)| {
-                                if *p == obligation.predicate { Some(*span) } else { None }
+                                if p == obligation.predicate { Some(span) } else { None }
                             },
                         )
                         .unwrap_or(rustc_span::DUMMY_SP);

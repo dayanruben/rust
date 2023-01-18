@@ -231,6 +231,10 @@ fn run_compiler(
         registry: diagnostics_registry(),
     };
 
+    if !tracing::dispatcher::has_been_set() {
+        init_rustc_env_logger_with_backtrace_option(&config.opts.unstable_opts.log_backtrace);
+    }
+
     match make_input(config.opts.error_format, &matches.free) {
         Err(reported) => return Err(reported),
         Ok(Some((input, input_file_path))) => {
@@ -309,8 +313,8 @@ fn run_compiler(
 
             if let Some(ppm) = &sess.opts.pretty {
                 if ppm.needs_ast_map() {
-                    let expanded_crate = queries.expansion()?.peek().0.clone();
-                    queries.global_ctxt()?.peek_mut().enter(|tcx| {
+                    let expanded_crate = queries.expansion()?.borrow().0.clone();
+                    queries.global_ctxt()?.enter(|tcx| {
                         pretty::print_after_hir_lowering(
                             tcx,
                             compiler.input(),
@@ -321,7 +325,7 @@ fn run_compiler(
                         Ok(())
                     })?;
                 } else {
-                    let krate = queries.parse()?.take();
+                    let krate = queries.parse()?.steal();
                     pretty::print_after_parsing(
                         sess,
                         compiler.input(),
@@ -343,7 +347,8 @@ fn run_compiler(
             }
 
             {
-                let (_, lint_store) = &*queries.register_plugins()?.peek();
+                let plugins = queries.register_plugins()?;
+                let (_, lint_store) = &*plugins.borrow();
 
                 // Lint plugins are registered; now we can process command line flags.
                 if sess.opts.describe_lints {
@@ -371,7 +376,7 @@ fn run_compiler(
                 return early_exit();
             }
 
-            queries.global_ctxt()?.peek_mut().enter(|tcx| {
+            queries.global_ctxt()?.enter(|tcx| {
                 let result = tcx.analysis(());
                 if sess.opts.unstable_opts.save_analysis {
                     let crate_name = tcx.crate_name(LOCAL_CRATE);
@@ -1196,8 +1201,8 @@ static DEFAULT_HOOK: LazyLock<Box<dyn Fn(&panic::PanicInfo<'_>) + Sync + Send + 
             };
 
             // Invoke the default handler, which prints the actual panic message and optionally a backtrace
-            // Don't do this for `GoodPathBug`, which already emits its own more useful backtrace.
-            if !info.payload().is::<rustc_errors::GoodPathBug>() {
+            // Don't do this for delayed bugs, which already emit their own more useful backtrace.
+            if !info.payload().is::<rustc_errors::DelayedBugPanic>() {
                 (*DEFAULT_HOOK)(info);
 
                 // Separate the output with an empty line
@@ -1235,7 +1240,7 @@ pub fn report_ice(info: &panic::PanicInfo<'_>, bug_report_url: &str) {
     // a .span_bug or .bug call has already printed what
     // it wants to print.
     if !info.payload().is::<rustc_errors::ExplicitBug>()
-        && !info.payload().is::<rustc_errors::GoodPathBug>()
+        && !info.payload().is::<rustc_errors::DelayedBugPanic>()
     {
         let mut d = rustc_errors::Diagnostic::new(rustc_errors::Level::Bug, "unexpected panic");
         handler.emit_diagnostic(&mut d);
@@ -1299,7 +1304,14 @@ pub fn install_ice_hook() {
 /// This allows tools to enable rust logging without having to magically match rustc's
 /// tracing crate version.
 pub fn init_rustc_env_logger() {
-    if let Err(error) = rustc_log::init_rustc_env_logger() {
+    init_rustc_env_logger_with_backtrace_option(&None);
+}
+
+/// This allows tools to enable rust logging without having to magically match rustc's
+/// tracing crate version. In contrast to `init_rustc_env_logger` it allows you to
+/// choose a target module you wish to show backtraces along with its logging.
+pub fn init_rustc_env_logger_with_backtrace_option(backtrace_target: &Option<String>) {
+    if let Err(error) = rustc_log::init_rustc_env_logger_with_backtrace_option(backtrace_target) {
         early_error(ErrorOutputType::default(), &error.to_string());
     }
 }
@@ -1365,7 +1377,6 @@ mod signal_handler {
 pub fn main() -> ! {
     let start_time = Instant::now();
     let start_rss = get_resident_set_size();
-    init_rustc_env_logger();
     signal_handler::install();
     let mut callbacks = TimePassesCallbacks::default();
     install_ice_hook();

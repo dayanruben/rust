@@ -7,7 +7,7 @@ use crate::mir::{Field, ProjectionKind};
 use crate::ty::fold::{FallibleTypeFolder, TypeFoldable, TypeSuperFoldable};
 use crate::ty::print::{with_no_trimmed_paths, FmtPrinter, Printer};
 use crate::ty::visit::{TypeSuperVisitable, TypeVisitable, TypeVisitor};
-use crate::ty::{self, InferConst, Lift, Term, TermKind, Ty, TyCtxt};
+use crate::ty::{self, AliasTy, InferConst, Lift, Term, TermKind, Ty, TyCtxt};
 use rustc_data_structures::functor::IdFunctor;
 use rustc_hir::def::Namespace;
 use rustc_index::vec::{Idx, IndexVec};
@@ -180,6 +180,15 @@ impl<'tcx> fmt::Debug for ty::PredicateKind<'tcx> {
     }
 }
 
+impl<'tcx> fmt::Debug for AliasTy<'tcx> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AliasTy")
+            .field("substs", &self.substs)
+            .field("def_id", &self.def_id)
+            .finish()
+    }
+}
+
 ///////////////////////////////////////////////////////////////////////////
 // Atomic structs
 //
@@ -227,6 +236,7 @@ TrivialTypeTraversalAndLiftImpls! {
     crate::ty::BoundRegionKind,
     crate::ty::AssocItem,
     crate::ty::AssocKind,
+    crate::ty::AliasKind,
     crate::ty::Placeholder<crate::ty::BoundRegionKind>,
     crate::ty::ClosureKind,
     crate::ty::FreeRegion,
@@ -455,7 +465,7 @@ impl<'tcx, T: TypeFoldable<'tcx>> TypeFoldable<'tcx> for Rc<T> {
             let slot = Rc::get_mut_unchecked(&mut unique);
 
             // Semantically move the contained type out from `unique`, fold
-            // it, then move the folded value back into `unique`.  Should
+            // it, then move the folded value back into `unique`. Should
             // folding fail, `ManuallyDrop` ensures that the "moved-out"
             // value is not re-dropped.
             let owned = ManuallyDrop::take(slot);
@@ -501,7 +511,7 @@ impl<'tcx, T: TypeFoldable<'tcx>> TypeFoldable<'tcx> for Arc<T> {
             let slot = Arc::get_mut_unchecked(&mut unique);
 
             // Semantically move the contained type out from `unique`, fold
-            // it, then move the folded value back into `unique`.  Should
+            // it, then move the folded value back into `unique`. Should
             // folding fail, `ManuallyDrop` ensures that the "moved-out"
             // value is not re-dropped.
             let owned = ManuallyDrop::take(slot);

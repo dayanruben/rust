@@ -76,7 +76,7 @@ pub fn obligations<'tcx>(
 }
 
 /// Returns the obligations that make this trait reference
-/// well-formed.  For example, if there is a trait `Set` defined like
+/// well-formed. For example, if there is a trait `Set` defined like
 /// `trait Set<K:Eq>`, then the trait reference `Foo: Set<Bar>` is WF
 /// if `Bar: Eq`.
 pub fn trait_obligations<'tcx>(
@@ -736,7 +736,7 @@ impl<'tcx> WfPredicates<'tcx> {
         trace!("{:#?}", predicates);
         debug_assert_eq!(predicates.predicates.len(), origins.len());
 
-        iter::zip(iter::zip(predicates.predicates, predicates.spans), origins.into_iter().rev())
+        iter::zip(predicates, origins.into_iter().rev())
             .map(|((mut pred, span), origin_def_id)| {
                 let code = if span.is_dummy() {
                     traits::ItemObligation(origin_def_id)

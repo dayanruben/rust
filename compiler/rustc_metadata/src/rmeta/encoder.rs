@@ -172,7 +172,7 @@ impl<'a, 'tcx> Encodable<EncodeContext<'a, 'tcx>> for SyntaxContext {
 impl<'a, 'tcx> Encodable<EncodeContext<'a, 'tcx>> for ExpnId {
     fn encode(&self, s: &mut EncodeContext<'a, 'tcx>) {
         if self.krate == LOCAL_CRATE {
-            // We will only write details for local expansions.  Non-local expansions will fetch
+            // We will only write details for local expansions. Non-local expansions will fetch
             // data from the corresponding crate's metadata.
             // FIXME(#43047) FIXME(#74731) We may eventually want to avoid relying on external
             // metadata from proc-macro crates.
@@ -1429,7 +1429,7 @@ impl<'a, 'tcx> EncodeContext<'a, 'tcx> {
             let instance =
                 ty::InstanceDef::Item(ty::WithOptConstParam::unknown(def_id.to_def_id()));
             let unused = tcx.unused_generic_params(instance);
-            if !unused.is_empty() {
+            if !unused.all_used() {
                 record!(self.tables.unused_generic_params[def_id.to_def_id()] <- unused);
             }
         }
@@ -1555,7 +1555,7 @@ impl<'a, 'tcx> EncodeContext<'a, 'tcx> {
                 self.tables.impl_defaultness.set(def_id.index, *defaultness);
                 self.tables.constness.set(def_id.index, *constness);
 
-                let trait_ref = self.tcx.impl_trait_ref(def_id);
+                let trait_ref = self.tcx.impl_trait_ref(def_id).map(ty::EarlyBinder::skip_binder);
                 if let Some(trait_ref) = trait_ref {
                     let trait_def = self.tcx.trait_def(trait_ref.def_id);
                     if let Ok(mut an) = trait_def.ancestors(self.tcx, def_id) {
@@ -1686,6 +1686,8 @@ impl<'a, 'tcx> EncodeContext<'a, 'tcx> {
             }
 
             ty::Closure(_, substs) => {
+                let constness = self.tcx.constness(def_id.to_def_id());
+                self.tables.constness.set(def_id.to_def_id().index, constness);
                 record!(self.tables.fn_sig[def_id.to_def_id()] <- substs.as_closure().sig());
             }
 
@@ -1897,6 +1899,8 @@ impl<'a, 'tcx> EncodeContext<'a, 'tcx> {
         for id in tcx.hir().items() {
             if matches!(tcx.def_kind(id.owner_id), DefKind::Impl) {
                 if let Some(trait_ref) = tcx.impl_trait_ref(id.owner_id) {
+                    let trait_ref = trait_ref.subst_identity();
+
                     let simplified_self_ty = fast_reject::simplify_type(
                         self.tcx,
                         trait_ref.self_ty(),

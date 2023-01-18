@@ -881,6 +881,10 @@ pub struct Resolver<'a> {
     /// Used for hints during error reporting.
     field_names: FxHashMap<DefId, Vec<Spanned<Symbol>>>,
 
+    /// Span of the privacy modifier in fields of an item `DefId` accessible with dot syntax.
+    /// Used for hints during error reporting.
+    field_visibility_spans: FxHashMap<DefId, Vec<Span>>,
+
     /// All imports known to succeed or fail.
     determined_imports: Vec<&'a Import<'a>>,
 
@@ -1133,7 +1137,7 @@ impl<'a, 'b> DefIdTree for &'a Resolver<'b> {
     }
 }
 
-impl Resolver<'_> {
+impl<'a> Resolver<'a> {
     fn opt_local_def_id(&self, node: NodeId) -> Option<LocalDefId> {
         self.node_id_to_def_id.get(&node).copied()
     }
@@ -1189,6 +1193,10 @@ impl Resolver<'_> {
         } else {
             self.cstore().item_generics_num_lifetimes(def_id, self.session)
         }
+    }
+
+    pub fn sess(&self) -> &'a Session {
+        self.session
     }
 }
 
@@ -1268,6 +1276,7 @@ impl<'a> Resolver<'a> {
 
             has_self: FxHashSet::default(),
             field_names: FxHashMap::default(),
+            field_visibility_spans: FxHashMap::default(),
 
             determined_imports: Vec::new(),
             indeterminate_imports: Vec::new(),

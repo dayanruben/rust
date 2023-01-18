@@ -192,7 +192,7 @@ fn visit_implementation_of_dispatch_from_dyn(tcx: TyCtxt<'_>, impl_did: LocalDef
     let source = tcx.type_of(impl_did);
     assert!(!source.has_escaping_bound_vars());
     let target = {
-        let trait_ref = tcx.impl_trait_ref(impl_did).unwrap();
+        let trait_ref = tcx.impl_trait_ref(impl_did).unwrap().subst_identity();
         assert_eq!(trait_ref.def_id, dispatch_from_dyn_trait);
 
         trait_ref.substs.type_at(1)
@@ -354,7 +354,7 @@ pub fn coerce_unsized_info<'tcx>(tcx: TyCtxt<'tcx>, impl_did: DefId) -> CoerceUn
     });
 
     let source = tcx.type_of(impl_did);
-    let trait_ref = tcx.impl_trait_ref(impl_did).unwrap();
+    let trait_ref = tcx.impl_trait_ref(impl_did).unwrap().subst_identity();
     assert_eq!(trait_ref.def_id, coerce_unsized_trait);
     let target = trait_ref.substs.type_at(1);
     debug!("visit_implementation_of_coerce_unsized: {:?} -> {:?} (bound)", source, target);
@@ -438,7 +438,7 @@ pub fn coerce_unsized_info<'tcx>(tcx: TyCtxt<'tcx>, impl_did: DefId) -> CoerceUn
             // when this coercion occurs, we would be changing the
             // field `ptr` from a thin pointer of type `*mut [i32;
             // 3]` to a fat pointer of type `*mut [i32]` (with
-            // extra data `3`).  **The purpose of this check is to
+            // extra data `3`). **The purpose of this check is to
             // make sure that we know how to do this conversion.**
             //
             // To check if this impl is legal, we would walk down

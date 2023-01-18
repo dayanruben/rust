@@ -1664,15 +1664,15 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         match *qpath {
             QPath::Resolved(ref maybe_qself, ref path) => {
                 let self_ty = maybe_qself.as_ref().map(|qself| self.to_ty(qself).raw);
-                let ty = <dyn AstConv<'_>>::res_to_ty(self, self_ty, path, true);
+                let ty = self.astconv().res_to_ty(self_ty, path, true);
                 (path.res, self.handle_raw_ty(path_span, ty))
             }
             QPath::TypeRelative(ref qself, ref segment) => {
                 let ty = self.to_ty(qself);
 
-                let result = <dyn AstConv<'_>>::associated_path_to_ty(
-                    self, hir_id, path_span, ty.raw, qself, segment, true,
-                );
+                let result = self
+                    .astconv()
+                    .associated_path_to_ty(hir_id, path_span, ty.raw, qself, segment, true);
                 let ty = result.map(|(ty, _, _)| ty).unwrap_or_else(|_| self.tcx().ty_error());
                 let ty = self.handle_raw_ty(path_span, ty);
                 let result = result.map(|(_, kind, def_id)| (kind, def_id));
@@ -2140,8 +2140,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                         // FIXME(compiler-errors): This could be problematic if something has two
                         // fn-like predicates with different args, but callable types really never
                         // do that, so it's OK.
-                        for (predicate, span) in
-                            std::iter::zip(instantiated.predicates, instantiated.spans)
+                        for (predicate, span) in instantiated
                         {
                             if let ty::PredicateKind::Clause(ty::Clause::Trait(pred)) = predicate.kind().skip_binder()
                                 && pred.self_ty().peel_refs() == callee_ty

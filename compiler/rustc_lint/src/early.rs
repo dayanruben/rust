@@ -40,6 +40,7 @@ pub struct EarlyContextAndPass<'a, T: EarlyLintPass> {
 impl<'a, T: EarlyLintPass> EarlyContextAndPass<'a, T> {
     // This always-inlined function is for the hot call site.
     #[inline(always)]
+    #[allow(rustc::diagnostic_outside_of_impl)]
     fn inlined_check_id(&mut self, id: ast::NodeId) {
         for early_lint in self.context.buffered.take(id) {
             let BufferedEarlyLint { span, msg, node_id: _, lint_id, diagnostic } = early_lint;
@@ -247,7 +248,9 @@ impl<'a, T: EarlyLintPass> ast_visit::Visitor<'a> for EarlyContextAndPass<'a, T>
     }
 
     fn visit_where_predicate(&mut self, p: &'a ast::WherePredicate) {
+        lint_callback!(self, enter_where_predicate, p);
         ast_visit::walk_where_predicate(self, p);
+        lint_callback!(self, exit_where_predicate, p);
     }
 
     fn visit_poly_trait_ref(&mut self, t: &'a ast::PolyTraitRef) {

@@ -283,6 +283,8 @@ pub trait PrettyPrinter<'tcx>:
     /// This is typically the case for all non-`'_` regions.
     fn should_print_region(&self, region: ty::Region<'tcx>) -> bool;
 
+    fn reset_type_limit(&mut self) {}
+
     // Defaults (should not be overridden):
 
     /// If possible, this returns a global path resolving to `def_id` that is visible
@@ -852,24 +854,7 @@ pub trait PrettyPrinter<'tcx>:
                 }
                 p!("]");
             }
-            ty::Array(ty, sz) => {
-                p!("[", print(ty), "; ");
-                if self.should_print_verbose() {
-                    p!(write("{:?}", sz));
-                } else if let ty::ConstKind::Unevaluated(..) = sz.kind() {
-                    // Do not try to evaluate unevaluated constants. If we are const evaluating an
-                    // array length anon const, rustc will (with debug assertions) print the
-                    // constant's path. Which will end up here again.
-                    p!("_");
-                } else if let Some(n) = sz.kind().try_to_bits(self.tcx().data_layout.pointer_size) {
-                    p!(write("{}", n));
-                } else if let ty::ConstKind::Param(param) = sz.kind() {
-                    p!(print(param));
-                } else {
-                    p!("_");
-                }
-                p!("]")
-            }
+            ty::Array(ty, sz) => p!("[", print(ty), "; ", print(sz), "]"),
             ty::Slice(ty) => p!("[", print(ty), "]"),
         }
 
@@ -1301,21 +1286,25 @@ pub trait PrettyPrinter<'tcx>:
         match ct.kind() {
             ty::ConstKind::Unevaluated(ty::UnevaluatedConst { def, substs }) => {
                 match self.tcx().def_kind(def.did) {
-                    DefKind::Static(..) | DefKind::Const | DefKind::AssocConst => {
+                    DefKind::Const | DefKind::AssocConst => {
                         p!(print_value_path(def.did, substs))
                     }
-                    _ => {
-                        if def.is_local() {
-                            let span = self.tcx().def_span(def.did);
-                            if let Ok(snip) = self.tcx().sess.source_map().span_to_snippet(span) {
-                                p!(write("{}", snip))
-                            } else {
-                                print_underscore!()
-                            }
+                    DefKind::AnonConst => {
+                        if def.is_local()
+                            && let span = self.tcx().def_span(def.did)
+                            && let Ok(snip) = self.tcx().sess.source_map().span_to_snippet(span)
+                        {
+                            p!(write("{}", snip))
                         } else {
-                            print_underscore!()
+                            // Do not call `print_value_path` as if a parent of this anon const is an impl it will
+                            // attempt to print out the impl trait ref i.e. `<T as Trait>::{constant#0}`. This would
+                            // cause printing to enter an infinite recursion if the anon const is in the self type i.e.
+                            // `impl<T: Default> Default for [T; 32 - 1 - 1 - 1] {`
+                            // where we would try to print `<[T; /* print `constant#0` again */] as Default>::{constant#0}`
+                            p!(write("{}::{}", self.tcx().crate_name(def.did.krate), self.tcx().def_path(def.did).to_string_no_crate_verbose()))
                         }
                     }
+                    defkind => bug!("`{:?}` has unexpcted defkind {:?}", ct, defkind),
                 }
             }
             ty::ConstKind::Infer(infer_ct) => {
@@ -1337,7 +1326,7 @@ pub trait PrettyPrinter<'tcx>:
             ty::ConstKind::Placeholder(placeholder) => p!(write("Placeholder({:?})", placeholder)),
             // FIXME(generic_const_exprs):
             // write out some legible representation of an abstract const?
-            ty::ConstKind::Expr(_) => p!("[Const Expr]"),
+            ty::ConstKind::Expr(_) => p!("[const expr]"),
             ty::ConstKind::Error(_) => p!("[const error]"),
         };
         Ok(self)
@@ -1981,6 +1970,10 @@ impl<'tcx> PrettyPrinter<'tcx> for FmtPrinter<'_, 'tcx> {
         self.0.ty_infer_name_resolver.as_ref().and_then(|func| func(id))
     }
 
+    fn reset_type_limit(&mut self) {
+        self.printed_type_count = 0;
+    }
+
     fn const_infer_name(&self, id: ty::ConstVid<'tcx>) -> Option<Symbol> {
         self.0.const_infer_name_resolver.as_ref().and_then(|func| func(id))
     }
@@ -2126,9 +2119,9 @@ impl<'tcx> FmtPrinter<'_, 'tcx> {
 
         let identify_regions = self.tcx.sess.opts.unstable_opts.identify_regions;
 
-        // These printouts are concise.  They do not contain all the information
+        // These printouts are concise. They do not contain all the information
         // the user might want to diagnose an error, but there is basically no way
-        // to fit that into a short string.  Hence the recommendation to use
+        // to fit that into a short string. Hence the recommendation to use
         // `explain_region()` or `note_and_explain_region()`.
         match *region {
             ty::ReEarlyBound(ref data) => {
@@ -2722,11 +2715,15 @@ define_print_and_forward_display! {
     }
 
     ty::SubtypePredicate<'tcx> {
-        p!(print(self.a), " <: ", print(self.b))
+        p!(print(self.a), " <: ");
+        cx.reset_type_limit();
+        p!(print(self.b))
     }
 
     ty::CoercePredicate<'tcx> {
-        p!(print(self.a), " -> ", print(self.b))
+        p!(print(self.a), " -> ");
+        cx.reset_type_limit();
+        p!(print(self.b))
     }
 
     ty::TraitPredicate<'tcx> {
@@ -2738,7 +2735,9 @@ define_print_and_forward_display! {
     }
 
     ty::ProjectionPredicate<'tcx> {
-        p!(print(self.projection_ty), " == ", print(self.term))
+        p!(print(self.projection_ty), " == ");
+        cx.reset_type_limit();
+        p!(print(self.term))
     }
 
     ty::Term<'tcx> {

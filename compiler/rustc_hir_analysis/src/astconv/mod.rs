@@ -3,8 +3,11 @@
 //! instance of `AstConv`.
 
 mod errors;
-mod generics;
+pub mod generics;
 
+use crate::astconv::generics::{
+    check_generic_arg_count, create_substs_for_generic_args, prohibit_assoc_ty_binding,
+};
 use crate::bounds::Bounds;
 use crate::collect::HirPlaceholderCollector;
 use crate::errors::{
@@ -24,6 +27,7 @@ use rustc_hir::def::{CtorOf, DefKind, Namespace, Res};
 use rustc_hir::def_id::{DefId, LocalDefId};
 use rustc_hir::intravisit::{walk_generics, Visitor as _};
 use rustc_hir::{GenericArg, GenericArgs, OpaqueTyOrigin};
+use rustc_infer::infer::TyCtxtInferExt;
 use rustc_middle::middle::stability::AllowUnstable;
 use rustc_middle::ty::subst::{self, GenericArgKind, InternalSubsts, SubstsRef};
 use rustc_middle::ty::GenericParamDefKind;
@@ -120,6 +124,13 @@ pub trait AstConv<'tcx> {
     fn set_tainted_by_errors(&self, e: ErrorGuaranteed);
 
     fn record_ty(&self, hir_id: hir::HirId, ty: Ty<'tcx>, span: Span);
+
+    fn astconv(&self) -> &dyn AstConv<'tcx>
+    where
+        Self: Sized,
+    {
+        self
+    }
 }
 
 #[derive(Debug)]
@@ -279,7 +290,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
             ty::BoundConstness::NotConst,
         );
         if let Some(b) = item_segment.args().bindings.first() {
-            Self::prohibit_assoc_ty_binding(self.tcx(), b.span);
+            prohibit_assoc_ty_binding(self.tcx(), b.span);
         }
 
         substs
@@ -349,7 +360,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
             assert!(self_ty.is_none());
         }
 
-        let arg_count = Self::check_generic_arg_count(
+        let arg_count = check_generic_arg_count(
             tcx,
             span,
             def_id,
@@ -500,9 +511,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                             return tcx.const_error(ty).into();
                         }
                         if !infer_args && has_default {
-                            tcx.bound_const_param_default(param.def_id)
-                                .subst(tcx, substs.unwrap())
-                                .into()
+                            tcx.const_param_default(param.def_id).subst(tcx, substs.unwrap()).into()
                         } else {
                             if infer_args {
                                 self.astconv.ct_infer(ty, Some(param), self.span).into()
@@ -524,7 +533,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
             inferred_params: vec![],
             infer_args,
         };
-        let substs = Self::create_substs_for_generic_args(
+        let substs = create_substs_for_generic_args(
             tcx,
             def_id,
             parent_substs,
@@ -610,7 +619,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
         );
 
         if let Some(b) = item_segment.args().bindings.first() {
-            Self::prohibit_assoc_ty_binding(self.tcx(), b.span);
+            prohibit_assoc_ty_binding(self.tcx(), b.span);
         }
 
         args
@@ -804,7 +813,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
             constness,
         );
         if let Some(b) = trait_segment.args().bindings.first() {
-            Self::prohibit_assoc_ty_binding(self.tcx(), b.span);
+            prohibit_assoc_ty_binding(self.tcx(), b.span);
         }
         self.tcx().mk_trait_ref(trait_def_id, substs)
     }
@@ -983,7 +992,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
     /// ```
     ///
     /// The `sized_by_default` parameter indicates if, in this context, the `param_ty` should be
-    /// considered `Sized` unless there is an explicit `?Sized` bound.  This would be true in the
+    /// considered `Sized` unless there is an explicit `?Sized` bound. This would be true in the
     /// example above, but is not true in supertrait listings like `trait Foo: Bar + Baz`.
     ///
     /// `span` should be the declaration size of the parameter.
@@ -1488,7 +1497,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
             i.trait_ref().map_bound(|trait_ref: ty::TraitRef<'tcx>| {
                 assert_eq!(trait_ref.self_ty(), dummy_self);
 
-                // Verify that `dummy_self` did not leak inside default type parameters.  This
+                // Verify that `dummy_self` did not leak inside default type parameters. This
                 // could not be done at path creation, since we need to see through trait aliases.
                 let mut missing_type_params = vec![];
                 let mut references_self = false;
@@ -1633,8 +1642,8 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
     fn report_ambiguous_associated_type(
         &self,
         span: Span,
-        type_str: &str,
-        trait_str: &str,
+        types: &[String],
+        traits: &[String],
         name: Symbol,
     ) -> ErrorGuaranteed {
         let mut err = struct_span_err!(self.tcx().sess, span, E0223, "ambiguous associated type");
@@ -1645,19 +1654,92 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
             .keys()
             .any(|full_span| full_span.contains(span))
         {
-            err.span_suggestion(
+            err.span_suggestion_verbose(
                 span.shrink_to_lo(),
                 "you are looking for the module in `std`, not the primitive type",
                 "std::",
                 Applicability::MachineApplicable,
             );
         } else {
-            err.span_suggestion(
-                span,
-                "use fully-qualified syntax",
-                format!("<{} as {}>::{}", type_str, trait_str, name),
-                Applicability::HasPlaceholders,
-            );
+            match (types, traits) {
+                ([], []) => {
+                    err.span_suggestion_verbose(
+                        span,
+                        &format!(
+                            "if there were a type named `Type` that implements a trait named \
+                             `Trait` with associated type `{name}`, you could use the \
+                             fully-qualified path",
+                        ),
+                        format!("<Type as Trait>::{name}"),
+                        Applicability::HasPlaceholders,
+                    );
+                }
+                ([], [trait_str]) => {
+                    err.span_suggestion_verbose(
+                        span,
+                        &format!(
+                            "if there were a type named `Example` that implemented `{trait_str}`, \
+                             you could use the fully-qualified path",
+                        ),
+                        format!("<Example as {trait_str}>::{name}"),
+                        Applicability::HasPlaceholders,
+                    );
+                }
+                ([], traits) => {
+                    err.span_suggestions(
+                        span,
+                        &format!(
+                            "if there were a type named `Example` that implemented one of the \
+                             traits with associated type `{name}`, you could use the \
+                             fully-qualified path",
+                        ),
+                        traits
+                            .iter()
+                            .map(|trait_str| format!("<Example as {trait_str}>::{name}"))
+                            .collect::<Vec<_>>(),
+                        Applicability::HasPlaceholders,
+                    );
+                }
+                ([type_str], []) => {
+                    err.span_suggestion_verbose(
+                        span,
+                        &format!(
+                            "if there were a trait named `Example` with associated type `{name}` \
+                             implemented for `{type_str}`, you could use the fully-qualified path",
+                        ),
+                        format!("<{type_str} as Example>::{name}"),
+                        Applicability::HasPlaceholders,
+                    );
+                }
+                (types, []) => {
+                    err.span_suggestions(
+                        span,
+                        &format!(
+                            "if there were a trait named `Example` with associated type `{name}` \
+                             implemented for one of the types, you could use the fully-qualified \
+                             path",
+                        ),
+                        types
+                            .into_iter()
+                            .map(|type_str| format!("<{type_str} as Example>::{name}")),
+                        Applicability::HasPlaceholders,
+                    );
+                }
+                (types, traits) => {
+                    let mut suggestions = vec![];
+                    for type_str in types {
+                        for trait_str in traits {
+                            suggestions.push(format!("<{type_str} as {trait_str}>::{name}"));
+                        }
+                    }
+                    err.span_suggestions(
+                        span,
+                        "use the fully-qualified path",
+                        suggestions,
+                        Applicability::MachineApplicable,
+                    );
+                }
+            }
         }
         err.emit()
     }
@@ -1984,7 +2066,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                 };
 
                 self.one_bound_for_assoc_type(
-                    || traits::supertraits(tcx, ty::Binder::dummy(trait_ref)),
+                    || traits::supertraits(tcx, ty::Binder::dummy(trait_ref.subst_identity())),
                     || "Self".to_string(),
                     assoc_ident,
                     span,
@@ -2040,12 +2122,64 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                     err.emit()
                 } else if let Err(reported) = qself_ty.error_reported() {
                     reported
+                } else if let ty::Alias(ty::Opaque, alias_ty) = qself_ty.kind() {
+                    // `<impl Trait as OtherTrait>::Assoc` makes no sense.
+                    struct_span_err!(
+                        tcx.sess,
+                        tcx.def_span(alias_ty.def_id),
+                        E0667,
+                        "`impl Trait` is not allowed in path parameters"
+                    )
+                    .emit() // Already reported in an earlier stage.
                 } else {
+                    // Find all the `impl`s that `qself_ty` has for any trait that has the
+                    // associated type, so that we suggest the right one.
+                    let infcx = tcx.infer_ctxt().build();
+                    // We create a fresh `ty::ParamEnv` instead of the one for `self.item_def_id()`
+                    // to avoid a cycle error in `src/test/ui/resolve/issue-102946.rs`.
+                    let param_env = ty::ParamEnv::empty();
+                    let traits: Vec<_> = self
+                        .tcx()
+                        .all_traits()
+                        .filter(|trait_def_id| {
+                            // Consider only traits with the associated type
+                            tcx.associated_items(*trait_def_id)
+                                .in_definition_order()
+                                .any(|i| {
+                                    i.kind.namespace() == Namespace::TypeNS
+                                        && i.ident(tcx).normalize_to_macros_2_0() == assoc_ident
+                                        && matches!(i.kind, ty::AssocKind::Type)
+                                })
+                            // Consider only accessible traits
+                            && tcx.visibility(*trait_def_id)
+                                .is_accessible_from(self.item_def_id(), tcx)
+                            && tcx.all_impls(*trait_def_id)
+                                .any(|impl_def_id| {
+                                    let trait_ref = tcx.impl_trait_ref(impl_def_id);
+                                    trait_ref.map_or(false, |trait_ref| {
+                                        let impl_ = trait_ref.subst(
+                                            tcx,
+                                            infcx.fresh_substs_for_item(span, impl_def_id),
+                                        );
+                                        infcx
+                                            .can_eq(
+                                                param_env,
+                                                tcx.erase_regions(impl_.self_ty()),
+                                                tcx.erase_regions(qself_ty),
+                                            )
+                                            .is_ok()
+                                    })
+                                    && tcx.impl_polarity(impl_def_id) != ty::ImplPolarity::Negative
+                                })
+                        })
+                        .map(|trait_def_id| tcx.def_path_str(trait_def_id))
+                        .collect();
+
                     // Don't print `TyErr` to the user.
                     self.report_ambiguous_associated_type(
                         span,
-                        &qself_ty.to_string(),
-                        "Trait",
+                        &[qself_ty.to_string()],
+                        &traits,
                         assoc_ident.name,
                     )
                 };
@@ -2163,16 +2297,30 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
             let is_part_of_self_trait_constraints = def_id == trait_def_id;
             let is_part_of_fn_in_self_trait = parent_def_id == Some(trait_def_id);
 
-            let type_name = if is_part_of_self_trait_constraints || is_part_of_fn_in_self_trait {
-                "Self"
+            let type_names = if is_part_of_self_trait_constraints || is_part_of_fn_in_self_trait {
+                vec!["Self".to_string()]
             } else {
-                "Type"
+                // Find all the types that have an `impl` for the trait.
+                tcx.all_impls(trait_def_id)
+                    .filter(|impl_def_id| {
+                        // Consider only accessible traits
+                        tcx.visibility(*impl_def_id).is_accessible_from(self.item_def_id(), tcx)
+                            && tcx.impl_polarity(impl_def_id) != ty::ImplPolarity::Negative
+                    })
+                    .filter_map(|impl_def_id| tcx.impl_trait_ref(impl_def_id))
+                    .map(|impl_| impl_.subst_identity().self_ty())
+                    // We don't care about blanket impls.
+                    .filter(|self_ty| !self_ty.has_non_region_param())
+                    .map(|self_ty| tcx.erase_regions(self_ty).to_string())
+                    .collect()
             };
-
+            // FIXME: also look at `tcx.generics_of(self.item_def_id()).params` any that
+            // references the trait. Relevant for the first case in
+            // `src/test/ui/associated-types/associated-types-in-ambiguous-context.rs`
             let reported = self.report_ambiguous_associated_type(
                 span,
-                type_name,
-                &path_str,
+                &type_names,
+                &[path_str],
                 item_segment.ident.name,
             );
             return tcx.ty_error_with_guaranteed(reported)
@@ -2301,7 +2449,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
         for segment in segments {
             // Only emit the first error to avoid overloading the user with error messages.
             if let Some(b) = segment.args().bindings.first() {
-                Self::prohibit_assoc_ty_binding(self.tcx(), b.span);
+                prohibit_assoc_ty_binding(self.tcx(), b.span);
                 return true;
             }
         }
@@ -2684,7 +2832,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
     }
 
     /// Parses the programmer's textual representation of a type into our
-    /// internal notion of a type.  This is meant to be used within a path.
+    /// internal notion of a type. This is meant to be used within a path.
     pub fn ast_ty_to_ty_in_path(&self, ast_ty: &hir::Ty<'_>) -> Ty<'tcx> {
         self.ast_ty_to_ty_inner(ast_ty, false, true)
     }
@@ -3157,7 +3305,13 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                 let label = "add `dyn` keyword before this trait";
                 let mut diag =
                     rustc_errors::struct_span_err!(tcx.sess, self_ty.span, E0782, "{}", msg);
-                diag.multipart_suggestion_verbose(label, sugg, Applicability::MachineApplicable);
+                if self_ty.span.can_be_used_for_suggestions() {
+                    diag.multipart_suggestion_verbose(
+                        label,
+                        sugg,
+                        Applicability::MachineApplicable,
+                    );
+                }
                 // check if the impl trait that we are considering is a impl of a local trait
                 self.maybe_lint_blanket_trait_impl(&self_ty, &mut diag);
                 diag.emit();

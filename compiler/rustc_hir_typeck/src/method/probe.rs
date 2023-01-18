@@ -9,6 +9,7 @@ use rustc_data_structures::fx::FxHashSet;
 use rustc_errors::Applicability;
 use rustc_hir as hir;
 use rustc_hir::def::DefKind;
+use rustc_hir_analysis::autoderef::{self, Autoderef};
 use rustc_infer::infer::canonical::OriginalQueryValues;
 use rustc_infer::infer::canonical::{Canonical, QueryResponse};
 use rustc_infer::infer::type_variable::{TypeVariableOrigin, TypeVariableOriginKind};
@@ -29,7 +30,6 @@ use rustc_span::lev_distance::{
 };
 use rustc_span::symbol::sym;
 use rustc_span::{symbol::Ident, Span, Symbol, DUMMY_SP};
-use rustc_trait_selection::autoderef::{self, Autoderef};
 use rustc_trait_selection::traits::query::evaluate_obligation::InferCtxtExt;
 use rustc_trait_selection::traits::query::method_autoderef::MethodAutoderefBadTy;
 use rustc_trait_selection::traits::query::method_autoderef::{
@@ -232,7 +232,7 @@ pub type PickResult<'tcx> = Result<Pick<'tcx>, MethodError<'tcx>>;
 pub enum Mode {
     // An expression of the form `receiver.method_name(...)`.
     // Autoderefs are performed on `receiver`, lookup is done based on the
-    // `self` argument  of the method, and static methods aren't considered.
+    // `self` argument of the method, and static methods aren't considered.
     MethodCall,
     // An expression of the form `Type::item` or `<T>::item`.
     // No autoderefs are performed, lookup is done based on the type each
@@ -486,7 +486,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             probe_cx.assemble_inherent_candidates();
             match scope {
                 ProbeScope::TraitsInScope => {
-                    probe_cx.assemble_extension_candidates_for_traits_in_scope(scope_expr_id)
+                    probe_cx.assemble_extension_candidates_for_traits_in_scope()
                 }
                 ProbeScope::AllTraits => probe_cx.assemble_extension_candidates_for_all_traits(),
             };
@@ -889,9 +889,9 @@ impl<'a, 'tcx> ProbeContext<'a, 'tcx> {
         }
     }
 
-    fn assemble_extension_candidates_for_traits_in_scope(&mut self, expr_hir_id: hir::HirId) {
+    fn assemble_extension_candidates_for_traits_in_scope(&mut self) {
         let mut duplicates = FxHashSet::default();
-        let opt_applicable_traits = self.tcx.in_scope_traits(expr_hir_id);
+        let opt_applicable_traits = self.tcx.in_scope_traits(self.scope_expr_id);
         if let Some(applicable_traits) = opt_applicable_traits {
             for trait_candidate in applicable_traits.iter() {
                 let trait_did = trait_candidate.def_id;
@@ -1556,7 +1556,23 @@ impl<'a, 'tcx> ProbeContext<'a, 'tcx> {
 
                     // Convert the bounds into obligations.
                     let impl_obligations = traits::predicates_for_generics(
-                        |_, _| cause.clone(),
+                        |_idx, span| {
+                            let misc = traits::ObligationCause::misc(span, self.body_id);
+                            let parent_trait_pred = ty::Binder::dummy(ty::TraitPredicate {
+                                trait_ref: ty::TraitRef::from_method(self.tcx, impl_def_id, substs),
+                                constness: ty::BoundConstness::NotConst,
+                                polarity: ty::ImplPolarity::Positive,
+                            });
+                            misc.derived_cause(parent_trait_pred, |derived| {
+                                traits::ImplDerivedObligation(Box::new(
+                                    traits::ImplDerivedObligationCause {
+                                        derived,
+                                        impl_def_id,
+                                        span,
+                                    },
+                                ))
+                            })
+                        },
                         self.param_env,
                         impl_bounds,
                     );
@@ -1571,11 +1587,29 @@ impl<'a, 'tcx> ProbeContext<'a, 'tcx> {
                         let o = self.resolve_vars_if_possible(o);
                         if !self.predicate_may_hold(&o) {
                             result = ProbeResult::NoMatch;
-                            possibly_unsatisfied_predicates.push((
-                                o.predicate,
-                                None,
-                                Some(o.cause),
-                            ));
+                            let parent_o = o.clone();
+                            let implied_obligations =
+                                traits::elaborate_obligations(self.tcx, vec![o]);
+                            for o in implied_obligations {
+                                let parent = if o == parent_o {
+                                    None
+                                } else {
+                                    if o.predicate.to_opt_poly_trait_pred().map(|p| p.def_id())
+                                        == self.tcx.lang_items().sized_trait()
+                                    {
+                                        // We don't care to talk about implicit `Sized` bounds.
+                                        continue;
+                                    }
+                                    Some(parent_o.predicate)
+                                };
+                                if !self.predicate_may_hold(&o) {
+                                    possibly_unsatisfied_predicates.push((
+                                        o.predicate,
+                                        parent,
+                                        Some(o.cause),
+                                    ));
+                                }
+                            }
                         }
                     }
                 }

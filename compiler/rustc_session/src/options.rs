@@ -1411,6 +1411,8 @@ options! {
         "what location details should be tracked when using caller_location, either \
         `none`, or a comma separated list of location details, for which \
         valid options are `file`, `line`, and `column` (default: `file,line,column`)"),
+    log_backtrace: Option<String> = (None, parse_opt_string, [TRACKED],
+        "add a backtrace along with logging"),
     ls: bool = (false, parse_bool, [UNTRACKED],
         "list the symbols defined by a library crate (default: no)"),
     macro_backtrace: bool = (false, parse_bool, [UNTRACKED],
@@ -1570,7 +1572,7 @@ options! {
     /// o/w tests have closure@path
     span_free_formats: bool = (false, parse_bool, [UNTRACKED],
         "exclude spans when debug-printing compiler state (default: no)"),
-    split_dwarf_inlining: bool = (true, parse_bool, [TRACKED],
+    split_dwarf_inlining: bool = (false, parse_bool, [TRACKED],
         "provide minimal debug info in the object/executable to facilitate online \
          symbolication/stack traces in the absence of .dwo/.dwp files when using Split DWARF"),
     split_dwarf_kind: SplitDwarfKind = (SplitDwarfKind::Split, parse_split_dwarf_kind, [TRACKED],

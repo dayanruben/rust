@@ -410,9 +410,6 @@ pub enum SubregionOrigin<'tcx> {
     /// Creating a pointer `b` to contents of another reference
     Reborrow(Span),
 
-    /// Data with type `Ty<'tcx>` was borrowed
-    DataBorrowed(Ty<'tcx>, Span),
-
     /// (&'a &'b T) where a >= b
     ReferenceOutlivesReferent(Ty<'tcx>, Span),
 
@@ -688,6 +685,10 @@ impl<'tcx> InferCtxt<'tcx> {
             typeck_results: None,
             fallback_has_occurred: false,
             normalize_fn_sig: Box::new(|fn_sig| fn_sig),
+            autoderef_steps: Box::new(|ty| {
+                debug_assert!(false, "shouldn't be using autoderef_steps outside of typeck");
+                vec![(ty, vec![])]
+            }),
         }
     }
 
@@ -1104,7 +1105,7 @@ impl<'tcx> InferCtxt<'tcx> {
         self.tcx.mk_region(ty::ReVar(region_var))
     }
 
-    /// Return the universe that the region `r` was created in.  For
+    /// Return the universe that the region `r` was created in. For
     /// most regions (e.g., `'static`, named regions from the user,
     /// etc) this is the root universe U0. For inference variables or
     /// placeholders, however, it will return the universe which they
@@ -1360,7 +1361,7 @@ impl<'tcx> InferCtxt<'tcx> {
     }
 
     /// Resolve any type variables found in `value` -- but only one
-    /// level.  So, if the variable `?X` is bound to some type
+    /// level. So, if the variable `?X` is bound to some type
     /// `Foo<?Y>`, then this would return `Foo<?Y>` (but `?Y` may
     /// itself be bound to a type).
     ///
@@ -1719,7 +1720,7 @@ impl<'tcx> TypeErrCtxt<'_, 'tcx> {
         if let None = self.tainted_by_errors() {
             // As a heuristic, just skip reporting region errors
             // altogether if other errors have been reported while
-            // this infcx was in use.  This is totally hokey but
+            // this infcx was in use. This is totally hokey but
             // otherwise we have a hard time separating legit region
             // errors from silly ones.
             self.report_region_errors(generic_param_scope, &errors);
@@ -1974,7 +1975,6 @@ impl<'tcx> SubregionOrigin<'tcx> {
             RelateParamBound(a, ..) => a,
             RelateRegionParamBound(a) => a,
             Reborrow(a) => a,
-            DataBorrowed(_, a) => a,
             ReferenceOutlivesReferent(_, a) => a,
             CompareImplItemObligation { span, .. } => span,
             AscribeUserTypeProvePredicate(span) => span,

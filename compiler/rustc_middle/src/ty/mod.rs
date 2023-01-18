@@ -86,7 +86,7 @@ pub use self::context::{
     tls, CtxtInterners, DeducedParamAttrs, FreeRegionInfo, GlobalCtxt, Lift, OnDiskCache, TyCtxt,
     TyCtxtFeed,
 };
-pub use self::instance::{Instance, InstanceDef, ShortInstance};
+pub use self::instance::{Instance, InstanceDef, ShortInstance, UnusedGenericParams};
 pub use self::list::List;
 pub use self::parameterized::ParameterizedOverTcx;
 pub use self::rvalue_scopes::RvalueScopes;
@@ -689,7 +689,7 @@ impl<'tcx> Predicate<'tcx> {
         //
         // In terms of why this is sound, the idea is that whenever there
         // is an impl of `T:Foo<'a>`, it must show that `T:Bar<'a,'a>`
-        // holds.  So if there is an impl of `T:Foo<'a>` that applies to
+        // holds. So if there is an impl of `T:Foo<'a>` that applies to
         // all `'a`, then we must know that `T:Bar<'a,'a>` holds for all
         // `'a`.
         //
@@ -701,7 +701,7 @@ impl<'tcx> Predicate<'tcx> {
         // Here, if we have `for<'x> T: Foo1<'x>`, then what do we know?
         // The answer is that we know `for<'x,'b> T: Bar1<'x,'b>`. The
         // reason is similar to the previous example: any impl of
-        // `T:Foo1<'x>` must show that `for<'b> T: Bar1<'x, 'b>`.  So
+        // `T:Foo1<'x>` must show that `for<'b> T: Bar1<'x, 'b>`. So
         // basically we would want to collapse the bound lifetimes from
         // the input (`trait_ref`) and the supertraits.
         //
@@ -1252,6 +1252,35 @@ impl<'tcx> InstantiatedPredicates<'tcx> {
     pub fn is_empty(&self) -> bool {
         self.predicates.is_empty()
     }
+
+    pub fn iter(&self) -> <&Self as IntoIterator>::IntoIter {
+        (&self).into_iter()
+    }
+}
+
+impl<'tcx> IntoIterator for InstantiatedPredicates<'tcx> {
+    type Item = (Predicate<'tcx>, Span);
+
+    type IntoIter = std::iter::Zip<std::vec::IntoIter<Predicate<'tcx>>, std::vec::IntoIter<Span>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        debug_assert_eq!(self.predicates.len(), self.spans.len());
+        std::iter::zip(self.predicates, self.spans)
+    }
+}
+
+impl<'a, 'tcx> IntoIterator for &'a InstantiatedPredicates<'tcx> {
+    type Item = (Predicate<'tcx>, Span);
+
+    type IntoIter = std::iter::Zip<
+        std::iter::Copied<std::slice::Iter<'a, Predicate<'tcx>>>,
+        std::iter::Copied<std::slice::Iter<'a, Span>>,
+    >;
+
+    fn into_iter(self) -> Self::IntoIter {
+        debug_assert_eq!(self.predicates.len(), self.spans.len());
+        std::iter::zip(self.predicates.iter().copied(), self.spans.iter().copied())
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, HashStable, TyEncodable, TyDecodable, Lift)]
@@ -1330,7 +1359,7 @@ impl<'tcx> OpaqueHiddenType<'tcx> {
         debug!(?id_substs);
 
         // This zip may have several times the same lifetime in `substs` paired with a different
-        // lifetime from `id_substs`.  Simply `collect`ing the iterator is the correct behaviour:
+        // lifetime from `id_substs`. Simply `collect`ing the iterator is the correct behaviour:
         // it will pick the last one, which is the one we introduced in the impl-trait desugaring.
         let map = substs.iter().zip(id_substs);
 
@@ -2141,7 +2170,7 @@ impl<'tcx> TyCtxt<'tcx> {
 
     /// Look up the name of a definition across crates. This does not look at HIR.
     ///
-    /// This method will ICE if the corresponding item does not have a name.  In these cases, use
+    /// This method will ICE if the corresponding item does not have a name. In these cases, use
     /// [`opt_item_name`] instead.
     ///
     /// [`opt_item_name`]: Self::opt_item_name
@@ -2187,8 +2216,10 @@ impl<'tcx> TyCtxt<'tcx> {
     ) -> Option<ImplOverlapKind> {
         // If either trait impl references an error, they're allowed to overlap,
         // as one of them essentially doesn't exist.
-        if self.impl_trait_ref(def_id1).map_or(false, |tr| tr.references_error())
-            || self.impl_trait_ref(def_id2).map_or(false, |tr| tr.references_error())
+        if self.impl_trait_ref(def_id1).map_or(false, |tr| tr.subst_identity().references_error())
+            || self
+                .impl_trait_ref(def_id2)
+                .map_or(false, |tr| tr.subst_identity().references_error())
         {
             return Some(ImplOverlapKind::Permitted { marker: false });
         }
@@ -2218,7 +2249,7 @@ impl<'tcx> TyCtxt<'tcx> {
         let is_marker_overlap = {
             let is_marker_impl = |def_id: DefId| -> bool {
                 let trait_ref = self.impl_trait_ref(def_id);
-                trait_ref.map_or(false, |tr| self.trait_def(tr.def_id).is_marker)
+                trait_ref.map_or(false, |tr| self.trait_def(tr.skip_binder().def_id).is_marker)
             };
             is_marker_impl(def_id1) && is_marker_impl(def_id2)
         };
@@ -2364,7 +2395,7 @@ impl<'tcx> TyCtxt<'tcx> {
     /// Given the `DefId` of an impl, returns the `DefId` of the trait it implements.
     /// If it implements no trait, returns `None`.
     pub fn trait_id_of_impl(self, def_id: DefId) -> Option<DefId> {
-        self.impl_trait_ref(def_id).map(|tr| tr.def_id)
+        self.impl_trait_ref(def_id).map(|tr| tr.skip_binder().def_id)
     }
 
     /// If the given `DefId` describes an item belonging to a trait,
@@ -2465,8 +2496,10 @@ impl<'tcx> TyCtxt<'tcx> {
 
     #[inline]
     pub fn is_const_fn_raw(self, def_id: DefId) -> bool {
-        matches!(self.def_kind(def_id), DefKind::Fn | DefKind::AssocFn | DefKind::Ctor(..))
-            && self.constness(def_id) == hir::Constness::Const
+        matches!(
+            self.def_kind(def_id),
+            DefKind::Fn | DefKind::AssocFn | DefKind::Ctor(..) | DefKind::Closure
+        ) && self.constness(def_id) == hir::Constness::Const
     }
 
     #[inline]

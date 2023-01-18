@@ -29,15 +29,6 @@ impl<'tcx> TypeErrCtxt<'_, 'tcx> {
                 RegionOriginNote::Plain { span, msg: fluent::infer_relate_object_bound }
                     .add_to_diagnostic(err);
             }
-            infer::DataBorrowed(ty, span) => {
-                RegionOriginNote::WithName {
-                    span,
-                    msg: fluent::infer_data_borrowed,
-                    name: &self.ty_to_string(ty),
-                    continues: false,
-                }
-                .add_to_diagnostic(err);
-            }
             infer::ReferenceOutlivesReferent(ty, span) => {
                 RegionOriginNote::WithName {
                     span,
@@ -227,32 +218,6 @@ impl<'tcx> TypeErrCtxt<'_, 'tcx> {
                 );
                 err
             }
-            infer::DataBorrowed(ty, span) => {
-                let mut err = struct_span_err!(
-                    self.tcx.sess,
-                    span,
-                    E0490,
-                    "a value of type `{}` is borrowed for too long",
-                    self.ty_to_string(ty)
-                );
-                note_and_explain_region(
-                    self.tcx,
-                    &mut err,
-                    "the type is valid for ",
-                    sub,
-                    "",
-                    None,
-                );
-                note_and_explain_region(
-                    self.tcx,
-                    &mut err,
-                    "but the borrow lasts for ",
-                    sup,
-                    "",
-                    None,
-                );
-                err
-            }
             infer::ReferenceOutlivesReferent(ty, span) => {
                 let mut err = struct_span_err!(
                     self.tcx.sess,
@@ -355,6 +320,7 @@ impl<'tcx> TypeErrCtxt<'_, 'tcx> {
             .impl_trait_ref(impl_def_id)
             else { return; };
         let trait_substs = trait_ref
+            .subst_identity()
             // Replace the explicit self type with `Self` for better suggestion rendering
             .with_self_ty(self.tcx, self.tcx.mk_ty_param(0, kw::SelfUpper))
             .substs;
@@ -364,9 +330,8 @@ impl<'tcx> TypeErrCtxt<'_, 'tcx> {
 
         let Ok(trait_predicates) = self
             .tcx
-            .bound_explicit_predicates_of(trait_item_def_id)
-            .map_bound(|p| p.predicates)
-            .subst_iter_copied(self.tcx, trait_item_substs)
+            .explicit_predicates_of(trait_item_def_id)
+            .instantiate_own(self.tcx, trait_item_substs)
             .map(|(pred, _)| {
                 if pred.is_suggestable(self.tcx, false) {
                     Ok(pred.to_string())

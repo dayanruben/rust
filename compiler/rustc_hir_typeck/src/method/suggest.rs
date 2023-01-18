@@ -101,6 +101,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         self.autoderef(span, ty).any(|(ty, _)| matches!(ty.kind(), ty::Slice(..) | ty::Array(..)))
     }
 
+    #[instrument(level = "debug", skip(self))]
     pub fn report_method_error(
         &self,
         span: Span,
@@ -504,19 +505,21 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                             }
                             _ => None,
                         };
-                        if let Some(hir::Node::Item(hir::Item { kind, .. })) = node {
-                            if let Some(g) = kind.generics() {
-                                let key = (
-                                    g.tail_span_for_predicate_suggestion(),
-                                    g.add_where_or_trailing_comma(),
-                                );
-                                type_params
-                                    .entry(key)
-                                    .or_insert_with(FxHashSet::default)
-                                    .insert(obligation.to_owned());
-                            }
+                        if let Some(hir::Node::Item(hir::Item { kind, .. })) = node
+                            && let Some(g) = kind.generics()
+                        {
+                            let key = (
+                                g.tail_span_for_predicate_suggestion(),
+                                g.add_where_or_trailing_comma(),
+                            );
+                            type_params
+                                .entry(key)
+                                .or_insert_with(FxHashSet::default)
+                                .insert(obligation.to_owned());
+                            return true;
                         }
                     }
+                    false
                 };
             let mut bound_span_label = |self_ty: Ty<'_>, obligation: &str, quiet: &str| {
                 let msg = format!(
@@ -586,22 +589,19 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
 
             // Find all the requirements that come from a local `impl` block.
             let mut skip_list: FxHashSet<_> = Default::default();
-            let mut spanned_predicates: FxHashMap<MultiSpan, _> = Default::default();
-            for (data, p, parent_p, impl_def_id, cause) in unsatisfied_predicates
+            let mut spanned_predicates = FxHashMap::default();
+            for (p, parent_p, impl_def_id, cause) in unsatisfied_predicates
                 .iter()
                 .filter_map(|(p, parent, c)| c.as_ref().map(|c| (p, parent, c)))
                 .filter_map(|(p, parent, c)| match c.code() {
-                    ObligationCauseCode::ImplDerivedObligation(data) => {
-                        Some((&data.derived, p, parent, data.impl_def_id, data))
+                    ObligationCauseCode::ImplDerivedObligation(data)
+                        if matches!(p.kind().skip_binder(), ty::PredicateKind::Clause(_)) =>
+                    {
+                        Some((p, parent, data.impl_def_id, data))
                     }
                     _ => None,
                 })
             {
-                let parent_trait_ref = data.parent_trait_pred;
-                let path = parent_trait_ref.print_modifiers_and_trait_path();
-                let tr_self_ty = parent_trait_ref.skip_binder().self_ty();
-                let unsatisfied_msg = "unsatisfied trait bound introduced here";
-                let derive_msg = "unsatisfied trait bound introduced in this `derive` macro";
                 match self.tcx.hir().get_if_local(impl_def_id) {
                     // Unmet obligation comes from a `derive` macro, point at it once to
                     // avoid multiple span labels pointing at the same place.
@@ -617,10 +617,17 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     ) =>
                     {
                         let span = self_ty.span.ctxt().outer_expn_data().call_site;
-                        let mut spans: MultiSpan = span.into();
-                        spans.push_span_label(span, derive_msg);
-                        let entry = spanned_predicates.entry(spans);
-                        entry.or_insert_with(|| (path, tr_self_ty, Vec::new())).2.push(p);
+                        let entry = spanned_predicates.entry(span);
+                        let entry = entry.or_insert_with(|| {
+                            (FxHashSet::default(), FxHashSet::default(), Vec::new())
+                        });
+                        entry.0.insert(span);
+                        entry.1.insert((
+                            span,
+                            "unsatisfied trait bound introduced in this `derive` macro",
+                        ));
+                        entry.2.push(p);
+                        skip_list.insert(p);
                     }
 
                     // Unmet obligation coming from an `impl`.
@@ -647,8 +654,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                                 };
                                 err.span_suggestion_verbose(
                                     sp,
-                                    "consider relaxing the type parameter's implicit \
-                                     `Sized` bound",
+                                    "consider relaxing the type parameter's implicit `Sized` bound",
                                     sugg,
                                     Applicability::MachineApplicable,
                                 );
@@ -659,25 +665,24 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                             let _ = format_pred(*pred);
                         }
                         skip_list.insert(p);
-                        let mut spans = if cause.span != *item_span {
-                            let mut spans: MultiSpan = cause.span.into();
-                            spans.push_span_label(cause.span, unsatisfied_msg);
-                            spans
+                        let entry = spanned_predicates.entry(self_ty.span);
+                        let entry = entry.or_insert_with(|| {
+                            (FxHashSet::default(), FxHashSet::default(), Vec::new())
+                        });
+                        entry.2.push(p);
+                        if cause.span != *item_span {
+                            entry.0.insert(cause.span);
+                            entry.1.insert((cause.span, "unsatisfied trait bound introduced here"));
                         } else {
-                            let mut spans = Vec::with_capacity(2);
                             if let Some(trait_ref) = of_trait {
-                                spans.push(trait_ref.path.span);
+                                entry.0.insert(trait_ref.path.span);
                             }
-                            spans.push(self_ty.span);
-                            spans.into()
+                            entry.0.insert(self_ty.span);
                         };
                         if let Some(trait_ref) = of_trait {
-                            spans.push_span_label(trait_ref.path.span, "");
+                            entry.1.insert((trait_ref.path.span, ""));
                         }
-                        spans.push_span_label(self_ty.span, "");
-
-                        let entry = spanned_predicates.entry(spans);
-                        entry.or_insert_with(|| (path, tr_self_ty, Vec::new())).2.push(p);
+                        entry.1.insert((self_ty.span, ""));
                     }
                     Some(Node::Item(hir::Item {
                         kind: hir::ItemKind::Trait(rustc_ast::ast::IsAuto::Yes, ..),
@@ -689,16 +694,29 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                             "auto trait is invoked with no method error, but no error reported?",
                         );
                     }
-                    Some(_) => unreachable!(),
+                    Some(Node::Item(hir::Item {
+                        ident, kind: hir::ItemKind::Trait(..), ..
+                    })) => {
+                        skip_list.insert(p);
+                        let entry = spanned_predicates.entry(ident.span);
+                        let entry = entry.or_insert_with(|| {
+                            (FxHashSet::default(), FxHashSet::default(), Vec::new())
+                        });
+                        entry.0.insert(cause.span);
+                        entry.1.insert((ident.span, ""));
+                        entry.1.insert((cause.span, "unsatisfied trait bound introduced here"));
+                        entry.2.push(p);
+                    }
+                    Some(node) => unreachable!("encountered `{node:?}`"),
                     None => (),
                 }
             }
             let mut spanned_predicates: Vec<_> = spanned_predicates.into_iter().collect();
-            spanned_predicates.sort_by_key(|(span, (_, _, _))| span.primary_span());
-            for (span, (_path, _self_ty, preds)) in spanned_predicates {
-                let mut preds: Vec<_> = preds
-                    .into_iter()
-                    .filter_map(|pred| format_pred(*pred))
+            spanned_predicates.sort_by_key(|(span, _)| *span);
+            for (_, (primary_spans, span_labels, predicates)) in spanned_predicates {
+                let mut preds: Vec<_> = predicates
+                    .iter()
+                    .filter_map(|pred| format_pred(**pred))
                     .map(|(p, _)| format!("`{}`", p))
                     .collect();
                 preds.sort();
@@ -708,23 +726,47 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 } else {
                     format!("the following trait bounds were not satisfied:\n{}", preds.join("\n"),)
                 };
+                let mut span: MultiSpan = primary_spans.into_iter().collect::<Vec<_>>().into();
+                for (sp, label) in span_labels {
+                    span.push_span_label(sp, label);
+                }
                 err.span_note(span, &msg);
                 unsatisfied_bounds = true;
             }
 
+            let mut suggested_bounds = FxHashSet::default();
             // The requirements that didn't have an `impl` span to show.
             let mut bound_list = unsatisfied_predicates
                 .iter()
                 .filter_map(|(pred, parent_pred, _cause)| {
+                    let mut suggested = false;
                     format_pred(*pred).map(|(p, self_ty)| {
-                        collect_type_param_suggestions(self_ty, *pred, &p);
+                        if let Some(parent) = parent_pred && suggested_bounds.contains(parent) {
+                            // We don't suggest `PartialEq` when we already suggest `Eq`.
+                        } else if !suggested_bounds.contains(pred) {
+                            if collect_type_param_suggestions(self_ty, *pred, &p) {
+                                suggested = true;
+                                suggested_bounds.insert(pred);
+                            }
+                        }
                         (
                             match parent_pred {
                                 None => format!("`{}`", &p),
                                 Some(parent_pred) => match format_pred(*parent_pred) {
                                     None => format!("`{}`", &p),
                                     Some((parent_p, _)) => {
-                                        collect_type_param_suggestions(self_ty, *parent_pred, &p);
+                                        if !suggested
+                                            && !suggested_bounds.contains(pred)
+                                            && !suggested_bounds.contains(parent_pred)
+                                        {
+                                            if collect_type_param_suggestions(
+                                                self_ty,
+                                                *parent_pred,
+                                                &p,
+                                            ) {
+                                                suggested_bounds.insert(pred);
+                                            }
+                                        }
                                         format!("`{}`\nwhich is required by `{}`", p, parent_p)
                                     }
                                 },
@@ -1030,7 +1072,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     // the impl, if local to crate (item may be defaulted), else nothing.
                     let Some(item) = self.associated_value(impl_did, item_name).or_else(|| {
                         let impl_trait_ref = self.tcx.impl_trait_ref(impl_did)?;
-                        self.associated_value(impl_trait_ref.def_id, item_name)
+                        self.associated_value(impl_trait_ref.skip_binder().def_id, item_name)
                     }) else {
                         continue;
                     };
@@ -1048,7 +1090,10 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     let insertion = match self.tcx.impl_trait_ref(impl_did) {
                         None => String::new(),
                         Some(trait_ref) => {
-                            format!(" of the trait `{}`", self.tcx.def_path_str(trait_ref.def_id))
+                            format!(
+                                " of the trait `{}`",
+                                self.tcx.def_path_str(trait_ref.skip_binder().def_id)
+                            )
                         }
                     };
 
@@ -1079,7 +1124,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     }
                     if let Some(sugg_span) = sugg_span
                         && let Some(trait_ref) = self.tcx.impl_trait_ref(impl_did) {
-                        let path = self.tcx.def_path_str(trait_ref.def_id);
+                        let path = self.tcx.def_path_str(trait_ref.skip_binder().def_id);
 
                         let ty = match item.kind {
                             ty::AssocKind::Const | ty::AssocKind::Type => rcvr_ty,
@@ -2574,7 +2619,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                             self.tcx.impl_polarity(*imp_did) == ty::ImplPolarity::Negative
                         })
                         .any(|imp_did| {
-                            let imp = self.tcx.impl_trait_ref(imp_did).unwrap();
+                            let imp = self.tcx.impl_trait_ref(imp_did).unwrap().subst_identity();
                             let imp_simp =
                                 simplify_type(self.tcx, imp.self_ty(), TreatParams::AsPlaceholder);
                             imp_simp.map_or(false, |s| s == simp_rcvr_ty)
@@ -2655,8 +2700,10 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         found: Ty<'tcx>,
         expected: Ty<'tcx>,
     ) -> bool {
-        let Some((_def_id_or_name, output, _inputs)) = self.extract_callable_info(expr, found)
-        else { return false; };
+        let Some((_def_id_or_name, output, _inputs)) =
+            self.extract_callable_info(found) else {
+                return false;
+        };
 
         if !self.can_coerce(output, expected) {
             return false;

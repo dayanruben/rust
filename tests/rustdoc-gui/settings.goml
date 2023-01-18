@@ -105,6 +105,33 @@ assert-css: (
         "box-shadow": "rgb(33, 150, 243) 0px 0px 1px 1px",
     },
 )
+// Now we check the setting-name for radio buttons is on a different line than the label.
+compare-elements-position-near: (
+    "#theme .setting-name",
+    "#theme .choices",
+    {"x": 1}
+)
+compare-elements-position-near-false: (
+    "#theme .setting-name",
+    "#theme .choices",
+    {"y": 1}
+)
+// Now we check that the label positions are all on the same line.
+compare-elements-position-near: (
+    "#theme .choices #theme-light",
+    "#theme .choices #theme-dark",
+    {"y": 1}
+)
+compare-elements-position-near: (
+    "#theme .choices #theme-dark",
+    "#theme .choices #theme-ayu",
+    {"y": 1}
+)
+compare-elements-position-near: (
+    "#theme .choices #theme-ayu",
+    "#theme .choices #theme-system-preference",
+    {"y": 1}
+)
 
 // First we check the "default" display for toggles.
 assert-css: (
@@ -159,7 +186,7 @@ assert-text: ("#preferred-light-theme .setting-name", "Preferred light theme")
 // We now check that clicking on the toggles' text is like clicking on the checkbox.
 // To test it, we use the "Disable keyboard shortcuts".
 local-storage: {"rustdoc-disable-shortcuts": "false"}
-click: ".setting-line:last-child .toggle .label"
+click: ".setting-line:last-child .settings-toggle .label"
 assert-local-storage: {"rustdoc-disable-shortcuts": "true"}
 
 // Make sure that "Disable keyboard shortcuts" actually took effect.
@@ -169,7 +196,7 @@ assert-false: "#help-button .popover"
 wait-for-css: ("#settings-menu .popover", {"display": "block"})
 
 // Now turn keyboard shortcuts back on, and see if they work.
-click: ".setting-line:last-child .toggle .label"
+click: ".setting-line:last-child .settings-toggle .label"
 assert-local-storage: {"rustdoc-disable-shortcuts": "false"}
 press-key: "Escape"
 press-key: "?"
