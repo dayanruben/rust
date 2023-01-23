@@ -47,18 +47,15 @@ mod basic_blocks;
 pub mod coverage;
 mod generic_graph;
 pub mod generic_graphviz;
-mod graph_cyclic_cache;
 pub mod graphviz;
 pub mod interpret;
 pub mod mono;
 pub mod patch;
-mod predecessors;
 pub mod pretty;
 mod query;
 pub mod spanview;
 mod syntax;
 pub use syntax::*;
-mod switch_sources;
 pub mod tcx;
 pub mod terminator;
 pub use terminator::*;
@@ -3049,7 +3046,7 @@ impl Location {
         if self.block == other.block {
             self.statement_index <= other.statement_index
         } else {
-            dominators.is_dominated_by(other.block, self.block)
+            dominators.dominates(self.block, other.block)
         }
     }
 }
