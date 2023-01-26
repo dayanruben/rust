@@ -133,6 +133,21 @@ pub(super) trait GoalKind<'tcx>: TypeFoldable<'tcx> + Copy + Eq {
         ecx: &mut EvalCtxt<'_, 'tcx>,
         goal: Goal<'tcx, Self>,
     ) -> QueryResult<'tcx>;
+
+    fn consider_builtin_pointee_candidate(
+        ecx: &mut EvalCtxt<'_, 'tcx>,
+        goal: Goal<'tcx, Self>,
+    ) -> QueryResult<'tcx>;
+
+    fn consider_builtin_future_candidate(
+        ecx: &mut EvalCtxt<'_, 'tcx>,
+        goal: Goal<'tcx, Self>,
+    ) -> QueryResult<'tcx>;
+
+    fn consider_builtin_generator_candidate(
+        ecx: &mut EvalCtxt<'_, 'tcx>,
+        goal: Goal<'tcx, Self>,
+    ) -> QueryResult<'tcx>;
 }
 
 impl<'tcx> EvalCtxt<'_, 'tcx> {
@@ -259,6 +274,12 @@ impl<'tcx> EvalCtxt<'_, 'tcx> {
             G::consider_builtin_fn_trait_candidates(self, goal, kind)
         } else if lang_items.tuple_trait() == Some(trait_def_id) {
             G::consider_builtin_tuple_candidate(self, goal)
+        } else if lang_items.pointee_trait() == Some(trait_def_id) {
+            G::consider_builtin_pointee_candidate(self, goal)
+        } else if lang_items.future_trait() == Some(trait_def_id) {
+            G::consider_builtin_future_candidate(self, goal)
+        } else if lang_items.gen_trait() == Some(trait_def_id) {
+            G::consider_builtin_generator_candidate(self, goal)
         } else {
             Err(NoSolution)
         };
@@ -314,9 +335,10 @@ impl<'tcx> EvalCtxt<'_, 'tcx> {
             | ty::Tuple(_)
             | ty::Param(_)
             | ty::Placeholder(..)
-            | ty::Infer(_)
+            | ty::Infer(ty::IntVar(_) | ty::FloatVar(_))
             | ty::Error(_) => return,
-            ty::Bound(..) => bug!("unexpected bound type: {goal:?}"),
+            ty::Infer(ty::TyVar(_) | ty::FreshTy(_) | ty::FreshIntTy(_) | ty::FreshFloatTy(_))
+            | ty::Bound(..) => bug!("unexpected self type for `{goal:?}`"),
             ty::Alias(_, alias_ty) => alias_ty,
         };
 
@@ -364,9 +386,10 @@ impl<'tcx> EvalCtxt<'_, 'tcx> {
             | ty::Tuple(_)
             | ty::Param(_)
             | ty::Placeholder(..)
-            | ty::Infer(_)
+            | ty::Infer(ty::IntVar(_) | ty::FloatVar(_))
             | ty::Error(_) => return,
-            ty::Bound(..) => bug!("unexpected bound type: {goal:?}"),
+            ty::Infer(ty::TyVar(_) | ty::FreshTy(_) | ty::FreshIntTy(_) | ty::FreshFloatTy(_))
+            | ty::Bound(..) => bug!("unexpected self type for `{goal:?}`"),
             ty::Dynamic(bounds, ..) => bounds,
         };
 
