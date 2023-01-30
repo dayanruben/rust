@@ -831,8 +831,6 @@ pub struct OwnerNodes<'tcx> {
     pub nodes: IndexVec<ItemLocalId, Option<ParentedNode<'tcx>>>,
     /// Content of local bodies.
     pub bodies: SortedMap<ItemLocalId, &'tcx Body<'tcx>>,
-    /// Non-owning definitions contained in this owner.
-    pub local_id_to_def_id: SortedMap<ItemLocalId, LocalDefId>,
 }
 
 impl<'tcx> OwnerNodes<'tcx> {
@@ -862,7 +860,6 @@ impl fmt::Debug for OwnerNodes<'_> {
                     .collect::<Vec<_>>(),
             )
             .field("bodies", &self.bodies)
-            .field("local_id_to_def_id", &self.local_id_to_def_id)
             .field("hash_without_bodies", &self.hash_without_bodies)
             .field("hash_including_bodies", &self.hash_including_bodies)
             .finish()
@@ -2106,8 +2103,8 @@ pub enum LocalSource {
 }
 
 /// Hints at the original code for a `match _ { .. }`.
-#[derive(Copy, Clone, PartialEq, Eq, Encodable, Hash, Debug)]
-#[derive(HashStable_Generic)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
+#[derive(HashStable_Generic, Encodable, Decodable)]
 pub enum MatchSource {
     /// A `match _ { .. }`.
     Normal,
