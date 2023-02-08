@@ -326,14 +326,16 @@ fn run_compiler(
                 }
             }
 
-            let mut gctxt = queries.global_ctxt()?;
+            // Make sure name resolution and macro expansion is run.
+            queries.global_ctxt()?;
+
             if callbacks.after_expansion(compiler, queries) == Compilation::Stop {
                 return early_exit();
             }
 
             // Make sure the `output_filenames` query is run for its side
             // effects of writing the dep-info and reporting errors.
-            gctxt.enter(|tcx| tcx.output_filenames(()));
+            queries.global_ctxt()?.enter(|tcx| tcx.output_filenames(()));
 
             if sess.opts.output_types.contains_key(&OutputType::DepInfo)
                 && sess.opts.output_types.len() == 1
@@ -345,7 +347,7 @@ fn run_compiler(
                 return early_exit();
             }
 
-            gctxt.enter(|tcx| {
+            queries.global_ctxt()?.enter(|tcx| {
                 let result = tcx.analysis(());
                 if sess.opts.unstable_opts.save_analysis {
                     let crate_name = tcx.crate_name(LOCAL_CRATE);
@@ -361,8 +363,6 @@ fn run_compiler(
                 }
                 result
             })?;
-
-            drop(gctxt);
 
             if callbacks.after_analysis(compiler, queries) == Compilation::Stop {
                 return early_exit();
@@ -1200,11 +1200,9 @@ pub fn report_ice(info: &panic::PanicInfo<'_>, bug_report_url: &str) {
     if !info.payload().is::<rustc_errors::ExplicitBug>()
         && !info.payload().is::<rustc_errors::DelayedBugPanic>()
     {
-        let mut d = rustc_errors::Diagnostic::new(rustc_errors::Level::Bug, "unexpected panic");
-        handler.emit_diagnostic(&mut d);
+        handler.emit_err(session_diagnostics::Ice);
     }
 
-    handler.emit_note(session_diagnostics::Ice);
     handler.emit_note(session_diagnostics::IceBugReport { bug_report_url });
     handler.emit_note(session_diagnostics::IceVersion {
         version: util::version_str!().unwrap_or("unknown_version"),
