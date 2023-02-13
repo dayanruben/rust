@@ -83,9 +83,6 @@ use crate::scrape_examples::{CallData, CallLocation};
 use crate::try_none;
 use crate::DOC_RUST_LANG_ORG_CHANNEL;
 
-/// A pair of name and its optional document.
-pub(crate) type NameDoc = (String, Option<String>);
-
 pub(crate) fn ensure_trailing_slash(v: &str) -> impl fmt::Display + '_ {
     crate::html::format::display_fn(move |f| {
         if !v.ends_with('/') && !v.is_empty() { write!(f, "{}/", v) } else { f.write_str(v) }
@@ -1313,7 +1310,7 @@ pub(crate) fn notable_traits_button(ty: &clean::Type, cx: &mut Context<'_>) -> O
     if has_notable_trait {
         cx.types_with_notable_traits.insert(ty.clone());
         Some(format!(
-            " <a href=\"#\" class=\"notable-traits\" data-ty=\"{ty}\">ⓘ</a>",
+            " <a href=\"#\" class=\"tooltip\" data-notable-ty=\"{ty}\">ⓘ</a>",
             ty = Escape(&format!("{:#}", ty.print(cx))),
         ))
     } else {
