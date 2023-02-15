@@ -346,7 +346,7 @@ pub fn is_non_aggregate_primitive_type(ty: Ty<'_>) -> bool {
 pub fn is_recursively_primitive_type(ty: Ty<'_>) -> bool {
     match *ty.kind() {
         ty::Bool | ty::Char | ty::Int(_) | ty::Uint(_) | ty::Float(_) | ty::Str => true,
-        ty::Ref(_, inner, _) if *inner.kind() == ty::Str => true,
+        ty::Ref(_, inner, _) if inner.is_str() => true,
         ty::Array(inner_type, _) | ty::Slice(inner_type) => is_recursively_primitive_type(inner_type),
         ty::Tuple(inner_types) => inner_types.iter().all(is_recursively_primitive_type),
         _ => false,
@@ -949,7 +949,7 @@ pub fn approx_ty_size<'tcx>(cx: &LateContext<'tcx>, ty: Ty<'tcx>) -> u64 {
         (Ok(size), _) => size,
         (Err(_), ty::Tuple(list)) => list.as_substs().types().map(|t| approx_ty_size(cx, t)).sum(),
         (Err(_), ty::Array(t, n)) => {
-            n.try_eval_usize(cx.tcx, cx.param_env).unwrap_or_default() * approx_ty_size(cx, *t)
+            n.try_eval_target_usize(cx.tcx, cx.param_env).unwrap_or_default() * approx_ty_size(cx, *t)
         },
         (Err(_), ty::Adt(def, subst)) if def.is_struct() => def
             .variants()
