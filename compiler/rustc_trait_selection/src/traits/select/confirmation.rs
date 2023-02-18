@@ -540,13 +540,13 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
                                 let kind = ty::BoundRegionKind::BrNamed(param.def_id, param.name);
                                 let bound_var = ty::BoundVariableKind::Region(kind);
                                 bound_vars.push(bound_var);
-                                tcx.mk_region(ty::ReLateBound(
+                                tcx.mk_re_late_bound(
                                     ty::INNERMOST,
                                     ty::BoundRegion {
                                         var: ty::BoundVar::from_usize(bound_vars.len() - 1),
                                         kind,
                                     },
-                                ))
+                                )
                                 .into()
                             }
                             GenericParamDefKind::Const { .. } => {
@@ -557,7 +557,9 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
                                         ty::INNERMOST,
                                         ty::BoundVar::from_usize(bound_vars.len() - 1),
                                     ),
-                                    tcx.type_of(param.def_id),
+                                    tcx.type_of(param.def_id)
+                                        .no_bound_vars()
+                                        .expect("const parameter types cannot be generic"),
                                 )
                                 .into()
                             }
@@ -1073,7 +1075,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
                     .fields
                     .last()
                     .expect("expected unsized ADT to have a tail field");
-                let tail_field_ty = tcx.bound_type_of(tail_field.did);
+                let tail_field_ty = tcx.type_of(tail_field.did);
 
                 // Extract `TailField<T>` and `TailField<U>` from `Struct<T>` and `Struct<U>`,
                 // normalizing in the process, since `type_of` returns something directly from
@@ -1189,7 +1191,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
             let cause = obligation.derived_cause(|derived| {
                 ImplDerivedObligation(Box::new(ImplDerivedObligationCause {
                     derived,
-                    impl_def_id,
+                    impl_or_alias_def_id: impl_def_id,
                     impl_def_predicate_index: None,
                     span: obligation.cause.span,
                 }))
