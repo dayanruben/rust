@@ -9,12 +9,11 @@ use rustc_data_structures::fx::FxHashSet;
 use rustc_errors::Applicability;
 use rustc_hir as hir;
 use rustc_hir::def::DefKind;
+use rustc_hir_analysis::astconv::InferCtxtExt as _;
 use rustc_hir_analysis::autoderef::{self, Autoderef};
 use rustc_infer::infer::canonical::OriginalQueryValues;
 use rustc_infer::infer::canonical::{Canonical, QueryResponse};
-use rustc_infer::infer::type_variable::{TypeVariableOrigin, TypeVariableOriginKind};
 use rustc_infer::infer::{self, InferOk, TyCtxtInferExt};
-use rustc_middle::infer::unify_key::{ConstVariableOrigin, ConstVariableOriginKind};
 use rustc_middle::middle::stability;
 use rustc_middle::ty::fast_reject::{simplify_type, TreatParams};
 use rustc_middle::ty::AssocItem;
@@ -25,8 +24,8 @@ use rustc_middle::ty::{InternalSubsts, SubstsRef};
 use rustc_session::lint;
 use rustc_span::def_id::DefId;
 use rustc_span::def_id::LocalDefId;
-use rustc_span::lev_distance::{
-    find_best_match_for_name_with_substrings, lev_distance_with_substrings,
+use rustc_span::edit_distance::{
+    edit_distance_with_substrings, find_best_match_for_name_with_substrings,
 };
 use rustc_span::symbol::sym;
 use rustc_span::{symbol::Ident, Span, Symbol, DUMMY_SP};
@@ -70,7 +69,7 @@ struct ProbeContext<'a, 'tcx> {
     impl_dups: FxHashSet<DefId>,
 
     /// When probing for names, include names that are close to the
-    /// requested name (by Levenshtein distance)
+    /// requested name (by edit distance)
     allow_similar_names: bool,
 
     /// Some(candidate) if there is a private candidate
@@ -1794,7 +1793,7 @@ impl<'a, 'tcx> ProbeContext<'a, 'tcx> {
 
     /// Similarly to `probe_for_return_type`, this method attempts to find the best matching
     /// candidate method where the method name may have been misspelled. Similarly to other
-    /// Levenshtein based suggestions, we provide at most one such suggestion.
+    /// edit distance based suggestions, we provide at most one such suggestion.
     fn probe_for_similar_candidate(&mut self) -> Result<Option<ty::AssocItem>, MethodError<'tcx>> {
         debug!("probing for method names similar to {:?}", self.method_name);
 
@@ -1941,33 +1940,6 @@ impl<'a, 'tcx> ProbeContext<'a, 'tcx> {
         (self.tcx.type_of(impl_def_id), self.fresh_item_substs(impl_def_id))
     }
 
-    fn fresh_item_substs(&self, def_id: DefId) -> SubstsRef<'tcx> {
-        InternalSubsts::for_item(self.tcx, def_id, |param, _| match param.kind {
-            GenericParamDefKind::Lifetime => self.tcx.lifetimes.re_erased.into(),
-            GenericParamDefKind::Type { .. } => self
-                .next_ty_var(TypeVariableOrigin {
-                    kind: TypeVariableOriginKind::SubstitutionPlaceholder,
-                    span: self.tcx.def_span(def_id),
-                })
-                .into(),
-            GenericParamDefKind::Const { .. } => {
-                let span = self.tcx.def_span(def_id);
-                let origin = ConstVariableOrigin {
-                    kind: ConstVariableOriginKind::SubstitutionPlaceholder,
-                    span,
-                };
-                self.next_const_var(
-                    self.tcx
-                        .type_of(param.def_id)
-                        .no_bound_vars()
-                        .expect("const parameter types cannot be generic"),
-                    origin,
-                )
-                .into()
-            }
-        })
-    }
-
     /// Replaces late-bound-regions bound by `value` with `'static` using
     /// `ty::erase_late_bound_regions`.
     ///
@@ -2052,8 +2024,11 @@ impl<'a, 'tcx> ProbeContext<'a, 'tcx> {
                         if self.matches_by_doc_alias(x.def_id) {
                             return true;
                         }
-                        match lev_distance_with_substrings(name.as_str(), x.name.as_str(), max_dist)
-                        {
+                        match edit_distance_with_substrings(
+                            name.as_str(),
+                            x.name.as_str(),
+                            max_dist,
+                        ) {
                             Some(d) => d > 0,
                             None => false,
                         }
