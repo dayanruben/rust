@@ -21,7 +21,7 @@ use rustc_middle::ty::adjustment::{
     Adjust, Adjustment, AllowTwoPhase, AutoBorrow, AutoBorrowMutability,
 };
 use rustc_middle::ty::SubstsRef;
-use rustc_middle::ty::{self, Ty, TyCtxt, TypeVisitable};
+use rustc_middle::ty::{self, Ty, TyCtxt, TypeVisitableExt};
 use rustc_span::def_id::LocalDefId;
 use rustc_span::symbol::{sym, Ident};
 use rustc_span::Span;
@@ -232,7 +232,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             let Some(trait_def_id) = opt_trait_def_id else { continue };
 
             let opt_input_type = opt_arg_exprs.map(|arg_exprs| {
-                self.tcx.mk_tup(arg_exprs.iter().map(|e| {
+                self.tcx.mk_tup_from_iter(arg_exprs.iter().map(|e| {
                     self.next_ty_var(TypeVariableOrigin {
                         kind: TypeVariableOriginKind::TypeInference,
                         span: e.span,
@@ -438,7 +438,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
 
                 let err = self.report_invalid_callee(call_expr, callee_expr, callee_ty, arg_exprs);
 
-                return self.tcx.ty_error_with_guaranteed(err);
+                return self.tcx.ty_error(err);
             }
         };
 
@@ -671,7 +671,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 && !self.type_is_sized_modulo_regions(self.param_env, output_ty, callee_expr.span)
             {
                 let descr = match maybe_def {
-                    DefIdOrName::DefId(def_id) => self.tcx.def_kind(def_id).descr(def_id),
+                    DefIdOrName::DefId(def_id) => self.tcx.def_descr(def_id),
                     DefIdOrName::Name(name) => name,
                 };
                 err.span_label(

@@ -50,7 +50,7 @@ fn mk_session(matches: getopts::Matches) -> (Session, CfgSpecs) {
         output_file: None,
         temps_dir,
     };
-    let sess = build_session(sessopts, io, None, registry, Default::default(), None, None);
+    let sess = build_session(sessopts, io, None, registry, vec![], Default::default(), None, None);
     (sess, cfg)
 }
 
@@ -756,6 +756,7 @@ fn test_unstable_options_tracking_hash() {
     tracked!(instrument_coverage, Some(InstrumentCoverage::All));
     tracked!(instrument_mcount, true);
     tracked!(instrument_xray, Some(InstrumentXRay::default()));
+    tracked!(link_directives, false);
     tracked!(link_only, true);
     tracked!(llvm_plugins, vec![String::from("plugin_name")]);
     tracked!(location_detail, LocationDetail { file: true, line: false, column: false });

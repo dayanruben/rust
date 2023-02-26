@@ -72,7 +72,7 @@ use rustc_middle::ty::print::with_forced_trimmed_paths;
 use rustc_middle::ty::relate::{self, RelateResult, TypeRelation};
 use rustc_middle::ty::{
     self, error::TypeError, List, Region, Ty, TyCtxt, TypeFoldable, TypeSuperVisitable,
-    TypeVisitable,
+    TypeVisitable, TypeVisitableExt,
 };
 use rustc_span::{sym, symbol::kw, BytePos, DesugaringKind, Pos, Span};
 use rustc_target::spec::abi;
@@ -925,7 +925,7 @@ impl<'tcx> TypeErrCtxt<'_, 'tcx> {
     ) -> Option<()> {
         // FIXME/HACK: Go back to `SubstsRef` to use its inherent methods,
         // ideally that shouldn't be necessary.
-        let sub = self.tcx.intern_substs(sub);
+        let sub = self.tcx.mk_substs(sub);
         for (i, ta) in sub.types().enumerate() {
             if ta == other_ty {
                 self.highlight_outer(&mut t1_out, &mut t2_out, path, sub, i, other_ty);
@@ -1450,8 +1450,8 @@ impl<'tcx> TypeErrCtxt<'_, 'tcx> {
         impl<'tcx> OpaqueTypesVisitor<'tcx> {
             fn visit_expected_found(
                 tcx: TyCtxt<'tcx>,
-                expected: impl TypeVisitable<'tcx>,
-                found: impl TypeVisitable<'tcx>,
+                expected: impl TypeVisitable<TyCtxt<'tcx>>,
+                found: impl TypeVisitable<TyCtxt<'tcx>>,
                 ignore_span: Span,
             ) -> Self {
                 let mut types_visitor = OpaqueTypesVisitor {
@@ -1501,7 +1501,7 @@ impl<'tcx> TypeErrCtxt<'_, 'tcx> {
             }
         }
 
-        impl<'tcx> ty::visit::ir::TypeVisitor<TyCtxt<'tcx>> for OpaqueTypesVisitor<'tcx> {
+        impl<'tcx> ty::visit::TypeVisitor<TyCtxt<'tcx>> for OpaqueTypesVisitor<'tcx> {
             fn visit_ty(&mut self, t: Ty<'tcx>) -> ControlFlow<Self::BreakTy> {
                 if let Some((kind, def_id)) = TyCategory::from_ty(self.tcx, t) {
                     let span = self.tcx.def_span(def_id);
@@ -2206,7 +2206,7 @@ impl<'tcx> TypeErrCtxt<'_, 'tcx> {
     }
 
     /// Returns a string of the form "expected `{}`, found `{}`".
-    fn expected_found_str<T: fmt::Display + TypeFoldable<'tcx>>(
+    fn expected_found_str<T: fmt::Display + TypeFoldable<TyCtxt<'tcx>>>(
         &self,
         exp_found: ty::error::ExpectedFound<T>,
     ) -> Option<(DiagnosticStyledString, DiagnosticStyledString, Option<PathBuf>, Option<PathBuf>)>

@@ -16,8 +16,8 @@ use rustc_middle::mir::ConstraintCategory;
 use rustc_middle::ty::query::Providers;
 use rustc_middle::ty::trait_def::TraitSpecializationKind;
 use rustc_middle::ty::{
-    self, ir::TypeVisitor, AdtKind, GenericParamDefKind, Ty, TyCtxt, TypeFoldable,
-    TypeSuperVisitable,
+    self, AdtKind, GenericParamDefKind, Ty, TyCtxt, TypeFoldable, TypeSuperVisitable,
+    TypeVisitable, TypeVisitableExt, TypeVisitor,
 };
 use rustc_middle::ty::{GenericArgKind, InternalSubsts};
 use rustc_session::parse::feature_err;
@@ -56,7 +56,7 @@ impl<'tcx> WfCheckingCtxt<'_, 'tcx> {
     // `ObligationCtxt::normalize`, but provides a nice `ObligationCauseCode`.
     fn normalize<T>(&self, span: Span, loc: Option<WellFormedLoc>, value: T) -> T
     where
-        T: TypeFoldable<'tcx>,
+        T: TypeFoldable<TyCtxt<'tcx>>,
     {
         self.ocx.normalize(
             &ObligationCause::new(span, self.body_def_id, ObligationCauseCode::WellFormed(loc)),
@@ -493,8 +493,9 @@ fn augment_param_env<'tcx>(
         return param_env;
     }
 
-    let bounds =
-        tcx.mk_predicates(param_env.caller_bounds().iter().chain(new_predicates.iter().cloned()));
+    let bounds = tcx.mk_predicates_from_iter(
+        param_env.caller_bounds().iter().chain(new_predicates.iter().cloned()),
+    );
     // FIXME(compiler-errors): Perhaps there is a case where we need to normalize this
     // i.e. traits::normalize_param_env_or_error
     ty::ParamEnv::new(bounds, param_env.reveal(), param_env.constness())
@@ -510,7 +511,7 @@ fn augment_param_env<'tcx>(
 ///     fn into_iter<'a>(&'a self) -> Self::Iter<'a>;
 /// }
 /// ```
-fn gather_gat_bounds<'tcx, T: TypeFoldable<'tcx>>(
+fn gather_gat_bounds<'tcx, T: TypeFoldable<TyCtxt<'tcx>>>(
     tcx: TyCtxt<'tcx>,
     param_env: ty::ParamEnv<'tcx>,
     item_def_id: hir::OwnerId,
@@ -708,7 +709,7 @@ struct GATSubstCollector<'tcx> {
 }
 
 impl<'tcx> GATSubstCollector<'tcx> {
-    fn visit<T: TypeFoldable<'tcx>>(
+    fn visit<T: TypeFoldable<TyCtxt<'tcx>>>(
         gat: DefId,
         t: T,
     ) -> (FxHashSet<(ty::Region<'tcx>, usize)>, FxHashSet<(Ty<'tcx>, usize)>) {
@@ -1382,7 +1383,7 @@ fn check_where_clauses<'tcx>(wfcx: &WfCheckingCtxt<'_, 'tcx>, span: Span, def_id
             struct CountParams {
                 params: FxHashSet<u32>,
             }
-            impl<'tcx> ty::visit::ir::TypeVisitor<TyCtxt<'tcx>> for CountParams {
+            impl<'tcx> ty::visit::TypeVisitor<TyCtxt<'tcx>> for CountParams {
                 type BreakTy = ();
 
                 fn visit_ty(&mut self, t: Ty<'tcx>) -> ControlFlow<Self::BreakTy> {
@@ -1476,7 +1477,7 @@ fn check_fn_or_method<'tcx>(
         |idx| hir_decl.inputs.get(idx).map_or(hir_decl.output.span(), |arg: &hir::Ty<'_>| arg.span);
 
     sig.inputs_and_output =
-        tcx.mk_type_list(sig.inputs_and_output.iter().enumerate().map(|(idx, ty)| {
+        tcx.mk_type_list_from_iter(sig.inputs_and_output.iter().enumerate().map(|(idx, ty)| {
             wfcx.normalize(
                 arg_span(idx),
                 Some(WellFormedLoc::Param {
