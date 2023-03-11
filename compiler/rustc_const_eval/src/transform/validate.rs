@@ -679,6 +679,14 @@ impl<'a, 'tcx> Visitor<'tcx> for TypeChecker<'a, 'tcx> {
                     }
                 }
             }
+            StatementKind::PlaceMention(..) => {
+                if self.mir_phase >= MirPhase::Runtime(RuntimePhase::Initial) {
+                    self.fail(
+                        location,
+                        "`PlaceMention` should have been removed after drop lowering phase",
+                    );
+                }
+            }
             StatementKind::AscribeUserType(..) => {
                 if self.mir_phase >= MirPhase::Runtime(RuntimePhase::Initial) {
                     self.fail(
@@ -841,18 +849,6 @@ impl<'a, 'tcx> Visitor<'tcx> for TypeChecker<'a, 'tcx> {
                 }
             }
             TerminatorKind::Drop { target, unwind, .. } => {
-                self.check_edge(location, *target, EdgeKind::Normal);
-                if let Some(unwind) = unwind {
-                    self.check_edge(location, *unwind, EdgeKind::Unwind);
-                }
-            }
-            TerminatorKind::DropAndReplace { target, unwind, .. } => {
-                if self.mir_phase >= MirPhase::Runtime(RuntimePhase::Initial) {
-                    self.fail(
-                        location,
-                        "`DropAndReplace` should have been removed during drop elaboration",
-                    );
-                }
                 self.check_edge(location, *target, EdgeKind::Normal);
                 if let Some(unwind) = unwind {
                     self.check_edge(location, *unwind, EdgeKind::Unwind);

@@ -690,6 +690,7 @@ impl<'tcx> Visitor<'tcx> for Checker<'_, 'tcx> {
             | StatementKind::StorageLive(_)
             | StatementKind::StorageDead(_)
             | StatementKind::Retag { .. }
+            | StatementKind::PlaceMention(..)
             | StatementKind::AscribeUserType(..)
             | StatementKind::Coverage(..)
             | StatementKind::Intrinsic(..)
@@ -769,7 +770,7 @@ impl<'tcx> Visitor<'tcx> for Checker<'_, 'tcx> {
 
                         let errors = ocx.select_all_or_error();
                         if !errors.is_empty() {
-                            infcx.err_ctxt().report_fulfillment_errors(&errors, None);
+                            infcx.err_ctxt().report_fulfillment_errors(&errors);
                         }
                     }
 
@@ -985,8 +986,7 @@ impl<'tcx> Visitor<'tcx> for Checker<'_, 'tcx> {
 
             // Forbid all `Drop` terminators unless the place being dropped is a local with no
             // projections that cannot be `NeedsNonConstDrop`.
-            TerminatorKind::Drop { place: dropped_place, .. }
-            | TerminatorKind::DropAndReplace { place: dropped_place, .. } => {
+            TerminatorKind::Drop { place: dropped_place, .. } => {
                 // If we are checking live drops after drop-elaboration, don't emit duplicate
                 // errors here.
                 if super::post_drop_elaboration::checking_enabled(self.ccx) {
