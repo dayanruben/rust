@@ -330,7 +330,6 @@ fn compare_method_predicate_entailment<'tcx>(
     // lifetime parameters.
     let outlives_env = OutlivesEnvironment::with_bounds(
         param_env,
-        Some(infcx),
         infcx.implied_bounds_tys(param_env, impl_m_def_id, wf_tys.clone()),
     );
     infcx.process_registered_region_obligations(
@@ -728,7 +727,6 @@ pub(super) fn collect_return_position_impl_trait_in_trait_tys<'tcx>(
     // lifetime parameters.
     let outlives_environment = OutlivesEnvironment::with_bounds(
         param_env,
-        Some(infcx),
         infcx.implied_bounds_tys(param_env, impl_m_def_id, wf_tys),
     );
     infcx
@@ -830,7 +828,7 @@ impl<'tcx> TypeFolder<TyCtxt<'tcx>> for ImplTraitInTraitCollector<'_, 'tcx> {
 
     fn fold_ty(&mut self, ty: Ty<'tcx>) -> Ty<'tcx> {
         if let ty::Alias(ty::Projection, proj) = ty.kind()
-            && self.interner().def_kind(proj.def_id) == DefKind::ImplTraitPlaceholder
+            && self.interner().is_impl_trait_in_trait(proj.def_id)
         {
             if let Some((ty, _)) = self.types.get(&proj.def_id) {
                 return *ty;
@@ -1995,13 +1993,20 @@ pub(super) fn check_type_bounds<'tcx>(
     let infcx = tcx.infer_ctxt().build();
     let ocx = ObligationCtxt::new(&infcx);
 
-    let impl_ty_span = match tcx.hir().get_by_def_id(impl_ty_def_id) {
-        hir::Node::TraitItem(hir::TraitItem {
-            kind: hir::TraitItemKind::Type(_, Some(ty)),
-            ..
-        }) => ty.span,
-        hir::Node::ImplItem(hir::ImplItem { kind: hir::ImplItemKind::Type(ty), .. }) => ty.span,
-        _ => bug!(),
+    // A synthetic impl Trait for RPITIT desugaring has no HIR, which we currently use to get the
+    // span for an impl's associated type. Instead, for these, use the def_span for the synthesized
+    // associated type.
+    let impl_ty_span = if tcx.opt_rpitit_info(impl_ty.def_id).is_some() {
+        tcx.def_span(impl_ty_def_id)
+    } else {
+        match tcx.hir().get_by_def_id(impl_ty_def_id) {
+            hir::Node::TraitItem(hir::TraitItem {
+                kind: hir::TraitItemKind::Type(_, Some(ty)),
+                ..
+            }) => ty.span,
+            hir::Node::ImplItem(hir::ImplItem { kind: hir::ImplItemKind::Type(ty), .. }) => ty.span,
+            _ => bug!(),
+        }
     };
     let assumed_wf_types = ocx.assumed_wf_types(param_env, impl_ty_span, impl_ty_def_id);
 
@@ -2051,8 +2056,7 @@ pub(super) fn check_type_bounds<'tcx>(
     // Finally, resolve all regions. This catches wily misuses of
     // lifetime parameters.
     let implied_bounds = infcx.implied_bounds_tys(param_env, impl_ty_def_id, assumed_wf_types);
-    let outlives_environment =
-        OutlivesEnvironment::with_bounds(param_env, Some(&infcx), implied_bounds);
+    let outlives_environment = OutlivesEnvironment::with_bounds(param_env, implied_bounds);
 
     infcx.err_ctxt().check_region_obligations_and_report_errors(
         impl_ty.def_id.expect_local(),
