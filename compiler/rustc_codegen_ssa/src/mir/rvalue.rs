@@ -13,7 +13,7 @@ use rustc_middle::ty::cast::{CastTy, IntTy};
 use rustc_middle::ty::layout::{HasTyCtxt, LayoutOf};
 use rustc_middle::ty::{self, adjustment::PointerCast, Instance, Ty, TyCtxt};
 use rustc_span::source_map::{Span, DUMMY_SP};
-use rustc_target::abi::{self, VariantIdx};
+use rustc_target::abi::{self, FIRST_VARIANT};
 
 impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
     #[instrument(level = "trace", skip(self, bx))]
@@ -118,7 +118,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                         let variant_dest = dest.project_downcast(bx, variant_index);
                         (variant_index, variant_dest, active_field_index)
                     }
-                    _ => (VariantIdx::from_u32(0), dest, None),
+                    _ => (FIRST_VARIANT, dest, None),
                 };
                 if active_field_index.is_some() {
                     assert_eq!(operands.len(), 1);
@@ -545,7 +545,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
         // ZST are passed as operands and require special handling
         // because codegen_place() panics if Local is operand.
         if let Some(index) = place.as_local() {
-            if let LocalRef::Operand(Some(op)) = self.locals[index] {
+            if let LocalRef::Operand(op) = self.locals[index] {
                 if let ty::Array(_, n) = op.layout.ty.kind() {
                     let n = n.eval_target_usize(bx.cx().tcx(), ty::ParamEnv::reveal_all());
                     return bx.cx().const_usize(n);

@@ -174,7 +174,7 @@ impl<'tcx> assembly::GoalKind<'tcx> for ProjectionPredicate<'tcx> {
                 goal.predicate.def_id(),
                 impl_def_id
             )? else {
-                return ecx.evaluate_added_goals_and_make_canonical_response(Certainty::Yes);
+                return ecx.evaluate_added_goals_and_make_canonical_response(Certainty::AMBIGUOUS);
             };
 
             if !assoc_def.item.defaultness(tcx).has_value() {
@@ -259,6 +259,13 @@ impl<'tcx> assembly::GoalKind<'tcx> for ProjectionPredicate<'tcx> {
         goal: Goal<'tcx, Self>,
     ) -> QueryResult<'tcx> {
         bug!("`PointerLike` does not have an associated type: {:?}", goal);
+    }
+
+    fn consider_builtin_fn_ptr_trait_candidate(
+        _ecx: &mut EvalCtxt<'_, 'tcx>,
+        goal: Goal<'tcx, Self>,
+    ) -> QueryResult<'tcx> {
+        bug!("`FnPtr` does not have an associated type: {:?}", goal);
     }
 
     fn consider_builtin_fn_trait_candidates(
