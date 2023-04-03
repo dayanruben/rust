@@ -360,7 +360,7 @@ impl<'a, 'tcx> Visitor<'tcx> for TypeChecker<'a, 'tcx> {
                     }
                     ty::Adt(adt_def, substs) => {
                         let var = parent_ty.variant_index.unwrap_or(FIRST_VARIANT);
-                        let Some(field) = adt_def.variant(var).fields.get(f.as_usize()) else {
+                        let Some(field) = adt_def.variant(var).fields.get(f) else {
                             fail_out_of_bounds(self, location);
                             return;
                         };
@@ -677,8 +677,7 @@ impl<'a, 'tcx> Visitor<'tcx> for TypeChecker<'a, 'tcx> {
                     );
                 }
                 if let Rvalue::CopyForDeref(place) = rvalue {
-                    if !place.ty(&self.body.local_decls, self.tcx).ty.builtin_deref(true).is_some()
-                    {
+                    if place.ty(&self.body.local_decls, self.tcx).ty.builtin_deref(true).is_none() {
                         self.fail(
                             location,
                             "`CopyForDeref` should only be used for dereferenceable types",

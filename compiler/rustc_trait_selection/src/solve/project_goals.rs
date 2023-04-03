@@ -34,16 +34,7 @@ impl<'tcx> EvalCtxt<'_, 'tcx> {
             let candidates = self.assemble_and_evaluate_candidates(goal);
             self.merge_candidates(candidates)
         } else {
-            let predicate = goal.predicate;
-            let unconstrained_rhs = self.next_term_infer_of_kind(predicate.term);
-            let unconstrained_predicate = ProjectionPredicate {
-                projection_ty: goal.predicate.projection_ty,
-                term: unconstrained_rhs,
-            };
-
-            self.set_normalizes_to_hack_goal(goal.with(self.tcx(), unconstrained_predicate));
-            self.try_evaluate_added_goals()?;
-            self.eq(goal.param_env, unconstrained_rhs, predicate.term)?;
+            self.set_normalizes_to_hack_goal(goal);
             self.evaluate_added_goals_and_make_canonical_response(Certainty::Yes)
         }
     }
@@ -349,7 +340,7 @@ impl<'tcx> assembly::GoalKind<'tcx> for ProjectionPredicate<'tcx> {
                 }
 
                 ty::Adt(def, substs) if def.is_struct() => {
-                    match def.non_enum_variant().fields.last() {
+                    match def.non_enum_variant().fields.raw.last() {
                         None => tcx.types.unit,
                         Some(field_def) => {
                             let self_ty = field_def.ty(tcx, substs);

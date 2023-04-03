@@ -6,6 +6,7 @@ use rustc_errors::{Applicability, Diagnostic};
 use rustc_hir as hir;
 use rustc_hir::def::{CtorKind, Namespace};
 use rustc_hir::GeneratorKind;
+use rustc_index::vec::IndexSlice;
 use rustc_infer::infer::{LateBoundRegionConversionTime, TyCtxtInferExt};
 use rustc_middle::mir::tcx::PlaceTy;
 use rustc_middle::mir::{
@@ -350,7 +351,7 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
                     if !including_tuple_field.0 && variant.ctor_kind() == Some(CtorKind::Fn) {
                         return None;
                     }
-                    Some(variant.fields[field.index()].name.to_string())
+                    Some(variant.fields[field].name.to_string())
                 }
                 ty::Tuple(_) => Some(field.index().to_string()),
                 ty::Ref(_, ty, _) | ty::RawPtr(ty::TypeAndMut { ty, .. }) => {
@@ -825,7 +826,7 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
                     debug!("move_spans: def_id={:?} place={:?}", closure_def_id, place);
                     let places = &[Operand::Move(place)];
                     if let Some((args_span, generator_kind, capture_kind_span, path_span)) =
-                        self.closure_span(closure_def_id, moved_place, places)
+                        self.closure_span(closure_def_id, moved_place, IndexSlice::from_raw(places))
                     {
                         return ClosureUse {
                             generator_kind,
@@ -975,7 +976,7 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
         &self,
         def_id: LocalDefId,
         target_place: PlaceRef<'tcx>,
-        places: &[Operand<'tcx>],
+        places: &IndexSlice<FieldIdx, Operand<'tcx>>,
     ) -> Option<(Span, Option<GeneratorKind>, Span, Span)> {
         debug!(
             "closure_span: def_id={:?} target_place={:?} places={:?}",

@@ -19,7 +19,8 @@ use rustc_hir::def_id::{DefId, LocalDefId};
 use rustc_index::bit_set::GrowableBitSet;
 use rustc_index::vec::{Idx, IndexVec};
 use rustc_macros::HashStable;
-use rustc_span::{sym, DUMMY_SP};
+use rustc_session::Limit;
+use rustc_span::sym;
 use rustc_target::abi::{Integer, IntegerType, Size, TargetDataLayout};
 use rustc_target::spec::abi::Abi;
 use smallvec::SmallVec;
@@ -225,17 +226,20 @@ impl<'tcx> TyCtxt<'tcx> {
         let recursion_limit = self.recursion_limit();
         for iteration in 0.. {
             if !recursion_limit.value_within_limit(iteration) {
-                return self.ty_error_with_message(
-                    DUMMY_SP,
-                    &format!("reached the recursion limit finding the struct tail for {}", ty),
-                );
+                let suggested_limit = match recursion_limit {
+                    Limit(0) => Limit(2),
+                    limit => limit * 2,
+                };
+                let reported =
+                    self.sess.emit_err(crate::error::RecursionLimitReached { ty, suggested_limit });
+                return self.ty_error(reported);
             }
             match *ty.kind() {
                 ty::Adt(def, substs) => {
                     if !def.is_struct() {
                         break;
                     }
-                    match def.non_enum_variant().fields.last() {
+                    match def.non_enum_variant().fields.raw.last() {
                         Some(field) => {
                             f();
                             ty = field.ty(self, substs);
@@ -309,7 +313,7 @@ impl<'tcx> TyCtxt<'tcx> {
                 (&ty::Adt(a_def, a_substs), &ty::Adt(b_def, b_substs))
                     if a_def == b_def && a_def.is_struct() =>
                 {
-                    if let Some(f) = a_def.non_enum_variant().fields.last() {
+                    if let Some(f) = a_def.non_enum_variant().fields.raw.last() {
                         a = f.ty(self, a_substs);
                         b = f.ty(self, b_substs);
                     } else {
