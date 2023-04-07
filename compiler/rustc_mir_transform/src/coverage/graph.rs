@@ -5,7 +5,7 @@ use rustc_data_structures::fx::FxHashMap;
 use rustc_data_structures::graph::dominators::{self, Dominators};
 use rustc_data_structures::graph::{self, GraphSuccessors, WithNumNodes, WithStartNode};
 use rustc_index::bit_set::BitSet;
-use rustc_index::vec::IndexVec;
+use rustc_index::vec::{IndexSlice, IndexVec};
 use rustc_middle::mir::coverage::*;
 use rustc_middle::mir::{self, BasicBlock, BasicBlockData, Terminator, TerminatorKind};
 
@@ -37,8 +37,7 @@ impl CoverageGraph {
         // `SwitchInt` to have multiple targets to the same destination `BasicBlock`, so
         // de-duplication is required. This is done without reordering the successors.
 
-        let bcbs_len = bcbs.len();
-        let mut seen = IndexVec::from_elem_n(false, bcbs_len);
+        let mut seen = IndexVec::from_elem(false, &bcbs);
         let successors = IndexVec::from_fn_n(
             |bcb| {
                 for b in seen.iter_mut() {
@@ -60,7 +59,7 @@ impl CoverageGraph {
             bcbs.len(),
         );
 
-        let mut predecessors = IndexVec::from_elem_n(Vec::new(), bcbs.len());
+        let mut predecessors = IndexVec::from_elem(Vec::new(), &bcbs);
         for (bcb, bcb_successors) in successors.iter_enumerated() {
             for &successor in bcb_successors {
                 predecessors[successor].push(bcb);
@@ -176,10 +175,10 @@ impl CoverageGraph {
 
     fn add_basic_coverage_block(
         bcbs: &mut IndexVec<BasicCoverageBlock, BasicCoverageBlockData>,
-        bb_to_bcb: &mut IndexVec<BasicBlock, Option<BasicCoverageBlock>>,
+        bb_to_bcb: &mut IndexSlice<BasicBlock, Option<BasicCoverageBlock>>,
         basic_blocks: Vec<BasicBlock>,
     ) {
-        let bcb = BasicCoverageBlock::from_usize(bcbs.len());
+        let bcb = bcbs.next_index();
         for &bb in basic_blocks.iter() {
             bb_to_bcb[bb] = Some(bcb);
         }

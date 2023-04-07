@@ -1,6 +1,7 @@
 #[cfg(feature = "rustc_serialize")]
 use rustc_serialize::{Decodable, Decoder, Encodable, Encoder};
 
+use std::borrow::{Borrow, BorrowMut};
 use std::fmt;
 use std::fmt::Debug;
 use std::hash::Hash;
@@ -23,6 +24,7 @@ pub trait Idx: Copy + 'static + Eq + PartialEq + Debug + Hash {
     }
 
     #[inline]
+    #[must_use = "Use `increment_by` if you wanted to update the index in-place"]
     fn plus(self, amount: usize) -> Self {
         Self::new(self.index() + amount)
     }
@@ -51,6 +53,12 @@ impl Idx for u32 {
     }
 }
 
+/// An owned contiguous collection of `T`s, indexed by `I` rather than by `usize`.
+///
+/// While it's possible to use `u32` or `usize` directly for `I`,
+/// you almost certainly want to use a [`newtype_index!`]-generated type instead.
+///
+/// [`newtype_index!`]: ../macro.newtype_index.html
 #[derive(Clone, PartialEq, Eq, Hash)]
 #[repr(transparent)]
 pub struct IndexVec<I: Idx, T> {
@@ -58,6 +66,13 @@ pub struct IndexVec<I: Idx, T> {
     _marker: PhantomData<fn(&I)>,
 }
 
+/// A view into contiguous `T`s, indexed by `I` rather than by `usize`.
+///
+/// One common pattern you'll see is code that uses [`IndexVec::from_elem`]
+/// to create the storage needed for a particular "universe" (aka the set of all
+/// the possible keys that need an associated value) then passes that working
+/// area as `&mut IndexSlice<I, T>` to clarify that nothing will be added nor
+/// removed during processing (and, as a bonus, to chase fewer pointers).
 #[derive(PartialEq, Eq, Hash)]
 #[repr(transparent)]
 pub struct IndexSlice<I: Idx, T> {
@@ -115,8 +130,19 @@ impl<I: Idx, T> IndexVec<I, T> {
         IndexVec { raw: Vec::with_capacity(capacity), _marker: PhantomData }
     }
 
+    /// Creates a new vector with a copy of `elem` for each index in `universe`.
+    ///
+    /// Thus `IndexVec::from_elem(elem, &universe)` is equivalent to
+    /// `IndexVec::<I, _>::from_elem_n(elem, universe.len())`. That can help
+    /// type inference as it ensures that the resulting vector uses the same
+    /// index type as `universe`, rather than something potentially surprising.
+    ///
+    /// For example, if you want to store data for each local in a MIR body,
+    /// using `let mut uses = IndexVec::from_elem(vec![], &body.local_decls);`
+    /// ensures that `uses` is an `IndexVec<Local, _>`, and thus can give
+    /// better error messages later if one accidentally mismatches indices.
     #[inline]
-    pub fn from_elem<S>(elem: T, universe: &IndexVec<I, S>) -> Self
+    pub fn from_elem<S>(elem: T, universe: &IndexSlice<I, S>) -> Self
     where
         T: Clone,
     {
@@ -244,7 +270,36 @@ impl<I: Idx, T> DerefMut for IndexVec<I, T> {
     }
 }
 
+impl<I: Idx, T> Borrow<IndexSlice<I, T>> for IndexVec<I, T> {
+    fn borrow(&self) -> &IndexSlice<I, T> {
+        self
+    }
+}
+
+impl<I: Idx, T> BorrowMut<IndexSlice<I, T>> for IndexVec<I, T> {
+    fn borrow_mut(&mut self) -> &mut IndexSlice<I, T> {
+        self
+    }
+}
+
+impl<I: Idx, T: Clone> ToOwned for IndexSlice<I, T> {
+    type Owned = IndexVec<I, T>;
+
+    fn to_owned(&self) -> IndexVec<I, T> {
+        IndexVec::from_raw(self.raw.to_owned())
+    }
+
+    fn clone_into(&self, target: &mut IndexVec<I, T>) {
+        self.raw.clone_into(&mut target.raw)
+    }
+}
+
 impl<I: Idx, T> IndexSlice<I, T> {
+    #[inline]
+    pub fn empty() -> &'static Self {
+        Default::default()
+    }
+
     #[inline]
     pub fn from_raw(raw: &[T]) -> &Self {
         let ptr: *const [T] = raw;
@@ -360,6 +415,36 @@ impl<I: Idx, T> IndexSlice<I, T> {
     }
 }
 
+impl<I: Idx, J: Idx> IndexSlice<I, J> {
+    /// Invert a bijective mapping, i.e. `invert(map)[y] = x` if `map[x] = y`,
+    /// assuming the values in `self` are a permutation of `0..self.len()`.
+    ///
+    /// This is used to go between `memory_index` (source field order to memory order)
+    /// and `inverse_memory_index` (memory order to source field order).
+    /// See also `FieldsShape::Arbitrary::memory_index` for more details.
+    // FIXME(eddyb) build a better abstraction for permutations, if possible.
+    pub fn invert_bijective_mapping(&self) -> IndexVec<J, I> {
+        debug_assert_eq!(
+            self.iter().map(|x| x.index() as u128).sum::<u128>(),
+            (0..self.len() as u128).sum::<u128>(),
+            "The values aren't 0..N in input {self:?}",
+        );
+
+        let mut inverse = IndexVec::from_elem_n(Idx::new(0), self.len());
+        for (i1, &i2) in self.iter_enumerated() {
+            inverse[i2] = i1;
+        }
+
+        debug_assert_eq!(
+            inverse.iter().map(|x| x.index() as u128).sum::<u128>(),
+            (0..inverse.len() as u128).sum::<u128>(),
+            "The values aren't 0..N in result {self:?}",
+        );
+
+        inverse
+    }
+}
+
 /// `IndexVec` is often used as a map, so it provides some map-like APIs.
 impl<I: Idx, T> IndexVec<I, Option<T>> {
     #[inline]
@@ -388,7 +473,7 @@ impl<I: Idx, T: Clone> IndexVec<I, T> {
     }
 }
 
-impl<I: Idx, T: Ord> IndexVec<I, T> {
+impl<I: Idx, T: Ord> IndexSlice<I, T> {
     #[inline]
     pub fn binary_search(&self, value: &T) -> Result<I, I> {
         match self.raw.binary_search(value) {
@@ -461,6 +546,13 @@ impl<I: Idx, T> FromIterator<T> for IndexVec<I, T> {
         J: IntoIterator<Item = T>,
     {
         IndexVec { raw: FromIterator::from_iter(iter), _marker: PhantomData }
+    }
+}
+
+impl<I: Idx, T, const N: usize> From<[T; N]> for IndexVec<I, T> {
+    #[inline]
+    fn from(array: [T; N]) -> Self {
+        IndexVec::from_raw(array.into())
     }
 }
 
