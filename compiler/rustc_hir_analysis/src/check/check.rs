@@ -494,7 +494,7 @@ fn check_item_type(tcx: TyCtxt<'_>, id: hir::ItemId) {
     debug!(
         "check_item_type(it.def_id={:?}, it.name={})",
         id.owner_id,
-        tcx.def_path_str(id.owner_id.to_def_id())
+        tcx.def_path_str(id.owner_id)
     );
     let _indenter = indenter();
     match tcx.def_kind(id.owner_id) {
@@ -863,7 +863,7 @@ fn check_impl_items_against_trait<'tcx>(
         if !missing_items.is_empty() {
             let full_impl_span =
                 tcx.hir().span_with_body(tcx.hir().local_def_id_to_hir_id(impl_id));
-            missing_items_err(tcx, tcx.def_span(impl_id), &missing_items, full_impl_span);
+            missing_items_err(tcx, impl_id, &missing_items, full_impl_span);
         }
 
         if let Some(missing_items) = must_implement_one_of {

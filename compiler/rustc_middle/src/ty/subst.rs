@@ -21,7 +21,6 @@ use std::marker::PhantomData;
 use std::mem;
 use std::num::NonZeroUsize;
 use std::ops::{ControlFlow, Deref};
-use std::slice;
 
 /// An entity in the Rust type system, which can be one of
 /// several kinds (types, lifetimes, and consts).
@@ -48,23 +47,11 @@ const TYPE_TAG: usize = 0b00;
 const REGION_TAG: usize = 0b01;
 const CONST_TAG: usize = 0b10;
 
-#[derive(Debug, TyEncodable, TyDecodable, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, TyEncodable, TyDecodable, PartialEq, Eq, PartialOrd, Ord, HashStable)]
 pub enum GenericArgKind<'tcx> {
     Lifetime(ty::Region<'tcx>),
     Type(Ty<'tcx>),
     Const(ty::Const<'tcx>),
-}
-
-/// This function goes from `&'a [Ty<'tcx>]` to `&'a [GenericArg<'tcx>]`
-///
-/// This is sound as, for types, `GenericArg` is just
-/// `NonZeroUsize::new_unchecked(ty as *const _ as usize)` as
-/// long as we use `0` for the `TYPE_TAG`.
-pub fn ty_slice_as_generic_args<'a, 'tcx>(ts: &'a [Ty<'tcx>]) -> &'a [GenericArg<'tcx>] {
-    assert_eq!(TYPE_TAG, 0);
-    // SAFETY: the whole slice is valid and immutable.
-    // `Ty` and `GenericArg` is explained above.
-    unsafe { slice::from_raw_parts(ts.as_ptr().cast(), ts.len()) }
 }
 
 impl<'tcx> GenericArgKind<'tcx> {
