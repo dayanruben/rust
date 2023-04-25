@@ -93,7 +93,7 @@ use rustc_hir::def::*;
 use rustc_hir::def_id::LocalDefId;
 use rustc_hir::intravisit::{self, Visitor};
 use rustc_hir::{Expr, HirId, HirIdMap, HirIdSet};
-use rustc_index::vec::IndexVec;
+use rustc_index::IndexVec;
 use rustc_middle::ty::query::Providers;
 use rustc_middle::ty::{self, RootVariableMinCaptureList, Ty, TyCtxt};
 use rustc_session::lint;
@@ -327,7 +327,7 @@ impl<'tcx> IrMaps<'tcx> {
                     pats.extend(inner_pat.iter());
                 }
                 Struct(_, fields, _) => {
-                    let (short, not_short): (Vec<_>, _) =
+                    let (short, not_short): (Vec<hir::PatField<'_>>, _) =
                         fields.iter().partition(|f| f.is_shorthand);
                     shorthand_field_ids.extend(short.iter().map(|f| f.pat.hir_id));
                     pats.extend(not_short.iter().map(|f| f.pat));
