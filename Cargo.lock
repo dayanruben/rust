@@ -1956,9 +1956,9 @@ dependencies = [
 
 [[package]]
 name = "libffi-sys"
-version = "2.2.1"
+version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc65067b78c0fc069771e8b9a9e02df71e08858bec92c1f101377c67b9dca7c7"
+checksum = "f36115160c57e8529781b4183c2bb51fdc1f6d6d1ed345591d84be7703befb3c"
 dependencies = [
  "cc",
 ]
@@ -2370,9 +2370,9 @@ checksum = "ff011a302c396a5197692431fc1948019154afc178baf7d8e37367442a4601cf"
 
 [[package]]
 name = "openssl-sys"
-version = "0.9.84"
+version = "0.9.87"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a20eace9dc2d82904039cb76dcf50fb1a0bba071cfd1629720b5d6f1ddba0fa"
+checksum = "8e17f59264b2809d77ae94f0e1ebabc434773f370d6ca667bd223ea10e06cc7e"
 dependencies = [
  "cc",
  "libc",
@@ -3250,6 +3250,7 @@ dependencies = [
  "tempfile",
  "thorin-dwp",
  "tracing",
+ "windows 0.46.0",
 ]
 
 [[package]]
@@ -3641,6 +3642,7 @@ dependencies = [
  "rustc_plugin_impl",
  "rustc_privacy",
  "rustc_query_impl",
+ "rustc_query_system",
  "rustc_resolve",
  "rustc_session",
  "rustc_span",
@@ -3770,6 +3772,7 @@ dependencies = [
  "derive_more",
  "either",
  "gsgdt",
+ "measureme",
  "polonius-engine",
  "rustc-rayon",
  "rustc-rayon-core",
