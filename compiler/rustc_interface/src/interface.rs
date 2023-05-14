@@ -60,6 +60,11 @@ impl Compiler {
     }
 }
 
+#[allow(rustc::bad_opt_access)]
+pub fn set_thread_safe_mode(sopts: &config::UnstableOptions) {
+    rustc_data_structures::sync::set_dyn_thread_safe_mode(sopts.threads > 1);
+}
+
 /// Converts strings provided as `--cfg [cfgspec]` into a `crate_cfg`.
 pub fn parse_cfgspecs(cfgspecs: Vec<String>) -> FxHashSet<(String, Option<String>)> {
     rustc_span::create_default_session_if_not_set_then(move |_| {
@@ -347,7 +352,7 @@ pub fn try_print_query_stack(handler: &Handler, num_frames: Option<usize>) {
     // state if it was responsible for triggering the panic.
     let i = ty::tls::with_context_opt(|icx| {
         if let Some(icx) = icx {
-            print_query_stack(QueryCtxt { tcx: icx.tcx }, icx.query, handler, num_frames)
+            print_query_stack(QueryCtxt::new(icx.tcx), icx.query, handler, num_frames)
         } else {
             0
         }
