@@ -295,7 +295,7 @@ pub fn coerce_unsized_into<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
             let (base, info) = match bx.load_operand(src).val {
                 OperandValue::Pair(base, info) => unsize_ptr(bx, base, src_ty, dst_ty, Some(info)),
                 OperandValue::Immediate(base) => unsize_ptr(bx, base, src_ty, dst_ty, None),
-                OperandValue::Ref(..) => bug!(),
+                OperandValue::Ref(..) | OperandValue::ZeroSized => bug!(),
             };
             OperandValue::Pair(base, info).store(bx, dst);
         }
@@ -380,7 +380,19 @@ pub fn memcpy_ty<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
         return;
     }
 
-    bx.memcpy(dst, dst_align, src, src_align, bx.cx().const_usize(size), flags);
+    if flags == MemFlags::empty()
+        && let Some(bty) = bx.cx().scalar_copy_backend_type(layout)
+    {
+        // I look forward to only supporting opaque pointers
+        let pty = bx.type_ptr_to(bty);
+        let src = bx.pointercast(src, pty);
+        let dst = bx.pointercast(dst, pty);
+
+        let temp = bx.load(bty, src, src_align);
+        bx.store(temp, dst, dst_align);
+    } else {
+        bx.memcpy(dst, dst_align, src, src_align, bx.cx().const_usize(size), flags);
+    }
 }
 
 pub fn codegen_instance<'a, 'tcx: 'a, Bx: BuilderMethods<'a, 'tcx>>(

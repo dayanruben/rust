@@ -147,9 +147,9 @@ impl<'a, 'tcx> RustdocVisitor<'a, 'tcx> {
 
         // `#[macro_export] macro_rules!` items are reexported at the top level of the
         // crate, regardless of where they're defined. We want to document the
-        // top level rexport of the macro, not its original definition, since
-        // the rexport defines the path that a user will actually see. Accordingly,
-        // we add the rexport as an item here, and then skip over the original
+        // top level re-export of the macro, not its original definition, since
+        // the re-export defines the path that a user will actually see. Accordingly,
+        // we add the re-export as an item here, and then skip over the original
         // definition in `visit_item()` below.
         //
         // We also skip `#[macro_export] macro_rules!` that have already been inserted,
@@ -246,7 +246,7 @@ impl<'a, 'tcx> RustdocVisitor<'a, 'tcx> {
         glob: bool,
         please_inline: bool,
     ) -> bool {
-        debug!("maybe_inline_local res: {:?}", res);
+        debug!("maybe_inline_local (renamed: {renamed:?}) res: {res:?}");
 
         if renamed == Some(kw::Underscore) {
             // We never inline `_` reexports.
@@ -308,6 +308,7 @@ impl<'a, 'tcx> RustdocVisitor<'a, 'tcx> {
                     .cache
                     .effective_visibilities
                     .is_directly_public(tcx, item_def_id.to_def_id()) &&
+                !tcx.is_doc_hidden(item_def_id) &&
                 !inherits_doc_hidden(tcx, item_def_id, None)
             {
                 // The imported item is public and not `doc(hidden)` so no need to inline it.
