@@ -11,10 +11,10 @@ use rustc_infer::traits::ObligationCause;
 use rustc_middle::infer::unify_key::{ConstVariableOrigin, ConstVariableOriginKind};
 use rustc_middle::traits::solve::inspect::{self, CandidateKind};
 use rustc_middle::traits::solve::{
-    CanonicalInput, CanonicalResponse, Certainty, MaybeCause, PredefinedOpaques,
-    PredefinedOpaquesData, QueryResult,
+    CanonicalInput, CanonicalResponse, Certainty, IsNormalizesToHack, MaybeCause,
+    PredefinedOpaques, PredefinedOpaquesData, QueryResult,
 };
-use rustc_middle::traits::{DefiningAnchor, IsNormalizesToHack};
+use rustc_middle::traits::DefiningAnchor;
 use rustc_middle::ty::{
     self, OpaqueTypeKey, Ty, TyCtxt, TypeFoldable, TypeSuperVisitable, TypeVisitable,
     TypeVisitableExt, TypeVisitor,
@@ -30,6 +30,7 @@ use super::SolverMode;
 use super::{search_graph::SearchGraph, Goal};
 
 mod canonical;
+mod probe;
 
 pub struct EvalCtxt<'a, 'tcx> {
     /// The inference context that backs (mostly) inference and placeholder terms
@@ -352,19 +353,19 @@ impl<'a, 'tcx> EvalCtxt<'a, 'tcx> {
         let kind = predicate.kind();
         if let Some(kind) = kind.no_bound_vars() {
             match kind {
-                ty::PredicateKind::Clause(ty::Clause::Trait(predicate)) => {
+                ty::PredicateKind::Clause(ty::ClauseKind::Trait(predicate)) => {
                     self.compute_trait_goal(Goal { param_env, predicate })
                 }
-                ty::PredicateKind::Clause(ty::Clause::Projection(predicate)) => {
+                ty::PredicateKind::Clause(ty::ClauseKind::Projection(predicate)) => {
                     self.compute_projection_goal(Goal { param_env, predicate })
                 }
-                ty::PredicateKind::Clause(ty::Clause::TypeOutlives(predicate)) => {
+                ty::PredicateKind::Clause(ty::ClauseKind::TypeOutlives(predicate)) => {
                     self.compute_type_outlives_goal(Goal { param_env, predicate })
                 }
-                ty::PredicateKind::Clause(ty::Clause::RegionOutlives(predicate)) => {
+                ty::PredicateKind::Clause(ty::ClauseKind::RegionOutlives(predicate)) => {
                     self.compute_region_outlives_goal(Goal { param_env, predicate })
                 }
-                ty::PredicateKind::Clause(ty::Clause::ConstArgHasType(ct, ty)) => {
+                ty::PredicateKind::Clause(ty::ClauseKind::ConstArgHasType(ct, ty)) => {
                     self.compute_const_arg_has_type_goal(Goal { param_env, predicate: (ct, ty) })
                 }
                 ty::PredicateKind::Subtype(predicate) => {
@@ -381,14 +382,14 @@ impl<'a, 'tcx> EvalCtxt<'a, 'tcx> {
                 ty::PredicateKind::ObjectSafe(trait_def_id) => {
                     self.compute_object_safe_goal(trait_def_id)
                 }
-                ty::PredicateKind::Clause(ty::Clause::WellFormed(arg)) => {
+                ty::PredicateKind::Clause(ty::ClauseKind::WellFormed(arg)) => {
                     self.compute_well_formed_goal(Goal { param_env, predicate: arg })
                 }
                 ty::PredicateKind::Ambiguous => {
                     self.evaluate_added_goals_and_make_canonical_response(Certainty::AMBIGUOUS)
                 }
                 // FIXME: implement this predicate :)
-                ty::PredicateKind::Clause(ty::Clause::ConstEvaluatable(_)) => {
+                ty::PredicateKind::Clause(ty::ClauseKind::ConstEvaluatable(_)) => {
                     self.evaluate_added_goals_and_make_canonical_response(Certainty::Yes)
                 }
                 ty::PredicateKind::ConstEquate(_, _) => {
@@ -529,32 +530,6 @@ impl<'a, 'tcx> EvalCtxt<'a, 'tcx> {
 }
 
 impl<'tcx> EvalCtxt<'_, 'tcx> {
-    /// `probe_kind` is only called when proof tree building is enabled so it can be
-    /// as expensive as necessary to output the desired information.
-    pub(super) fn probe<T>(
-        &mut self,
-        f: impl FnOnce(&mut EvalCtxt<'_, 'tcx>) -> T,
-        probe_kind: impl FnOnce(&T) -> CandidateKind<'tcx>,
-    ) -> T {
-        let mut ecx = EvalCtxt {
-            infcx: self.infcx,
-            var_values: self.var_values,
-            predefined_opaques_in_body: self.predefined_opaques_in_body,
-            max_input_universe: self.max_input_universe,
-            search_graph: self.search_graph,
-            nested_goals: self.nested_goals.clone(),
-            tainted: self.tainted,
-            inspect: self.inspect.new_goal_candidate(),
-        };
-        let r = self.infcx.probe(|_| f(&mut ecx));
-        if !self.inspect.is_noop() {
-            let cand_kind = probe_kind(&r);
-            ecx.inspect.candidate_kind(cand_kind);
-            self.inspect.goal_candidate(ecx.inspect);
-        }
-        r
-    }
-
     pub(super) fn tcx(&self) -> TyCtxt<'tcx> {
         self.infcx.tcx
     }
@@ -868,8 +843,12 @@ impl<'tcx> EvalCtxt<'_, 'tcx> {
             if candidate_key.def_id != key.def_id {
                 continue;
             }
-            values.extend(self.probe(
-                |ecx| {
+            values.extend(
+                self.probe(|r| CandidateKind::Candidate {
+                    name: "opaque type storage".into(),
+                    result: *r,
+                })
+                .enter(|ecx| {
                     for (a, b) in std::iter::zip(candidate_key.substs, key.substs) {
                         ecx.eq(param_env, a, b)?;
                     }
@@ -881,9 +860,8 @@ impl<'tcx> EvalCtxt<'_, 'tcx> {
                         candidate_ty,
                     );
                     ecx.evaluate_added_goals_and_make_canonical_response(Certainty::Yes)
-                },
-                |r| CandidateKind::Candidate { name: "opaque type storage".into(), result: *r },
-            ));
+                }),
+            );
         }
         values
     }
