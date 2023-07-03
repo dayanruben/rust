@@ -881,7 +881,7 @@ rustc_queries! {
     ///
     /// Note that we've liberated the late bound regions of function signatures, so
     /// this can not be used to check whether these types are well formed.
-    query assumed_wf_types(key: DefId) -> &'tcx ty::List<Ty<'tcx>> {
+    query assumed_wf_types(key: LocalDefId) -> &'tcx [(Ty<'tcx>, Span)] {
         desc { |tcx| "computing the implied bounds of `{}`", tcx.def_path_str(key) }
     }
 
@@ -1383,7 +1383,7 @@ rustc_queries! {
     /// executes in "reveal all" mode, and will normalize the input type.
     query layout_of(
         key: ty::ParamEnvAnd<'tcx, Ty<'tcx>>
-    ) -> Result<ty::layout::TyAndLayout<'tcx>, ty::layout::LayoutError<'tcx>> {
+    ) -> Result<ty::layout::TyAndLayout<'tcx>, &'tcx ty::layout::LayoutError<'tcx>> {
         depth_limit
         desc { "computing layout of `{}`", key.value }
     }
@@ -1394,7 +1394,7 @@ rustc_queries! {
     /// instead, where the instance is an `InstanceDef::Virtual`.
     query fn_abi_of_fn_ptr(
         key: ty::ParamEnvAnd<'tcx, (ty::PolyFnSig<'tcx>, &'tcx ty::List<Ty<'tcx>>)>
-    ) -> Result<&'tcx abi::call::FnAbi<'tcx, Ty<'tcx>>, ty::layout::FnAbiError<'tcx>> {
+    ) -> Result<&'tcx abi::call::FnAbi<'tcx, Ty<'tcx>>, &'tcx ty::layout::FnAbiError<'tcx>> {
         desc { "computing call ABI of `{}` function pointers", key.value.0 }
     }
 
@@ -1405,7 +1405,7 @@ rustc_queries! {
     /// to an `InstanceDef::Virtual` instance (of `<dyn Trait as Trait>::fn`).
     query fn_abi_of_instance(
         key: ty::ParamEnvAnd<'tcx, (ty::Instance<'tcx>, &'tcx ty::List<Ty<'tcx>>)>
-    ) -> Result<&'tcx abi::call::FnAbi<'tcx, Ty<'tcx>>, ty::layout::FnAbiError<'tcx>> {
+    ) -> Result<&'tcx abi::call::FnAbi<'tcx, Ty<'tcx>>, &'tcx ty::layout::FnAbiError<'tcx>> {
         desc { "computing call ABI of `{}`", key.value.0 }
     }
 
@@ -2164,7 +2164,7 @@ rustc_queries! {
         separate_provide_extern
     }
 
-    query check_validity_requirement(key: (ValidityRequirement, ty::ParamEnvAnd<'tcx, Ty<'tcx>>)) -> Result<bool, ty::layout::LayoutError<'tcx>> {
+    query check_validity_requirement(key: (ValidityRequirement, ty::ParamEnvAnd<'tcx, Ty<'tcx>>)) -> Result<bool, &'tcx ty::layout::LayoutError<'tcx>> {
         desc { "checking validity requirement for `{}`: {}", key.1.value, key.0 }
     }
 

@@ -40,6 +40,8 @@ use rustc_span::Span;
 use std::fmt::Debug;
 use std::ops::ControlFlow;
 
+pub(crate) use self::project::{needs_normalization, BoundVarReplacer, PlaceholderReplacer};
+
 pub use self::FulfillmentErrorCode::*;
 pub use self::ImplSource::*;
 pub use self::ObligationCauseCode::*;
@@ -161,7 +163,7 @@ fn pred_known_to_hold_modulo_regions<'tcx>(
         // the we do no inference in the process of checking this obligation.
         let goal = infcx.resolve_vars_if_possible((obligation.predicate, obligation.param_env));
         infcx.probe(|_| {
-            let ocx = ObligationCtxt::new_in_snapshot(infcx);
+            let ocx = ObligationCtxt::new(infcx);
             ocx.register_obligation(obligation);
 
             let errors = ocx.select_all_or_error();
@@ -407,7 +409,12 @@ pub fn normalize_param_env_or_error<'tcx>(
     )
 }
 
-/// Normalize a type and process all resulting obligations, returning any errors
+/// Normalize a type and process all resulting obligations, returning any errors.
+///
+/// FIXME(-Ztrait-solver=next): This should be replaced by `At::deeply_normalize`
+/// which has the same behavior with the new solver. Because using a separate
+/// fulfillment context worsens caching in the old solver, `At::deeply_normalize`
+/// is still lazy with the old solver as it otherwise negatively impacts perf.
 #[instrument(skip_all)]
 pub fn fully_normalize<'tcx, T>(
     infcx: &InferCtxt<'tcx>,

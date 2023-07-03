@@ -40,6 +40,7 @@ pub enum DefineOpaqueTypes {
     No,
 }
 
+#[derive(Clone, Copy)]
 pub struct At<'a, 'tcx> {
     pub infcx: &'a InferCtxt<'tcx>,
     pub cause: &'a ObligationCause<'tcx>,
@@ -79,7 +80,6 @@ impl<'tcx> InferCtxt<'tcx> {
             reported_closure_mismatch: self.reported_closure_mismatch.clone(),
             tainted_by_errors: self.tainted_by_errors.clone(),
             err_count_on_creation: self.err_count_on_creation,
-            in_snapshot: self.in_snapshot.clone(),
             universe: self.universe.clone(),
             intercrate: self.intercrate,
             next_trait_solver: self.next_trait_solver,

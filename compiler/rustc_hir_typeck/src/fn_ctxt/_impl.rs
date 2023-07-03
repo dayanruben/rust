@@ -2,7 +2,7 @@ use crate::callee::{self, DeferredCallResolution};
 use crate::errors::CtorIsPrivate;
 use crate::method::{self, MethodCallee, SelfSource};
 use crate::rvalue_scopes;
-use crate::{BreakableCtxt, Diverges, Expectation, FnCtxt, LocalTy, RawTy};
+use crate::{BreakableCtxt, Diverges, Expectation, FnCtxt, RawTy};
 use rustc_data_structures::captures::Captures;
 use rustc_data_structures::fx::FxHashSet;
 use rustc_errors::{Applicability, Diagnostic, ErrorGuaranteed, MultiSpan, StashKey};
@@ -83,6 +83,8 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
     /// version (resolve_vars_if_possible), this version will
     /// also select obligations if it seems useful, in an effort
     /// to get more type information.
+    // FIXME(-Ztrait-solver=next): A lot of the calls to this method should
+    // probably be `try_structurally_resolve_type` or `structurally_resolve_type` instead.
     pub(in super::super) fn resolve_vars_with_obligations(&self, ty: Ty<'tcx>) -> Ty<'tcx> {
         self.resolve_vars_with_obligations_and_mutate_fulfillment(ty, |_| {})
     }
@@ -135,7 +137,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         format!("{:p}", self)
     }
 
-    pub fn local_ty(&self, span: Span, nid: hir::HirId) -> LocalTy<'tcx> {
+    pub fn local_ty(&self, span: Span, nid: hir::HirId) -> Ty<'tcx> {
         self.locals.borrow().get(&nid).cloned().unwrap_or_else(|| {
             span_bug!(span, "no type for local variable {}", self.tcx.hir().node_to_string(nid))
         })
@@ -746,7 +748,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
 
         let expect_args = self
             .fudge_inference_if_ok(|| {
-                let ocx = ObligationCtxt::new_in_snapshot(self);
+                let ocx = ObligationCtxt::new(self);
 
                 // Attempt to apply a subtyping relationship between the formal
                 // return type (likely containing type variables if the function
@@ -1152,7 +1154,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         );
 
         if let Res::Local(hid) = res {
-            let ty = self.local_ty(span, hid).decl_ty;
+            let ty = self.local_ty(span, hid);
             let ty = self.normalize(span, ty);
             self.write_ty(hir_id, ty);
             return (ty, res);
@@ -1465,16 +1467,13 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         }
     }
 
-    /// Resolves `typ` by a single level if `typ` is a type variable.
+    /// Try to resolve `ty` to a structural type, normalizing aliases.
     ///
-    /// When the new solver is enabled, this will also attempt to normalize
-    /// the type if it's a projection (note that it will not deeply normalize
-    /// projections within the type, just the outermost layer of the type).
-    ///
-    /// If no resolution is possible, then an error is reported.
-    /// Numeric inference variables may be left unresolved.
-    pub fn structurally_resolved_type(&self, sp: Span, ty: Ty<'tcx>) -> Ty<'tcx> {
-        let mut ty = self.resolve_vars_with_obligations(ty);
+    /// In case there is still ambiguity, the returned type may be an inference
+    /// variable. This is different from `structurally_resolve_type` which errors
+    /// in this case.
+    pub fn try_structurally_resolve_type(&self, sp: Span, ty: Ty<'tcx>) -> Ty<'tcx> {
+        let ty = self.resolve_vars_with_obligations(ty);
 
         if self.next_trait_solver()
             && let ty::Alias(ty::Projection, _) = ty.kind()
@@ -1483,15 +1482,27 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 .at(&self.misc(sp), self.param_env)
                 .structurally_normalize(ty, &mut **self.fulfillment_cx.borrow_mut())
             {
-                Ok(normalized_ty) => {
-                    ty = normalized_ty;
-                },
+                Ok(normalized_ty) => normalized_ty,
                 Err(errors) => {
                     let guar = self.err_ctxt().report_fulfillment_errors(&errors);
                     return self.tcx.ty_error(guar);
                 }
             }
-        }
+        } else {
+            ty
+       }
+    }
+
+    /// Resolves `ty` by a single level if `ty` is a type variable.
+    ///
+    /// When the new solver is enabled, this will also attempt to normalize
+    /// the type if it's a projection (note that it will not deeply normalize
+    /// projections within the type, just the outermost layer of the type).
+    ///
+    /// If no resolution is possible, then an error is reported.
+    /// Numeric inference variables may be left unresolved.
+    pub fn structurally_resolve_type(&self, sp: Span, ty: Ty<'tcx>) -> Ty<'tcx> {
+        let ty = self.try_structurally_resolve_type(sp, ty);
 
         if !ty.is_ty_var() {
             ty

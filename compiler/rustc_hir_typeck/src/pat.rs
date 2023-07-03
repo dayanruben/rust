@@ -393,7 +393,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         // They can denote both statically and dynamically-sized byte arrays.
         let mut pat_ty = ty;
         if let hir::ExprKind::Lit(Spanned { node: ast::LitKind::ByteStr(..), .. }) = lt.kind {
-            let expected = self.structurally_resolved_type(span, expected);
+            let expected = self.structurally_resolve_type(span, expected);
             if let ty::Ref(_, inner_ty, _) = expected.kind()
                 && matches!(inner_ty.kind(), ty::Slice(_))
             {
@@ -501,7 +501,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         // This check is needed if both sides are inference variables.
         // We require types to be resolved here so that we emit inference failure
         // rather than "_ is not a char or numeric".
-        let ty = self.structurally_resolved_type(span, expected);
+        let ty = self.structurally_resolve_type(span, expected);
         if !(ty.is_numeric() || ty.is_char() || ty.references_error()) {
             if let Some((ref mut fail, _, _)) = lhs {
                 *fail = true;
@@ -594,7 +594,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
 
         debug!("check_pat_ident: pat.hir_id={:?} bm={:?}", pat.hir_id, bm);
 
-        let local_ty = self.local_ty(pat.span, pat.hir_id).decl_ty;
+        let local_ty = self.local_ty(pat.span, pat.hir_id);
         let eq_ty = match bm {
             ty::BindByReference(mutbl) => {
                 // If the binding is like `ref x | ref mut x`,
@@ -635,7 +635,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         ty: Ty<'tcx>,
         ti: TopInfo<'tcx>,
     ) {
-        let var_ty = self.local_ty(span, var_id).decl_ty;
+        let var_ty = self.local_ty(span, var_id);
         if let Some(mut err) = self.demand_eqtype_pat_diag(span, var_ty, ty, ti) {
             let hir = self.tcx.hir();
             let var_ty = self.resolve_vars_with_obligations(var_ty);
@@ -1289,7 +1289,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         let mut expected_len = elements.len();
         if ddpos.as_opt_usize().is_some() {
             // Require known type only when `..` is present.
-            if let ty::Tuple(tys) = self.structurally_resolved_type(span, expected).kind() {
+            if let ty::Tuple(tys) = self.structurally_resolve_type(span, expected).kind() {
                 expected_len = tys.len();
             }
         }
@@ -2042,7 +2042,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         def_bm: BindingMode,
         ti: TopInfo<'tcx>,
     ) -> Ty<'tcx> {
-        let expected = self.structurally_resolved_type(span, expected);
+        let expected = self.structurally_resolve_type(span, expected);
         let (element_ty, opt_slice_ty, inferred) = match *expected.kind() {
             // An array, so we might have something like `let [a, b, c] = [0, 1, 2];`.
             ty::Array(element_ty, len) => {
