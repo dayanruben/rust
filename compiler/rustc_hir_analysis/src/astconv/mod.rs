@@ -983,8 +983,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                 ty::ClauseKind::RegionOutlives(_)
                 | ty::ClauseKind::ConstArgHasType(..)
                 | ty::ClauseKind::WellFormed(_)
-                | ty::ClauseKind::ConstEvaluatable(_)
-                | ty::ClauseKind::TypeWellFormedFromEnv(_) => {
+                | ty::ClauseKind::ConstEvaluatable(_) => {
                     bug!()
                 }
             }
@@ -1893,6 +1892,15 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
     ) -> Result<Option<(Ty<'tcx>, DefId)>, ErrorGuaranteed> {
         let tcx = self.tcx();
 
+        // Don't attempt to look up inherent associated types when the feature is not enabled.
+        // Theoretically it'd be fine to do so since we feature-gate their definition site.
+        // However, due to current limitations of the implementation (caused by us performing
+        // selection in AstConv), IATs can lead to cycle errors (#108491, #110106) which mask the
+        // feature-gate error, needlessly confusing users that use IATs by accident (#113265).
+        if !tcx.features().inherent_associated_types {
+            return Ok(None);
+        }
+
         let candidates: Vec<_> = tcx
             .inherent_impls(adt_did)
             .iter()
@@ -1901,11 +1909,6 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
 
         if candidates.is_empty() {
             return Ok(None);
-        }
-
-        if !tcx.features().inherent_associated_types {
-            tcx.sess
-                .delay_span_bug(span, "found inherent assoc type without the feature being gated");
         }
 
         //
