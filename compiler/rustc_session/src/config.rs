@@ -743,6 +743,14 @@ pub enum TraitSolver {
     NextCoherence,
 }
 
+#[derive(Default, Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub enum DumpSolverProofTree {
+    Always,
+    OnError,
+    #[default]
+    Never,
+}
+
 pub enum Input {
     /// Load source code from a file.
     File(PathBuf),
@@ -1019,6 +1027,7 @@ impl Default for Options {
             json_future_incompat: false,
             pretty: None,
             working_dir: RealFileName::LocalPath(std::env::current_dir().unwrap()),
+            color: ColorConfig::Auto,
         }
     }
 }
@@ -2799,6 +2808,7 @@ pub fn build_session_options(
         json_future_incompat,
         pretty,
         working_dir,
+        color,
     }
 }
 
