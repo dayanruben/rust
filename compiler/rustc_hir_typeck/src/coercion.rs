@@ -636,6 +636,7 @@ impl<'f, 'tcx> Coerce<'f, 'tcx> {
                 Some(ty::PredicateKind::Clause(ty::ClauseKind::Trait(trait_pred)))
                     if traits.contains(&trait_pred.def_id()) =>
                 {
+                    let trait_pred = self.resolve_vars_if_possible(trait_pred);
                     if unsize_did == trait_pred.def_id() {
                         let self_ty = trait_pred.self_ty();
                         let unsize_ty = trait_pred.trait_ref.substs[1].expect_ty();
@@ -662,7 +663,6 @@ impl<'f, 'tcx> Coerce<'f, 'tcx> {
                 // Uncertain or unimplemented.
                 Ok(None) => {
                     if trait_pred.def_id() == unsize_did {
-                        let trait_pred = self.resolve_vars_if_possible(trait_pred);
                         let self_ty = trait_pred.self_ty();
                         let unsize_ty = trait_pred.trait_ref.substs[1].expect_ty();
                         debug!("coerce_unsized: ambiguous unsize case for {:?}", trait_pred);
@@ -1670,7 +1670,9 @@ impl<'tcx, 'exprs, E: AsCoercionSite> CoerceMany<'tcx, 'exprs, E> {
         expr: &hir::Expr<'tcx>,
         ret_exprs: &Vec<&'tcx hir::Expr<'tcx>>,
     ) {
-        let hir::ExprKind::Loop(_, _, _, loop_span) = expr.kind else { return;};
+        let hir::ExprKind::Loop(_, _, _, loop_span) = expr.kind else {
+            return;
+        };
         let mut span: MultiSpan = vec![loop_span].into();
         span.push_span_label(loop_span, "this might have zero elements to iterate on");
         const MAXITER: usize = 3;

@@ -2708,10 +2708,17 @@ impl<'tcx> InferCtxtPrivExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
         err: &mut Diagnostic,
         obligation: &PredicateObligation<'tcx>,
     ) {
-        let ty::PredicateKind::Clause(ty::ClauseKind::Trait(pred)) = obligation.predicate.kind().skip_binder() else { return; };
+        let ty::PredicateKind::Clause(ty::ClauseKind::Trait(pred)) =
+            obligation.predicate.kind().skip_binder()
+        else {
+            return;
+        };
         let (ObligationCauseCode::BindingObligation(item_def_id, span)
-        | ObligationCauseCode::ExprBindingObligation(item_def_id, span, ..))
-            = *obligation.cause.code().peel_derives() else { return; };
+        | ObligationCauseCode::ExprBindingObligation(item_def_id, span, ..)) =
+            *obligation.cause.code().peel_derives()
+        else {
+            return;
+        };
         debug!(?pred, ?item_def_id, ?span);
 
         let (Some(node), true) = (
@@ -2880,10 +2887,16 @@ impl<'tcx> InferCtxtPrivExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
             src: trait_ref.substs.type_at(1),
         };
         let scope = trait_ref.substs.type_at(2);
-        let Some(assume) =
-            rustc_transmute::Assume::from_const(self.infcx.tcx, obligation.param_env, trait_ref.substs.const_at(3)) else {
-                span_bug!(span, "Unable to construct rustc_transmute::Assume where it was previously possible");
-            };
+        let Some(assume) = rustc_transmute::Assume::from_const(
+            self.infcx.tcx,
+            obligation.param_env,
+            trait_ref.substs.const_at(3),
+        ) else {
+            span_bug!(
+                span,
+                "Unable to construct rustc_transmute::Assume where it was previously possible"
+            );
+        };
 
         match rustc_transmute::TransmuteTypeEnv::new(self.infcx).is_transmutable(
             obligation.cause,
@@ -3556,7 +3569,7 @@ pub fn dump_proof_tree<'tcx>(o: &Obligation<'tcx, ty::Predicate<'tcx>>, infcx: &
             .1
             .expect("proof tree should have been generated");
         let mut lock = std::io::stdout().lock();
-        let _ = lock.write_fmt(format_args!("{tree:?}"));
+        let _ = lock.write_fmt(format_args!("{tree:?}\n"));
         let _ = lock.flush();
     });
 }
