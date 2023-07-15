@@ -1136,7 +1136,7 @@ fn should_encode_type(tcx: TyCtxt<'_>, def_id: LocalDefId, def_kind: DefKind) ->
                 // the default projection predicates in default trait methods
                 // with RPITITs.
                 ty::AssocItemContainer::TraitContainer => {
-                    assoc_item.defaultness(tcx).has_value() || assoc_item.opt_rpitit_info.is_some()
+                    assoc_item.defaultness(tcx).has_value() || assoc_item.is_impl_trait_in_trait()
                 }
             }
         }
@@ -1924,7 +1924,7 @@ impl<'a, 'tcx> EncodeContext<'a, 'tcx> {
             if of_trait && let Some(trait_ref) = tcx.impl_trait_ref(def_id) {
                 record!(self.tables.impl_trait_ref[def_id] <- trait_ref);
 
-                let trait_ref = trait_ref.subst_identity();
+                let trait_ref = trait_ref.instantiate_identity();
                 let simplified_self_ty =
                     fast_reject::simplify_type(self.tcx, trait_ref.self_ty(), TreatParams::AsCandidateKey);
                 fx_hash_map
