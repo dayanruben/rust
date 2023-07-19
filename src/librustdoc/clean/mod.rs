@@ -53,7 +53,7 @@ pub(crate) fn clean_doc_module<'tcx>(doc: &DocModule<'tcx>, cx: &mut DocContext<
     let mut inserted = FxHashSet::default();
     items.extend(doc.foreigns.iter().map(|(item, renamed)| {
         let item = clean_maybe_renamed_foreign_item(cx, item, *renamed);
-        if let Some(name) = item.name && !item.is_doc_hidden() {
+        if let Some(name) = item.name && (cx.render_options.document_hidden || !item.is_doc_hidden()) {
             inserted.insert((item.type_(), name));
         }
         item
@@ -63,7 +63,7 @@ pub(crate) fn clean_doc_module<'tcx>(doc: &DocModule<'tcx>, cx: &mut DocContext<
             return None;
         }
         let item = clean_doc_module(x, cx);
-        if item.is_doc_hidden() {
+        if !cx.render_options.document_hidden && item.is_doc_hidden() {
             // Hidden modules are stripped at a later stage.
             // If a hidden module has the same name as a visible one, we want
             // to keep both of them around.
@@ -84,7 +84,7 @@ pub(crate) fn clean_doc_module<'tcx>(doc: &DocModule<'tcx>, cx: &mut DocContext<
         }
         let v = clean_maybe_renamed_item(cx, item, *renamed, *import_id);
         for item in &v {
-            if let Some(name) = item.name && !item.is_doc_hidden() {
+            if let Some(name) = item.name && (cx.render_options.document_hidden || !item.is_doc_hidden()) {
                 inserted.insert((item.type_(), name));
             }
         }
@@ -441,7 +441,7 @@ fn clean_projection<'tcx>(
         let bounds = cx
             .tcx
             .explicit_item_bounds(ty.skip_binder().def_id)
-            .arg_iter_copied(cx.tcx, ty.skip_binder().args)
+            .iter_instantiated_copied(cx.tcx, ty.skip_binder().args)
             .map(|(pred, _)| pred)
             .collect::<Vec<_>>();
         return clean_middle_opaque_bounds(cx, bounds);
@@ -2071,7 +2071,7 @@ pub(crate) fn clean_middle_ty<'tcx>(
                 let bounds = cx
                     .tcx
                     .explicit_item_bounds(def_id)
-                    .arg_iter_copied(cx.tcx, args)
+                    .iter_instantiated_copied(cx.tcx, args)
                     .map(|(bound, _)| bound)
                     .collect::<Vec<_>>();
                 let ty = clean_middle_opaque_bounds(cx, bounds);
@@ -2326,7 +2326,7 @@ fn get_all_import_attributes<'hir>(
             attrs = import_attrs.iter().map(|attr| (Cow::Borrowed(attr), Some(def_id))).collect();
             first = false;
         // We don't add attributes of an intermediate re-export if it has `#[doc(hidden)]`.
-        } else if !cx.tcx.is_doc_hidden(def_id) {
+        } else if cx.render_options.document_hidden || !cx.tcx.is_doc_hidden(def_id) {
             add_without_unwanted_attributes(&mut attrs, import_attrs, is_inline, Some(def_id));
         }
     }
