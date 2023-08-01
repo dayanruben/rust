@@ -129,7 +129,9 @@ fn param_env(tcx: TyCtxt<'_>, def_id: DefId) -> ty::ParamEnv<'_> {
     // sure that this will succeed without errors anyway.
 
     if tcx.def_kind(def_id) == DefKind::AssocFn
-        && tcx.associated_item(def_id).container == ty::AssocItemContainer::TraitContainer
+        && let assoc_item = tcx.associated_item(def_id)
+        && assoc_item.container == ty::AssocItemContainer::TraitContainer
+        && assoc_item.defaultness(tcx).has_value()
     {
         let sig = tcx.fn_sig(def_id).instantiate_identity();
         // We accounted for the binder of the fn sig, so skip the binder.
@@ -179,8 +181,10 @@ impl<'tcx> TypeVisitor<TyCtxt<'tcx>> for ImplTraitInTraitFinder<'_, 'tcx> {
 
     fn visit_ty(&mut self, ty: Ty<'tcx>) -> std::ops::ControlFlow<Self::BreakTy> {
         if let ty::Alias(ty::Projection, unshifted_alias_ty) = *ty.kind()
-            && self.tcx.is_impl_trait_in_trait(unshifted_alias_ty.def_id)
-            && self.tcx.impl_trait_in_trait_parent_fn(unshifted_alias_ty.def_id) == self.fn_def_id
+            && let Some(ty::ImplTraitInTraitData::Trait { fn_def_id, .. }
+                    | ty::ImplTraitInTraitData::Impl { fn_def_id, .. })
+                = self.tcx.opt_rpitit_info(unshifted_alias_ty.def_id)
+            && fn_def_id == self.fn_def_id
             && self.seen.insert(unshifted_alias_ty.def_id)
         {
             // We have entered some binders as we've walked into the
