@@ -220,6 +220,7 @@
 #![warn(missing_debug_implementations)]
 #![allow(explicit_outlives_requirements)]
 #![allow(unused_lifetimes)]
+#![cfg_attr(not(bootstrap), allow(internal_features))]
 #![deny(rustc::existing_doc_keyword)]
 #![deny(fuzzy_provenance_casts)]
 // Ensure that std can be linked against panic_abort despite compiled with `-C panic=unwind`
@@ -297,6 +298,7 @@
 #![feature(maybe_uninit_slice)]
 #![feature(maybe_uninit_uninit_array)]
 #![feature(maybe_uninit_write_slice)]
+#![feature(offset_of)]
 #![feature(panic_can_unwind)]
 #![feature(panic_info_message)]
 #![feature(panic_internals)]
