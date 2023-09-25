@@ -793,6 +793,7 @@ fn clean_ty_generics<'tcx>(
                 }
                 Some(clean_generic_param_def(param, cx))
             }
+            ty::GenericParamDefKind::Const { is_host_effect: true, .. } => None,
             ty::GenericParamDefKind::Const { .. } => Some(clean_generic_param_def(param, cx)),
         })
         .collect::<ThinVec<GenericParamDef>>();
@@ -2287,7 +2288,6 @@ pub(crate) fn clean_middle_ty<'tcx>(
         ty::Bound(..) => panic!("Bound"),
         ty::Placeholder(..) => panic!("Placeholder"),
         ty::GeneratorWitness(..) => panic!("GeneratorWitness"),
-        ty::GeneratorWitnessMIR(..) => panic!("GeneratorWitnessMIR"),
         ty::Infer(..) => panic!("Infer"),
         ty::Error(_) => rustc_errors::FatalError.raise(),
     }
