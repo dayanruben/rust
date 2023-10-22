@@ -20,6 +20,8 @@ use std::fmt::Debug;
 use std::hash::Hash;
 use std::ops::{ControlFlow, Index};
 
+mod internal;
+
 impl<'tcx> Index<stable_mir::DefId> for Tables<'tcx> {
     type Output = DefId;
 
@@ -59,8 +61,8 @@ impl<'tcx> Tables<'tcx> {
         stable_mir::ty::ClosureDef(self.create_def_id(did))
     }
 
-    pub fn generator_def(&mut self, did: DefId) -> stable_mir::ty::GeneratorDef {
-        stable_mir::ty::GeneratorDef(self.create_def_id(did))
+    pub fn coroutine_def(&mut self, did: DefId) -> stable_mir::ty::CoroutineDef {
+        stable_mir::ty::CoroutineDef(self.create_def_id(did))
     }
 
     pub fn alias_def(&mut self, did: DefId) -> stable_mir::ty::AliasDef {
@@ -230,4 +232,12 @@ impl<K: PartialEq + Hash + Eq, V: Copy + Debug + PartialEq + IndexedVal> Index<V
         assert_eq!(*v, index, "Provided value doesn't match with indexed value");
         k
     }
+}
+
+/// Trait used to translate a stable construct to its rustc counterpart.
+///
+/// This is basically a mirror of [crate::rustc_smir::Stable].
+pub(crate) trait RustcInternal<'tcx> {
+    type T;
+    fn internal(&self, tables: &mut Tables<'tcx>) -> Self::T;
 }
