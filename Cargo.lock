@@ -4279,6 +4279,7 @@ dependencies = [
  "coverage_test_macros",
  "either",
  "itertools",
+ "rustc_arena",
  "rustc_ast",
  "rustc_attr",
  "rustc_const_eval",
@@ -4520,9 +4521,7 @@ name = "rustc_smir"
 version = "0.0.0"
 dependencies = [
  "rustc_data_structures",
- "rustc_driver",
  "rustc_hir",
- "rustc_interface",
  "rustc_middle",
  "rustc_span",
  "rustc_target",
