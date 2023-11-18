@@ -928,10 +928,8 @@ impl<'tcx> TypeErrCtxtExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
     }
 
     fn fn_arg_obligation(&self, obligation: &PredicateObligation<'tcx>) -> bool {
-        if let ObligationCauseCode::FunctionArgumentObligation {
-            arg_hir_id,
-            ..
-        } = obligation.cause.code()
+        if let ObligationCauseCode::FunctionArgumentObligation { arg_hir_id, .. } =
+            obligation.cause.code()
             && let Some(Node::Expr(arg)) = self.tcx.hir().find(*arg_hir_id)
             && let arg = arg.peel_borrows()
             && let hir::ExprKind::Path(hir::QPath::Resolved(
@@ -2752,7 +2750,8 @@ impl<'tcx> InferCtxtPrivExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
         use rustc_transmute::Answer;
 
         // Erase regions because layout code doesn't particularly care about regions.
-        let trait_ref = self.tcx.erase_regions(self.tcx.erase_late_bound_regions(trait_ref));
+        let trait_ref =
+            self.tcx.erase_regions(self.tcx.instantiate_bound_regions_with_erased(trait_ref));
 
         let src_and_dst = rustc_transmute::Types {
             dst: trait_ref.args.type_at(0),
