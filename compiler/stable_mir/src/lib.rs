@@ -17,7 +17,7 @@
 //! The goal is to eventually be published on
 //! [crates.io](https://crates.io).
 
-use crate::mir::mono::InstanceDef;
+use crate::mir::mono::{InstanceDef, StaticDef};
 use crate::mir::Body;
 use std::fmt;
 use std::fmt::Debug;
@@ -31,17 +31,19 @@ use self::ty::{
 #[macro_use]
 extern crate scoped_tls;
 
+#[macro_use]
 pub mod error;
 pub mod mir;
 pub mod ty;
 pub mod visitor;
 
+use crate::mir::alloc::{AllocId, GlobalAlloc};
 use crate::mir::pretty::function_name;
 use crate::mir::Mutability;
-use crate::ty::{AdtDef, AdtKind, ClosureDef, ClosureKind};
+use crate::ty::{AdtDef, AdtKind, Allocation, ClosureDef, ClosureKind, Const, RigidTy};
 pub use error::*;
 use mir::mono::Instance;
-use ty::{Const, FnDef, GenericArgs};
+use ty::{FnDef, GenericArgs};
 
 /// Use String for now but we should replace it.
 pub type Symbol = String;
@@ -72,19 +74,6 @@ impl IndexedVal for DefId {
     }
 }
 
-/// A unique identification number for each provenance
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct AllocId(usize);
-
-impl IndexedVal for AllocId {
-    fn to_val(index: usize) -> Self {
-        AllocId(index)
-    }
-    fn to_index(&self) -> usize {
-        self.0
-    }
-}
-
 /// A list of crate items.
 pub type CrateItems = Vec<CrateItem>;
 
@@ -109,7 +98,7 @@ pub enum ItemKind {
     Const,
 }
 
-pub type Filename = Opaque;
+pub type Filename = String;
 
 /// Holds information about an item in the crate.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -138,6 +127,10 @@ impl CrateItem {
 
     pub fn ty(&self) -> Ty {
         with(|cx| cx.def_ty(self.0))
+    }
+
+    pub fn is_foreign_item(&self) -> bool {
+        with(|cx| cx.is_foreign_item(*self))
     }
 
     pub fn dump<W: io::Write>(&self, w: &mut W) -> io::Result<()> {
@@ -189,6 +182,8 @@ pub fn trait_impl(trait_impl: &ImplDef) -> ImplTrait {
     with(|cx| cx.trait_impl(trait_impl))
 }
 
+/// This trait defines the interface between stable_mir and the Rust compiler.
+/// Do not use this directly.
 pub trait Context {
     fn entry_fn(&self) -> Option<CrateItem>;
     /// Retrieve all items of the local crate that have a MIR associated with them.
@@ -224,8 +219,23 @@ pub trait Context {
     /// Returns the `kind` of given `DefId`
     fn item_kind(&self, item: CrateItem) -> ItemKind;
 
+    /// Returns whether this is a foreign item.
+    fn is_foreign_item(&self, item: CrateItem) -> bool;
+
     /// Returns the kind of a given algebraic data type
     fn adt_kind(&self, def: AdtDef) -> AdtKind;
+
+    /// Returns if the ADT is a box.
+    fn adt_is_box(&self, def: AdtDef) -> bool;
+
+    /// Evaluate constant as a target usize.
+    fn eval_target_usize(&self, cnst: &Const) -> Result<u64, Error>;
+
+    /// Create a target usize constant for the given value.
+    fn usize_to_const(&self, val: u64) -> Result<Const, Error>;
+
+    /// Create a new type from the given kind.
+    fn new_rigid_ty(&self, kind: RigidTy) -> Ty;
 
     /// Returns the type of given crate item.
     fn def_ty(&self, item: DefId) -> Ty;
@@ -275,6 +285,15 @@ pub trait Context {
         args: &GenericArgs,
         kind: ClosureKind,
     ) -> Option<Instance>;
+
+    /// Evaluate a static's initializer.
+    fn eval_static_initializer(&self, def: StaticDef) -> Result<Allocation, Error>;
+
+    /// Retrieve global allocation for the given allocation ID.
+    fn global_alloc(&self, id: AllocId) -> GlobalAlloc;
+
+    /// Retrieve the id for the virtual table.
+    fn vtable_allocation(&self, global_alloc: &GlobalAlloc) -> Option<AllocId>;
 }
 
 // A thread local variable that stores a pointer to the tables mapping between TyCtxt

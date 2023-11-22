@@ -1,7 +1,7 @@
 use crate::mir::Body;
-use crate::ty::{ClosureDef, ClosureKind, FnDef, GenericArgs, IndexedVal, Ty};
+use crate::ty::{Allocation, ClosureDef, ClosureKind, FnDef, GenericArgs, IndexedVal, Ty};
 use crate::{with, CrateItem, DefId, Error, ItemKind, Opaque};
-use std::fmt::Debug;
+use std::fmt::{Debug, Formatter};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum MonoItem {
@@ -10,7 +10,7 @@ pub enum MonoItem {
     GlobalAsm(Opaque),
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash)]
 pub struct Instance {
     /// The type of instance.
     pub kind: InstanceKind,
@@ -35,6 +35,11 @@ impl Instance {
     /// Get the body of an Instance. The body will be eagerly monomorphized.
     pub fn body(&self) -> Option<Body> {
         with(|context| context.instance_body(self.def))
+    }
+
+    pub fn is_foreign_item(&self) -> bool {
+        let item = CrateItem::try_from(*self);
+        item.as_ref().map_or(false, CrateItem::is_foreign_item)
     }
 
     /// Get the instance type with generic substitutions applied and lifetimes erased.
@@ -83,6 +88,15 @@ impl Instance {
     }
 }
 
+impl Debug for Instance {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Instance")
+            .field("kind", &self.kind)
+            .field("def", &self.mangled_name())
+            .finish()
+    }
+}
+
 /// Try to convert a crate item into an instance.
 /// The item cannot be generic in order to be converted into an instance.
 impl TryFrom<CrateItem> for Instance {
@@ -119,6 +133,18 @@ impl From<Instance> for MonoItem {
     }
 }
 
+impl From<StaticDef> for MonoItem {
+    fn from(value: StaticDef) -> Self {
+        MonoItem::Static(value)
+    }
+}
+
+impl From<StaticDef> for CrateItem {
+    fn from(value: StaticDef) -> Self {
+        CrateItem(value.0)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct InstanceDef(usize);
 
@@ -138,8 +164,14 @@ impl TryFrom<CrateItem> for StaticDef {
 }
 
 impl StaticDef {
+    /// Return the type of this static definition.
     pub fn ty(&self) -> Ty {
         with(|cx| cx.def_ty(self.0))
+    }
+
+    /// Evaluate a static's initializer, returning the allocation of the initializer's memory.
+    pub fn eval_initializer(&self) -> Result<Allocation, Error> {
+        with(|cx| cx.eval_static_initializer(*self))
     }
 }
 
