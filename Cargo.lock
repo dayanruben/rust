@@ -796,10 +796,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "coverage_test_macros"
-version = "0.0.0"
-
-[[package]]
 name = "cpufeatures"
 version = "0.2.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4266,7 +4262,6 @@ dependencies = [
 name = "rustc_mir_transform"
 version = "0.0.0"
 dependencies = [
- "coverage_test_macros",
  "either",
  "itertools",
  "rustc_arena",
@@ -4306,6 +4301,13 @@ dependencies = [
  "serde",
  "serde_json",
  "tracing",
+]
+
+[[package]]
+name = "rustc_next_trait_solver"
+version = "0.0.0"
+dependencies = [
+ "rustc_type_ir",
 ]
 
 [[package]]
@@ -4492,6 +4494,7 @@ dependencies = [
 name = "rustc_smir"
 version = "0.0.0"
 dependencies = [
+ "rustc_abi",
  "rustc_data_structures",
  "rustc_hir",
  "rustc_middle",
@@ -4576,6 +4579,7 @@ dependencies = [
  "rustc_infer",
  "rustc_macros",
  "rustc_middle",
+ "rustc_next_trait_solver",
  "rustc_parse_format",
  "rustc_query_system",
  "rustc_session",
