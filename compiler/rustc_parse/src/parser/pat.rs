@@ -15,10 +15,10 @@ use rustc_ast::ptr::P;
 use rustc_ast::token::{self, Delimiter};
 use rustc_ast::{
     self as ast, AttrVec, BindingAnnotation, ByRef, Expr, ExprKind, MacCall, Mutability, Pat,
-    PatField, PatKind, Path, QSelf, RangeEnd, RangeSyntax,
+    PatField, PatFieldsRest, PatKind, Path, QSelf, RangeEnd, RangeSyntax,
 };
 use rustc_ast_pretty::pprust;
-use rustc_errors::{Applicability, DiagnosticBuilder, ErrorGuaranteed, PResult};
+use rustc_errors::{Applicability, DiagnosticBuilder, PResult};
 use rustc_session::errors::ExprParenthesesNeeded;
 use rustc_span::source_map::{respan, Spanned};
 use rustc_span::symbol::{kw, sym, Ident};
@@ -687,7 +687,7 @@ impl<'a> Parser<'a> {
 
     fn fatal_unexpected_non_pat(
         &mut self,
-        err: DiagnosticBuilder<'a, ErrorGuaranteed>,
+        err: DiagnosticBuilder<'a>,
         expected: Option<Expected>,
     ) -> PResult<'a, P<Pat>> {
         err.cancel();
@@ -891,7 +891,8 @@ impl<'a> Parser<'a> {
             e.span_label(path.span, "while parsing the fields for this pattern");
             e.emit();
             self.recover_stmt();
-            (ThinVec::new(), true)
+            // When recovering, pretend we had `Foo { .. }`, to avoid cascading errors.
+            (ThinVec::new(), PatFieldsRest::Rest)
         });
         self.bump();
         Ok(PatKind::Struct(qself, path, fields, etc))
@@ -965,11 +966,11 @@ impl<'a> Parser<'a> {
     }
 
     /// Parses the fields of a struct-like pattern.
-    fn parse_pat_fields(&mut self) -> PResult<'a, (ThinVec<PatField>, bool)> {
+    fn parse_pat_fields(&mut self) -> PResult<'a, (ThinVec<PatField>, PatFieldsRest)> {
         let mut fields = ThinVec::new();
-        let mut etc = false;
+        let mut etc = PatFieldsRest::None;
         let mut ate_comma = true;
-        let mut delayed_err: Option<DiagnosticBuilder<'a, ErrorGuaranteed>> = None;
+        let mut delayed_err: Option<DiagnosticBuilder<'a>> = None;
         let mut first_etc_and_maybe_comma_span = None;
         let mut last_non_comma_dotdot_span = None;
 
@@ -1001,7 +1002,7 @@ impl<'a> Parser<'a> {
                 || self.check_noexpect(&token::DotDotDot)
                 || self.check_keyword(kw::Underscore)
             {
-                etc = true;
+                etc = PatFieldsRest::Rest;
                 let mut etc_sp = self.token.span;
                 if first_etc_and_maybe_comma_span.is_none() {
                     if let Some(comma_tok) = self
@@ -1135,7 +1136,7 @@ impl<'a> Parser<'a> {
     fn recover_misplaced_pattern_modifiers(
         &self,
         fields: &ThinVec<PatField>,
-        err: &mut DiagnosticBuilder<'a, ErrorGuaranteed>,
+        err: &mut DiagnosticBuilder<'a>,
     ) {
         if let Some(last) = fields.iter().last()
             && last.is_shorthand
