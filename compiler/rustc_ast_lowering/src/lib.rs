@@ -33,6 +33,7 @@
 #![allow(internal_features)]
 #![feature(rustdoc_internals)]
 #![doc(rust_logo)]
+#![feature(if_let_guard)]
 #![feature(box_patterns)]
 #![feature(let_chains)]
 #![recursion_limit = "256"]
@@ -53,7 +54,7 @@ use rustc_data_structures::fingerprint::Fingerprint;
 use rustc_data_structures::sorted_map::SortedMap;
 use rustc_data_structures::stable_hasher::{HashStable, StableHasher};
 use rustc_data_structures::sync::Lrc;
-use rustc_errors::{DiagnosticArgFromDisplay, StashKey};
+use rustc_errors::{DiagCtxt, DiagnosticArgFromDisplay, StashKey};
 use rustc_hir as hir;
 use rustc_hir::def::{DefKind, LifetimeRes, Namespace, PartialRes, PerNS, Res};
 use rustc_hir::def_id::{LocalDefId, LocalDefIdMap, CRATE_DEF_ID, LOCAL_CRATE};
@@ -65,6 +66,7 @@ use rustc_session::parse::{add_feature_diagnostics, feature_err};
 use rustc_span::symbol::{kw, sym, Ident, Symbol};
 use rustc_span::{DesugaringKind, Span, DUMMY_SP};
 use smallvec::SmallVec;
+use std::borrow::Cow;
 use std::collections::hash_map::Entry;
 use thin_vec::ThinVec;
 
@@ -182,6 +184,10 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
             generics_def_id_map: Default::default(),
             host_param_id: None,
         }
+    }
+
+    pub(crate) fn dcx(&self) -> &'hir DiagCtxt {
+        self.tcx.dcx()
     }
 }
 
@@ -766,6 +772,10 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
         self.resolver.get_import_res(id).present_items()
     }
 
+    fn make_lang_item_qpath(&mut self, lang_item: hir::LangItem, span: Span) -> hir::QPath<'hir> {
+        hir::QPath::Resolved(None, self.make_lang_item_path(lang_item, span, None))
+    }
+
     fn make_lang_item_path(
         &mut self,
         lang_item: hir::LangItem,
@@ -783,7 +793,7 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
                 hir_id: self.next_id(),
                 res,
                 args,
-                infer_args: false,
+                infer_args: args.is_none(),
             }]),
         })
     }
@@ -874,8 +884,27 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
         binder: NodeId,
         generic_params: &[GenericParam],
     ) -> &'hir [hir::GenericParam<'hir>] {
-        let mut generic_params: Vec<_> = self
-            .lower_generic_params_mut(generic_params, hir::GenericParamSource::Binder)
+        let mut generic_params: Vec<_> = generic_params
+            .iter()
+            .map(|param| {
+                let param = match param.kind {
+                    GenericParamKind::Type { ref default } if let Some(ty) = default => {
+                        // Default type is not permitted in non-lifetime binders.
+                        // So we emit an error and default to `None` to prevent
+                        // potential ice.
+                        self.dcx().emit_err(errors::UnexpectedDefaultParameterInBinder {
+                            span: ty.span(),
+                        });
+                        let param = GenericParam {
+                            kind: GenericParamKind::Type { default: None },
+                            ..param.clone()
+                        };
+                        Cow::Owned(param)
+                    }
+                    _ => Cow::Borrowed(param),
+                };
+                self.lower_generic_param(param.as_ref(), hir::GenericParamSource::Binder)
+            })
             .collect();
         let extra_lifetimes = self.resolver.take_extra_lifetime_params(binder);
         debug!(?extra_lifetimes);
@@ -1035,11 +1064,11 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
                         && first_char.is_ascii_lowercase()
                     {
                         let mut err = if !data.inputs.is_empty() {
-                            self.tcx.sess.create_err(errors::BadReturnTypeNotation::Inputs {
+                            self.dcx().create_err(errors::BadReturnTypeNotation::Inputs {
                                 span: data.inputs_span,
                             })
                         } else if let FnRetTy::Ty(ty) = &data.output {
-                            self.tcx.sess.create_err(errors::BadReturnTypeNotation::Output {
+                            self.dcx().create_err(errors::BadReturnTypeNotation::Output {
                                 span: data.inputs_span.shrink_to_hi().to(ty.span),
                             })
                         } else {
@@ -1163,7 +1192,7 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
                         hir::TypeBindingKind::Constraint { bounds }
                     }
                     DesugarKind::Error(position) => {
-                        let guar = self.tcx.sess.emit_err(errors::MisplacedAssocTyBinding {
+                        let guar = self.dcx().emit_err(errors::MisplacedAssocTyBinding {
                             span: constraint.span,
                             position: DiagnosticArgFromDisplay(position),
                         });
@@ -1205,7 +1234,7 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
                 data.inputs.last().unwrap().span.shrink_to_hi().to(data.inputs_span.shrink_to_hi());
             AssocTyParenthesesSub::NotEmpty { open_param, close_param }
         };
-        self.tcx.sess.emit_err(AssocTyParentheses { span: data.span, sub });
+        self.dcx().emit_err(AssocTyParentheses { span: data.span, sub });
     }
 
     #[instrument(level = "debug", skip(self))]
@@ -1347,20 +1376,20 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
         let kind = match &t.kind {
             TyKind::Infer => hir::TyKind::Infer,
             TyKind::Err => {
-                hir::TyKind::Err(self.tcx.sess.span_delayed_bug(t.span, "TyKind::Err lowered"))
+                hir::TyKind::Err(self.dcx().span_delayed_bug(t.span, "TyKind::Err lowered"))
             }
             // FIXME(unnamed_fields): IMPLEMENTATION IN PROGRESS
             #[allow(rustc::untranslatable_diagnostic)]
             #[allow(rustc::diagnostic_outside_of_impl)]
-            TyKind::AnonStruct(ref _fields) => hir::TyKind::Err(
-                self.tcx.sess.span_err(t.span, "anonymous structs are unimplemented"),
-            ),
+            TyKind::AnonStruct(ref _fields) => {
+                hir::TyKind::Err(self.dcx().span_err(t.span, "anonymous structs are unimplemented"))
+            }
             // FIXME(unnamed_fields): IMPLEMENTATION IN PROGRESS
             #[allow(rustc::untranslatable_diagnostic)]
             #[allow(rustc::diagnostic_outside_of_impl)]
-            TyKind::AnonUnion(ref _fields) => hir::TyKind::Err(
-                self.tcx.sess.span_err(t.span, "anonymous unions are unimplemented"),
-            ),
+            TyKind::AnonUnion(ref _fields) => {
+                hir::TyKind::Err(self.dcx().span_err(t.span, "anonymous unions are unimplemented"))
+            }
             TyKind::Slice(ty) => hir::TyKind::Slice(self.lower_ty(ty, itctx)),
             TyKind::Ptr(mt) => hir::TyKind::Ptr(self.lower_mt(mt, itctx)),
             TyKind::Ref(region, mt) => {
@@ -1518,7 +1547,7 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
                         hir::TyKind::Err(guar)
                     }
                     ImplTraitContext::Disallowed(position) => {
-                        let guar = self.tcx.sess.emit_err(MisplacedImplTrait {
+                        let guar = self.dcx().emit_err(MisplacedImplTrait {
                             span: t.span,
                             position: DiagnosticArgFromDisplay(position),
                         });
@@ -1528,7 +1557,7 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
             }
             TyKind::MacCall(_) => panic!("`TyKind::MacCall` should have been expanded by now"),
             TyKind::CVarArgs => {
-                let guar = self.tcx.sess.span_delayed_bug(
+                let guar = self.dcx().span_delayed_bug(
                     t.span,
                     "`TyKind::CVarArgs` should have been handled elsewhere",
                 );
@@ -1672,8 +1701,7 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
                     if let Some(old_def_id) = self.orig_opt_local_def_id(param) {
                         old_def_id
                     } else {
-                        self.tcx
-                            .sess
+                        self.dcx()
                             .span_delayed_bug(lifetime.ident.span, "no def-id for fresh lifetime");
                         continue;
                     }
@@ -2569,7 +2597,7 @@ impl<'hir> GenericArgsCtor<'hir> {
         let hir_id = lcx.next_id();
 
         let Some(host_param_id) = lcx.host_param_id else {
-            lcx.tcx.sess.span_delayed_bug(
+            lcx.dcx().span_delayed_bug(
                 span,
                 "no host param id for call in const yet no errors reported",
             );
