@@ -242,9 +242,15 @@ pub struct ClosureArgs<'tcx> {
 
 /// Struct returned by `split()`.
 pub struct ClosureArgsParts<'tcx> {
+    /// This is the args of the typeck root.
     pub parent_args: &'tcx [GenericArg<'tcx>],
+    /// Represents the maximum calling capability of the closure.
     pub closure_kind_ty: Ty<'tcx>,
+    /// Captures the closure's signature. This closure signature is "tupled", and
+    /// thus has a peculiar signature of `extern "rust-call" fn((Args, ...)) -> Ty`.
     pub closure_sig_as_fn_ptr_ty: Ty<'tcx>,
+    /// The upvars captured by the closure. Remains an inference variable
+    /// until the upvar analysis, which happens late in HIR typeck.
     pub tupled_upvars_ty: Ty<'tcx>,
 }
 
@@ -277,15 +283,6 @@ impl<'tcx> ClosureArgs<'tcx> {
         }
     }
 
-    /// Returns `true` only if enough of the synthetic types are known to
-    /// allow using all of the methods on `ClosureArgs` without panicking.
-    ///
-    /// Used primarily by `ty::print::pretty` to be able to handle closure
-    /// types that haven't had their synthetic types substituted in.
-    pub fn is_valid(self) -> bool {
-        self.args.len() >= 3 && matches!(self.split().tupled_upvars_ty.kind(), Tuple(_))
-    }
-
     /// Returns the substitutions of the closure's parent.
     pub fn parent_args(self) -> &'tcx [GenericArg<'tcx>] {
         self.split().parent_args
@@ -296,9 +293,9 @@ impl<'tcx> ClosureArgs<'tcx> {
     /// empty iterator is returned.
     #[inline]
     pub fn upvar_tys(self) -> &'tcx List<Ty<'tcx>> {
-        match self.tupled_upvars_ty().kind() {
+        match *self.tupled_upvars_ty().kind() {
             TyKind::Error(_) => ty::List::empty(),
-            TyKind::Tuple(..) => self.tupled_upvars_ty().tuple_fields(),
+            TyKind::Tuple(tys) => tys,
             TyKind::Infer(_) => bug!("upvar_tys called before capture types are inferred"),
             ty => bug!("Unexpected representation of upvar types tuple {:?}", ty),
         }
@@ -337,10 +334,9 @@ impl<'tcx> ClosureArgs<'tcx> {
 
     /// Extracts the signature from the closure.
     pub fn sig(self) -> ty::PolyFnSig<'tcx> {
-        let ty = self.sig_as_fn_ptr_ty();
-        match ty.kind() {
-            ty::FnPtr(sig) => *sig,
-            _ => bug!("closure_sig_as_fn_ptr_ty is not a fn-ptr: {:?}", ty.kind()),
+        match *self.sig_as_fn_ptr_ty().kind() {
+            ty::FnPtr(sig) => sig,
+            ty => bug!("closure_sig_as_fn_ptr_ty is not a fn-ptr: {ty:?}"),
         }
     }
 
@@ -356,11 +352,17 @@ pub struct CoroutineArgs<'tcx> {
 }
 
 pub struct CoroutineArgsParts<'tcx> {
+    /// This is the args of the typeck root.
     pub parent_args: &'tcx [GenericArg<'tcx>],
     pub resume_ty: Ty<'tcx>,
     pub yield_ty: Ty<'tcx>,
     pub return_ty: Ty<'tcx>,
+    /// The interior type of the coroutine.
+    /// Represents all types that are stored in locals
+    /// in the coroutine's body.
     pub witness: Ty<'tcx>,
+    /// The upvars captured by the closure. Remains an inference variable
+    /// until the upvar analysis, which happens late in HIR typeck.
     pub tupled_upvars_ty: Ty<'tcx>,
 }
 
@@ -397,15 +399,6 @@ impl<'tcx> CoroutineArgs<'tcx> {
         }
     }
 
-    /// Returns `true` only if enough of the synthetic types are known to
-    /// allow using all of the methods on `CoroutineArgs` without panicking.
-    ///
-    /// Used primarily by `ty::print::pretty` to be able to handle coroutine
-    /// types that haven't had their synthetic types substituted in.
-    pub fn is_valid(self) -> bool {
-        self.args.len() >= 5 && matches!(self.split().tupled_upvars_ty.kind(), Tuple(_))
-    }
-
     /// Returns the substitutions of the coroutine's parent.
     pub fn parent_args(self) -> &'tcx [GenericArg<'tcx>] {
         self.split().parent_args
@@ -425,9 +418,9 @@ impl<'tcx> CoroutineArgs<'tcx> {
     /// empty iterator is returned.
     #[inline]
     pub fn upvar_tys(self) -> &'tcx List<Ty<'tcx>> {
-        match self.tupled_upvars_ty().kind() {
+        match *self.tupled_upvars_ty().kind() {
             TyKind::Error(_) => ty::List::empty(),
-            TyKind::Tuple(..) => self.tupled_upvars_ty().tuple_fields(),
+            TyKind::Tuple(tys) => tys,
             TyKind::Infer(_) => bug!("upvar_tys called before capture types are inferred"),
             ty => bug!("Unexpected representation of upvar types tuple {:?}", ty),
         }
@@ -869,7 +862,7 @@ impl<'tcx> PolyTraitRef<'tcx> {
 }
 
 impl<'tcx> IntoDiagnosticArg for TraitRef<'tcx> {
-    fn into_diagnostic_arg(self) -> DiagnosticArgValue<'static> {
+    fn into_diagnostic_arg(self) -> DiagnosticArgValue {
         self.to_string().into_diagnostic_arg()
     }
 }
@@ -915,7 +908,7 @@ impl<'tcx> ExistentialTraitRef<'tcx> {
 }
 
 impl<'tcx> IntoDiagnosticArg for ExistentialTraitRef<'tcx> {
-    fn into_diagnostic_arg(self) -> DiagnosticArgValue<'static> {
+    fn into_diagnostic_arg(self) -> DiagnosticArgValue {
         self.to_string().into_diagnostic_arg()
     }
 }
@@ -1156,7 +1149,7 @@ impl<'tcx, T> IntoDiagnosticArg for Binder<'tcx, T>
 where
     T: IntoDiagnosticArg,
 {
-    fn into_diagnostic_arg(self) -> DiagnosticArgValue<'static> {
+    fn into_diagnostic_arg(self) -> DiagnosticArgValue {
         self.value.into_diagnostic_arg()
     }
 }
@@ -1225,7 +1218,7 @@ impl<'tcx> AliasTy<'tcx> {
 
     /// Whether this alias type is an opaque.
     pub fn is_opaque(self, tcx: TyCtxt<'tcx>) -> bool {
-        matches!(self.opt_kind(tcx), Some(ty::AliasKind::Opaque))
+        matches!(self.opt_kind(tcx), Some(ty::Opaque))
     }
 
     /// FIXME: rename `AliasTy` to `AliasTerm` and always handle
@@ -1366,7 +1359,7 @@ impl<'tcx> FnSig<'tcx> {
 }
 
 impl<'tcx> IntoDiagnosticArg for FnSig<'tcx> {
-    fn into_diagnostic_arg(self) -> DiagnosticArgValue<'static> {
+    fn into_diagnostic_arg(self) -> DiagnosticArgValue {
         self.to_string().into_diagnostic_arg()
     }
 }
@@ -2745,7 +2738,7 @@ impl<'tcx> Ty<'tcx> {
             // Extern types have metadata = ().
             | ty::Foreign(..)
             // `dyn*` has no metadata
-            | ty::Dynamic(_, _, DynKind::DynStar)
+            | ty::Dynamic(_, _, ty::DynStar)
             // If returned by `struct_tail_without_normalization` this is a unit struct
             // without any fields, or not a struct, and therefore is Sized.
             | ty::Adt(..)
@@ -2754,7 +2747,7 @@ impl<'tcx> Ty<'tcx> {
             | ty::Tuple(..) => (tcx.types.unit, false),
 
             ty::Str | ty::Slice(_) => (tcx.types.usize, false),
-            ty::Dynamic(_, _, DynKind::Dyn) => {
+            ty::Dynamic(_, _, ty::Dyn) => {
                 let dyn_metadata = tcx.require_lang_item(LangItem::DynMetadata, None);
                 (tcx.type_of(dyn_metadata).instantiate(tcx, &[tail.into()]), false)
             },

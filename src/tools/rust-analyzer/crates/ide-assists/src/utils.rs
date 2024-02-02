@@ -23,8 +23,8 @@ use syntax::{
 
 use crate::assist_context::{AssistContext, SourceChangeBuilder};
 
-pub(crate) mod suggest_name;
 mod gen_trait_fn_body;
+pub(crate) mod suggest_name;
 
 pub(crate) fn unwrap_trivial_block(block_expr: ast::BlockExpr) -> ast::Expr {
     extract_trivial_expression(&block_expr)
@@ -117,7 +117,7 @@ pub fn filter_assoc_items(
                 return false;
             }
 
-            return true;
+            true
         })
         // Note: This throws away items with no source.
         .filter_map(|assoc_item| {
@@ -165,7 +165,7 @@ pub fn add_trait_assoc_items_to_impl(
     target_scope: hir::SemanticsScope<'_>,
 ) -> ast::AssocItem {
     let new_indent_level = IndentLevel::from_node(impl_.syntax()) + 1;
-    let items = original_items.into_iter().map(|InFile { file_id, value: original_item }| {
+    let items = original_items.iter().map(|InFile { file_id, value: original_item }| {
         let cloned_item = {
             if file_id.is_macro() {
                 if let Some(formatted) =

@@ -98,7 +98,6 @@ use rustc_middle::query::Providers;
 use rustc_middle::ty::{self, RootVariableMinCaptureList, Ty, TyCtxt};
 use rustc_session::lint;
 use rustc_span::symbol::{kw, sym, Symbol};
-use rustc_span::DUMMY_SP;
 use rustc_span::{BytePos, Span};
 
 use std::io;
@@ -560,7 +559,7 @@ impl<'a, 'tcx> Liveness<'a, 'tcx> {
         match self.successors[ln] {
             Some(successor) => self.assigned_on_entry(successor, var),
             None => {
-                self.ir.tcx.dcx().span_delayed_bug(DUMMY_SP, "no successor");
+                self.ir.tcx.dcx().delayed_bug("no successor");
                 true
             }
         }
@@ -1286,7 +1285,7 @@ impl<'a, 'tcx> Liveness<'a, 'tcx> {
             // that we do not emit the same warning twice if the uninhabited type
             // is indeed `!`.
 
-            self.ir.tcx.emit_spanned_lint(
+            self.ir.tcx.emit_node_span_lint(
                 lint::builtin::UNREACHABLE_CODE,
                 expr_id,
                 expr_span,
@@ -1447,7 +1446,7 @@ impl<'tcx> Liveness<'_, 'tcx> {
                 if self.used_on_entry(entry_ln, var) {
                     if !self.live_on_entry(entry_ln, var) {
                         if let Some(name) = self.should_warn(var) {
-                            self.ir.tcx.emit_spanned_lint(
+                            self.ir.tcx.emit_node_span_lint(
                                 lint::builtin::UNUSED_ASSIGNMENTS,
                                 var_hir_id,
                                 vec![span],
@@ -1457,7 +1456,7 @@ impl<'tcx> Liveness<'_, 'tcx> {
                     }
                 } else {
                     if let Some(name) = self.should_warn(var) {
-                        self.ir.tcx.emit_spanned_lint(
+                        self.ir.tcx.emit_node_span_lint(
                             lint::builtin::UNUSED_VARIABLES,
                             var_hir_id,
                             vec![span],
@@ -1479,7 +1478,7 @@ impl<'tcx> Liveness<'_, 'tcx> {
                     if !self.live_on_entry(ln, var)
                         && let Some(name) = self.should_warn(var)
                     {
-                        self.ir.tcx.emit_spanned_lint(
+                        self.ir.tcx.emit_node_span_lint(
                             lint::builtin::UNUSED_ASSIGNMENTS,
                             hir_id,
                             spans,
@@ -1553,7 +1552,7 @@ impl<'tcx> Liveness<'_, 'tcx> {
                 if ln == self.exit_ln { false } else { self.assigned_on_exit(ln, var) };
 
             if is_assigned {
-                self.ir.tcx.emit_spanned_lint(
+                self.ir.tcx.emit_node_span_lint(
                     lint::builtin::UNUSED_VARIABLES,
                     first_hir_id,
                     hir_ids_and_spans
@@ -1575,7 +1574,7 @@ impl<'tcx> Liveness<'_, 'tcx> {
                         span.with_hi(BytePos(span.hi().0 + 1))
                     })
                     .collect();
-                self.ir.tcx.emit_spanned_lint(
+                self.ir.tcx.emit_node_span_lint(
                     lint::builtin::UNUSED_VARIABLES,
                     first_hir_id,
                     hir_ids_and_spans.iter().map(|(_, pat_span, _)| *pat_span).collect::<Vec<_>>(),
@@ -1600,7 +1599,7 @@ impl<'tcx> Liveness<'_, 'tcx> {
                     let non_shorthands =
                         non_shorthands.into_iter().map(|(_, pat_span, _)| pat_span).collect();
 
-                    self.ir.tcx.emit_spanned_lint(
+                    self.ir.tcx.emit_node_span_lint(
                         lint::builtin::UNUSED_VARIABLES,
                         first_hir_id,
                         hir_ids_and_spans
@@ -1639,7 +1638,7 @@ impl<'tcx> Liveness<'_, 'tcx> {
                         }
                     };
 
-                    self.ir.tcx.emit_spanned_lint(
+                    self.ir.tcx.emit_node_span_lint(
                         lint::builtin::UNUSED_VARIABLES,
                         first_hir_id,
                         hir_ids_and_spans
@@ -1691,7 +1690,7 @@ impl<'tcx> Liveness<'_, 'tcx> {
         if !self.live_on_exit(ln, var)
             && let Some(name) = self.should_warn(var)
         {
-            self.ir.tcx.emit_spanned_lint(
+            self.ir.tcx.emit_node_span_lint(
                 lint::builtin::UNUSED_ASSIGNMENTS,
                 hir_id,
                 spans,

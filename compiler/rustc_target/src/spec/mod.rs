@@ -1597,10 +1597,13 @@ supported_targets! {
     ("x86_64-unikraft-linux-musl", x86_64_unikraft_linux_musl),
 
     ("riscv32i-unknown-none-elf", riscv32i_unknown_none_elf),
+    ("riscv32im-risc0-zkvm-elf", riscv32im_risc0_zkvm_elf),
     ("riscv32im-unknown-none-elf", riscv32im_unknown_none_elf),
     ("riscv32imc-unknown-none-elf", riscv32imc_unknown_none_elf),
     ("riscv32imc-esp-espidf", riscv32imc_esp_espidf),
     ("riscv32imac-esp-espidf", riscv32imac_esp_espidf),
+    ("riscv32imafc-esp-espidf", riscv32imafc_esp_espidf),
+
     ("riscv32imac-unknown-none-elf", riscv32imac_unknown_none_elf),
     ("riscv32imafc-unknown-none-elf", riscv32imafc_unknown_none_elf),
     ("riscv32imac-unknown-xous-elf", riscv32imac_unknown_xous_elf),
@@ -2399,10 +2402,14 @@ impl DerefMut for Target {
 
 impl Target {
     /// Given a function ABI, turn it into the correct ABI for this target.
-    pub fn adjust_abi(&self, abi: Abi) -> Abi {
+    pub fn adjust_abi(&self, abi: Abi, c_variadic: bool) -> Abi {
         match abi {
             Abi::C { .. } => self.default_adjusted_cabi.unwrap_or(abi),
-            Abi::System { unwind } if self.is_like_windows && self.arch == "x86" => {
+
+            // On Windows, `extern "system"` behaves like msvc's `__stdcall`.
+            // `__stdcall` only applies on x86 and on non-variadic functions:
+            // https://learn.microsoft.com/en-us/cpp/cpp/stdcall?view=msvc-170
+            Abi::System { unwind } if self.is_like_windows && self.arch == "x86" && !c_variadic => {
                 Abi::Stdcall { unwind }
             }
             Abi::System { unwind } => Abi::C { unwind },
@@ -2450,7 +2457,6 @@ impl Target {
             Win64 { .. } | SysV64 { .. } => self.arch == "x86_64",
             PtxKernel => self.arch == "nvptx64",
             Msp430Interrupt => self.arch == "msp430",
-            AmdGpuKernel => self.arch == "amdgcn",
             RiscvInterruptM | RiscvInterruptS => ["riscv32", "riscv64"].contains(&&self.arch[..]),
             AvrInterrupt | AvrNonBlockingInterrupt => self.arch == "avr",
             Wasm => ["wasm32", "wasm64"].contains(&&self.arch[..]),
@@ -3394,19 +3400,22 @@ impl Hash for TargetTriple {
 impl<S: Encoder> Encodable<S> for TargetTriple {
     fn encode(&self, s: &mut S) {
         match self {
-            TargetTriple::TargetTriple(triple) => s.emit_enum_variant(0, |s| s.emit_str(triple)),
-            TargetTriple::TargetJson { path_for_rustdoc: _, triple, contents } => s
-                .emit_enum_variant(1, |s| {
-                    s.emit_str(triple);
-                    s.emit_str(contents)
-                }),
+            TargetTriple::TargetTriple(triple) => {
+                s.emit_u8(0);
+                s.emit_str(triple);
+            }
+            TargetTriple::TargetJson { path_for_rustdoc: _, triple, contents } => {
+                s.emit_u8(1);
+                s.emit_str(triple);
+                s.emit_str(contents);
+            }
         }
     }
 }
 
 impl<D: Decoder> Decodable<D> for TargetTriple {
     fn decode(d: &mut D) -> Self {
-        match d.read_usize() {
+        match d.read_u8() {
             0 => TargetTriple::TargetTriple(d.read_str().to_owned()),
             1 => TargetTriple::TargetJson {
                 path_for_rustdoc: PathBuf::new(),

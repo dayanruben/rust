@@ -40,7 +40,7 @@ use crate::{
     Access, Adjust, Adjustment, AutoBorrow, BindingMode, BuiltinAttr, Callable, ConstParam, Crate,
     DeriveHelper, Field, Function, HasSource, HirFileId, Impl, InFile, Label, LifetimeParam, Local,
     Macro, Module, ModuleDef, Name, OverloadedDeref, Path, ScopeDef, Struct, ToolModule, Trait,
-    Type, TypeAlias, TypeParam, VariantDef,
+    TupleField, Type, TypeAlias, TypeParam, VariantDef,
 };
 
 pub enum DescendPreference {
@@ -428,12 +428,12 @@ impl<'db> SemanticsImpl<'db> {
         if let Some(original_string) = ast::String::cast(original_token.clone()) {
             if let Some(quote) = original_string.open_quote_text_range() {
                 return self
-                    .descend_into_macros(DescendPreference::SameText, original_token.clone())
+                    .descend_into_macros(DescendPreference::SameText, original_token)
                     .into_iter()
                     .find_map(|token| {
                         self.resolve_offset_in_format_args(
                             ast::String::cast(token)?,
-                            offset - quote.end(),
+                            offset.checked_sub(quote.end())?,
                         )
                     })
                     .map(|(range, res)| (range + quote.end(), res));
@@ -659,10 +659,8 @@ impl<'db> SemanticsImpl<'db> {
                     // First expand into attribute invocations
                     let containing_attribute_macro_call = self.with_ctx(|ctx| {
                         token.parent_ancestors().filter_map(ast::Item::cast).find_map(|item| {
-                            if item.attrs().next().is_none() {
-                                // Don't force populate the dyn cache for items that don't have an attribute anyways
-                                return None;
-                            }
+                            // Don't force populate the dyn cache for items that don't have an attribute anyways
+                            item.attrs().next()?;
                             Some((
                                 ctx.item_to_macro_call(InFile::new(file_id, item.clone()))?,
                                 item,
@@ -1008,9 +1006,7 @@ impl<'db> SemanticsImpl<'db> {
                     // Update `source_ty` for the next adjustment
                     let source = mem::replace(&mut source_ty, target.clone());
 
-                    let adjustment = Adjustment { source, target, kind };
-
-                    adjustment
+                    Adjustment { source, target, kind }
                 })
                 .collect()
         })
@@ -1085,14 +1081,14 @@ impl<'db> SemanticsImpl<'db> {
         self.analyze(call.syntax())?.resolve_method_call_as_callable(self.db, call)
     }
 
-    pub fn resolve_field(&self, field: &ast::FieldExpr) -> Option<Field> {
+    pub fn resolve_field(&self, field: &ast::FieldExpr) -> Option<Either<Field, TupleField>> {
         self.analyze(field.syntax())?.resolve_field(self.db, field)
     }
 
     pub fn resolve_field_fallback(
         &self,
         field: &ast::FieldExpr,
-    ) -> Option<Either<Field, Function>> {
+    ) -> Option<Either<Either<Field, TupleField>, Function>> {
         self.analyze(field.syntax())?.resolve_field_fallback(self.db, field)
     }
 
@@ -1255,7 +1251,7 @@ impl<'db> SemanticsImpl<'db> {
         assert!(root_node.parent().is_none());
         let mut cache = self.cache.borrow_mut();
         let prev = cache.insert(root_node, file_id);
-        assert!(prev == None || prev == Some(file_id))
+        assert!(prev.is_none() || prev == Some(file_id))
     }
 
     pub fn assert_contains_node(&self, node: &SyntaxNode) {

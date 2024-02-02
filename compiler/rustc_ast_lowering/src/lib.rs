@@ -33,10 +33,8 @@
 #![allow(internal_features)]
 #![feature(rustdoc_internals)]
 #![doc(rust_logo)]
-#![feature(if_let_guard)]
 #![feature(box_patterns)]
 #![feature(let_chains)]
-#![recursion_limit = "256"]
 #![deny(rustc::untranslatable_diagnostic)]
 #![deny(rustc::diagnostic_outside_of_impl)]
 
@@ -77,6 +75,7 @@ macro_rules! arena_vec {
 
 mod asm;
 mod block;
+mod delegation;
 mod errors;
 mod expr;
 mod format;
@@ -661,9 +660,9 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
         let (opt_hash_including_bodies, attrs_hash) = if self.tcx.needs_crate_hash() {
             self.tcx.with_stable_hashing_context(|mut hcx| {
                 let mut stable_hasher = StableHasher::new();
-                hcx.with_hir_bodies(node.def_id(), &bodies, |hcx| {
-                    node.hash_stable(hcx, &mut stable_hasher)
-                });
+                node.hash_stable(&mut hcx, &mut stable_hasher);
+                // Bodies are stored out of line, so we need to pull them explicitly in the hash.
+                bodies.hash_stable(&mut hcx, &mut stable_hasher);
                 let h1 = stable_hasher.finish();
 
                 let mut stable_hasher = StableHasher::new();
@@ -1042,7 +1041,7 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
                         {
                             add_feature_diagnostics(
                                 &mut err,
-                                &self.tcx.sess.parse_sess,
+                                &self.tcx.sess,
                                 sym::return_type_notation,
                             );
                         }
@@ -2306,10 +2305,13 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
         match c.value.kind {
             ExprKind::Underscore => {
                 if self.tcx.features().generic_arg_infer {
-                    hir::ArrayLen::Infer(self.lower_node_id(c.id), self.lower_span(c.value.span))
+                    hir::ArrayLen::Infer(hir::InferArg {
+                        hir_id: self.lower_node_id(c.id),
+                        span: self.lower_span(c.value.span),
+                    })
                 } else {
                     feature_err(
-                        &self.tcx.sess.parse_sess,
+                        &self.tcx.sess,
                         sym::generic_arg_infer,
                         c.value.span,
                         "using `_` for array lengths is unstable",

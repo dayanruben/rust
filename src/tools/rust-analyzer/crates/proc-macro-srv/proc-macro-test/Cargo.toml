@@ -13,7 +13,4 @@ doctest = false
 cargo_metadata = "0.18.1"
 
 # local deps
-toolchain = { path = "../../toolchain", version = "0.0.0" }
-
-[features]
-sysroot-abi = []
+toolchain.workspace = true

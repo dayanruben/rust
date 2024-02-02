@@ -263,9 +263,6 @@ pub fn impl_(
     ast_from_text(&format!("impl{gen_params} {path_type}{tr_gen_args}{where_clause}{{{}}}", body))
 }
 
-// FIXME : We must make *_gen_args' type ast::GenericArgList but in order to do so we must implement in `edit_in_place.rs`
-// `add_generic_arg()` just like `add_generic_param()`
-// is implemented for `ast::GenericParamList`
 pub fn impl_trait(
     is_unsafe: bool,
     trait_gen_params: Option<ast::GenericParamList>,
@@ -597,6 +594,9 @@ pub fn expr_macro_call(f: ast::Expr, arg_list: ast::ArgList) -> ast::Expr {
 }
 pub fn expr_ref(expr: ast::Expr, exclusive: bool) -> ast::Expr {
     expr_from_text(&if exclusive { format!("&mut {expr}") } else { format!("&{expr}") })
+}
+pub fn expr_reborrow(expr: ast::Expr) -> ast::Expr {
+    expr_from_text(&format!("&mut *{expr}"))
 }
 pub fn expr_closure(pats: impl IntoIterator<Item = ast::Param>, expr: ast::Expr) -> ast::Expr {
     let params = pats.into_iter().join(", ");

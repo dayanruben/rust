@@ -186,14 +186,13 @@ impl TypeLocation {
     }
 
     pub(crate) fn complete_consts(&self) -> bool {
-        match self {
+        matches!(
+            self,
             TypeLocation::GenericArg {
                 corresponding_param: Some(ast::GenericParam::ConstParam(_)),
                 ..
-            } => true,
-            TypeLocation::AssocConstEq => true,
-            _ => false,
-        }
+            } | TypeLocation::AssocConstEq
+        )
     }
 
     pub(crate) fn complete_types(&self) -> bool {
@@ -527,6 +526,11 @@ impl CompletionContext<'_> {
             Some(lang) => OP_TRAIT_LANG_NAMES.contains(&lang.as_str()),
             None => false,
         }
+    }
+
+    /// Whether the given trait has `#[doc(notable_trait)]`
+    pub(crate) fn is_doc_notable_trait(&self, trait_: hir::Trait) -> bool {
+        trait_.attrs(self.db).has_doc_notable_trait()
     }
 
     /// Returns the traits in scope, with the [`Drop`] trait removed.

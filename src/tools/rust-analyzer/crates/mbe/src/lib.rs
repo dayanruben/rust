@@ -8,11 +8,11 @@
 
 #![warn(rust_2018_idioms, unused_lifetimes)]
 
-mod parser;
 mod expander;
+mod parser;
 mod syntax_bridge;
-mod tt_iter;
 mod to_parser_input;
+mod tt_iter;
 
 #[cfg(test)]
 mod benchmark;
@@ -254,7 +254,7 @@ impl<S: Span> DeclarativeMacro<S> {
         new_meta_vars: bool,
         call_site: S,
     ) -> ExpandResult<tt::Subtree<S>> {
-        expander::expand_rules(&self.rules, &tt, marker, self.is_2021, new_meta_vars, call_site)
+        expander::expand_rules(&self.rules, tt, marker, self.is_2021, new_meta_vars, call_site)
     }
 }
 

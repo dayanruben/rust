@@ -11,16 +11,18 @@ pub mod attrs;
 pub mod builtin_attr_macro;
 pub mod builtin_derive_macro;
 pub mod builtin_fn_macro;
+pub mod change;
 pub mod db;
+pub mod declarative;
 pub mod eager;
 pub mod files;
-pub mod change;
 pub mod hygiene;
 pub mod mod_path;
 pub mod name;
 pub mod proc_macro;
 pub mod quote;
 pub mod span_map;
+
 mod fixup;
 
 use attrs::collect_attrs;
@@ -77,7 +79,7 @@ macro_rules! impl_intern_lookup {
         impl $crate::Intern for $loc {
             type Database<'db> = dyn $db + 'db;
             type ID = $id;
-            fn intern<'db>(self, db: &Self::Database<'db>) -> $id {
+            fn intern(self, db: &Self::Database<'_>) -> $id {
                 db.$intern(self)
             }
         }
@@ -85,7 +87,7 @@ macro_rules! impl_intern_lookup {
         impl $crate::Lookup for $id {
             type Database<'db> = dyn $db + 'db;
             type Data = $loc;
-            fn lookup<'db>(&self, db: &Self::Database<'db>) -> $loc {
+            fn lookup(&self, db: &Self::Database<'_>) -> $loc {
                 db.$lookup(*self)
             }
         }
@@ -96,13 +98,13 @@ macro_rules! impl_intern_lookup {
 pub trait Intern {
     type Database<'db>: ?Sized;
     type ID;
-    fn intern<'db>(self, db: &Self::Database<'db>) -> Self::ID;
+    fn intern(self, db: &Self::Database<'_>) -> Self::ID;
 }
 
 pub trait Lookup {
     type Database<'db>: ?Sized;
     type Data;
-    fn lookup<'db>(&self, db: &Self::Database<'db>) -> Self::Data;
+    fn lookup(&self, db: &Self::Database<'_>) -> Self::Data;
 }
 
 impl_intern_lookup!(
@@ -167,7 +169,8 @@ pub struct MacroCallLoc {
     pub krate: CrateId,
     /// Some if this is a macro call for an eager macro. Note that this is `None`
     /// for the eager input macro file.
-    // FIXME: This seems bad to save in an interned structure
+    // FIXME: This is being interned, subtrees can vary quickly differ just slightly causing
+    // leakage problems here
     eager: Option<Arc<EagerCallInfo>>,
     pub kind: MacroCallKind,
     pub call_site: Span,
@@ -220,6 +223,8 @@ pub enum MacroCallKind {
     },
     Attr {
         ast_id: AstId<ast::Item>,
+        // FIXME: This is being interned, subtrees can vary quickly differ just slightly causing
+        // leakage problems here
         attr_args: Option<Arc<tt::Subtree>>,
         /// Syntactical index of the invoking `#[attribute]`.
         ///
@@ -316,6 +321,7 @@ pub trait MacroFileIdExt {
     fn expansion_level(self, db: &dyn ExpandDatabase) -> u32;
     /// If this is a macro call, returns the syntax node of the call.
     fn call_node(self, db: &dyn ExpandDatabase) -> InFile<SyntaxNode>;
+    fn parent(self, db: &dyn ExpandDatabase) -> HirFileId;
 
     fn expansion_info(self, db: &dyn ExpandDatabase) -> ExpansionInfo;
 
@@ -350,6 +356,9 @@ impl MacroFileIdExt for MacroFileId {
                 HirFileIdRepr::MacroFile(it) => it,
             };
         }
+    }
+    fn parent(self, db: &dyn ExpandDatabase) -> HirFileId {
+        self.macro_call_id.lookup(db).kind.file_id()
     }
 
     /// Return expansion information if it is a macro-expansion file
@@ -419,7 +428,7 @@ impl MacroDefId {
 
     pub fn ast_id(&self) -> Either<AstId<ast::Macro>, AstId<ast::Fn>> {
         match self.kind {
-            MacroDefKind::ProcMacro(.., id) => return Either::Right(id),
+            MacroDefKind::ProcMacro(.., id) => Either::Right(id),
             MacroDefKind::Declarative(id)
             | MacroDefKind::BuiltIn(_, id)
             | MacroDefKind::BuiltInAttr(_, id)
@@ -651,10 +660,10 @@ impl ExpansionInfo {
     }
 
     /// Maps the passed in file range down into a macro expansion if it is the input to a macro call.
-    pub fn map_range_down<'a>(
-        &'a self,
+    pub fn map_range_down(
+        &self,
         span: Span,
-    ) -> Option<InMacroFile<impl Iterator<Item = SyntaxToken> + 'a>> {
+    ) -> Option<InMacroFile<impl Iterator<Item = SyntaxToken> + '_>> {
         let tokens = self
             .exp_map
             .ranges_with_span(span)

@@ -11,8 +11,9 @@ pub(crate) fn unresolved_assoc_item(
         ctx,
         DiagnosticCode::RustcHardError("E0599"),
         "no such associated item",
-        d.expr_or_pat.clone().map(Into::into),
+        d.expr_or_pat.map(Into::into),
     )
+    .experimental()
 }
 
 #[cfg(test)]

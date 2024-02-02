@@ -155,7 +155,14 @@ impl PartialEq for AstIdMap {
 impl Eq for AstIdMap {}
 
 impl AstIdMap {
-    pub(crate) fn from_source(node: &SyntaxNode) -> AstIdMap {
+    pub(crate) fn ast_id_map(
+        db: &dyn ExpandDatabase,
+        file_id: span::HirFileId,
+    ) -> triomphe::Arc<AstIdMap> {
+        triomphe::Arc::new(AstIdMap::from_source(&db.parse_or_expand(file_id)))
+    }
+
+    fn from_source(node: &SyntaxNode) -> AstIdMap {
         assert!(node.parent().is_none());
         let mut res = AstIdMap::default();
 
@@ -191,7 +198,7 @@ impl AstIdMap {
 
     /// The [`AstId`] of the root node
     pub fn root(&self) -> SyntaxNodePtr {
-        self.arena[Idx::from_raw(RawIdx::from_u32(0))].clone()
+        self.arena[Idx::from_raw(RawIdx::from_u32(0))]
     }
 
     pub fn ast_id<N: AstIdNode>(&self, item: &N) -> FileAstId<N> {
@@ -213,11 +220,11 @@ impl AstIdMap {
     }
 
     pub fn get<N: AstIdNode>(&self, id: FileAstId<N>) -> AstPtr<N> {
-        AstPtr::try_from_raw(self.arena[id.raw].clone()).unwrap()
+        AstPtr::try_from_raw(self.arena[id.raw]).unwrap()
     }
 
     pub fn get_erased(&self, id: ErasedFileAstId) -> SyntaxNodePtr {
-        self.arena[id].clone()
+        self.arena[id]
     }
 
     fn erased_ast_id(&self, item: &SyntaxNode) -> ErasedFileAstId {
@@ -239,9 +246,7 @@ impl AstIdMap {
 }
 
 fn hash_ptr(ptr: &SyntaxNodePtr) -> u64 {
-    let mut hasher = BuildHasherDefault::<FxHasher>::default().build_hasher();
-    ptr.hash(&mut hasher);
-    hasher.finish()
+    BuildHasherDefault::<FxHasher>::default().hash_one(ptr)
 }
 
 #[derive(Copy, Clone, PartialEq, Eq)]

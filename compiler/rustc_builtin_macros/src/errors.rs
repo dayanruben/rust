@@ -1,6 +1,6 @@
 use rustc_errors::{
-    AddToDiagnostic, DiagCtxt, DiagnosticBuilder, EmissionGuarantee, IntoDiagnostic, Level,
-    MultiSpan, SingleLabelManySpans,
+    codes::*, AddToDiagnostic, DiagCtxt, DiagnosticBuilder, EmissionGuarantee, IntoDiagnostic,
+    Level, MultiSpan, SingleLabelManySpans,
 };
 use rustc_macros::{Diagnostic, Subdiagnostic};
 use rustc_span::{symbol::Ident, Span, Symbol};
@@ -269,7 +269,7 @@ pub(crate) struct ConcatIdentsIdentArgs {
 }
 
 #[derive(Diagnostic)]
-#[diag(builtin_macros_bad_derive_target, code = "E0774")]
+#[diag(builtin_macros_bad_derive_target, code = E0774)]
 pub(crate) struct BadDeriveTarget {
     #[primary_span]
     #[label]
@@ -283,7 +283,7 @@ pub(crate) struct BadDeriveTarget {
 pub(crate) struct TestsNotSupport {}
 
 #[derive(Diagnostic)]
-#[diag(builtin_macros_unexpected_lit, code = "E0777")]
+#[diag(builtin_macros_unexpected_lit, code = E0777)]
 pub(crate) struct BadDeriveLit {
     #[primary_span]
     #[label]
@@ -803,24 +803,23 @@ pub(crate) struct AsmClobberNoReg {
 
 impl<'a, G: EmissionGuarantee> IntoDiagnostic<'a, G> for AsmClobberNoReg {
     fn into_diagnostic(self, dcx: &'a DiagCtxt, level: Level) -> DiagnosticBuilder<'a, G> {
-        let mut diag = DiagnosticBuilder::new(
-            dcx,
-            level,
-            crate::fluent_generated::builtin_macros_asm_clobber_no_reg,
-        );
-        diag.span(self.spans.clone());
         // eager translation as `span_labels` takes `AsRef<str>`
         let lbl1 = dcx.eagerly_translate_to_string(
             crate::fluent_generated::builtin_macros_asm_clobber_abi,
             [].into_iter(),
         );
-        diag.span_labels(self.clobbers, &lbl1);
         let lbl2 = dcx.eagerly_translate_to_string(
             crate::fluent_generated::builtin_macros_asm_clobber_outputs,
             [].into_iter(),
         );
-        diag.span_labels(self.spans, &lbl2);
-        diag
+        DiagnosticBuilder::new(
+            dcx,
+            level,
+            crate::fluent_generated::builtin_macros_asm_clobber_no_reg,
+        )
+        .with_span(self.spans.clone())
+        .with_span_labels(self.clobbers, &lbl1)
+        .with_span_labels(self.spans, &lbl2)
     }
 }
 

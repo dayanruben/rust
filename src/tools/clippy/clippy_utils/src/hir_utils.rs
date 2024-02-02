@@ -134,7 +134,7 @@ impl HirEqInterExpr<'_, '_, '_> {
     /// Checks whether two blocks are the same.
     #[expect(clippy::similar_names)]
     fn eq_block(&mut self, left: &Block<'_>, right: &Block<'_>) -> bool {
-        use TokenKind::{BlockComment, LineComment, Semi, Whitespace};
+        use TokenKind::{Semi, Whitespace};
         if left.stmts.len() != right.stmts.len() {
             return false;
         }
@@ -177,7 +177,7 @@ impl HirEqInterExpr<'_, '_, '_> {
                 return false;
             }
             if !eq_span_tokens(self.inner.cx, lstart..lstmt_span.lo, rstart..rstmt_span.lo, |t| {
-                !matches!(t, Whitespace | LineComment { .. } | BlockComment { .. } | Semi)
+                !matches!(t, Whitespace | Semi)
             }) {
                 return false;
             }
@@ -212,7 +212,7 @@ impl HirEqInterExpr<'_, '_, '_> {
             return false;
         }
         eq_span_tokens(self.inner.cx, lstart..lend, rstart..rend, |t| {
-            !matches!(t, Whitespace | LineComment { .. } | BlockComment { .. } | Semi)
+            !matches!(t, Whitespace | Semi)
         })
     }
 
@@ -865,7 +865,7 @@ impl<'a, 'tcx> SpanlessHash<'a, 'tcx> {
 
                 for arm in arms {
                     self.hash_pat(arm.pat);
-                    if let Some(ref e) = arm.guard {
+                    if let Some(e) = arm.guard {
                         self.hash_expr(e);
                     }
                     self.hash_expr(arm.body);
@@ -1007,7 +1007,7 @@ impl<'a, 'tcx> SpanlessHash<'a, 'tcx> {
                 }
                 e.hash(&mut self.s);
             },
-            PatKind::Never | PatKind::Wild => {},
+            PatKind::Never | PatKind::Wild | PatKind::Err(_) => {},
         }
     }
 
@@ -1108,7 +1108,7 @@ impl<'a, 'tcx> SpanlessHash<'a, 'tcx> {
             TyKind::Typeof(anon_const) => {
                 self.hash_body(anon_const.body);
             },
-            TyKind::Err(_) | TyKind::Infer | TyKind::Never => {},
+            TyKind::Err(_) | TyKind::Infer | TyKind::Never | TyKind::InferDelegation(..) => {},
         }
     }
 

@@ -320,7 +320,7 @@ impl<'a> State<'a> {
                 self.word("/*ERROR*/");
                 self.pclose();
             }
-            hir::TyKind::Infer => {
+            hir::TyKind::Infer | hir::TyKind::InferDelegation(..) => {
                 self.word("_");
             }
         }
@@ -956,7 +956,7 @@ impl<'a> State<'a> {
 
     fn print_array_length(&mut self, len: &hir::ArrayLen) {
         match len {
-            hir::ArrayLen::Infer(_, _) => self.word("_"),
+            hir::ArrayLen::Infer(..) => self.word("_"),
             hir::ArrayLen::Body(ct) => self.print_anon_const(ct),
         }
     }
@@ -1837,6 +1837,11 @@ impl<'a> State<'a> {
                 }
                 self.commasep(Inconsistent, after, |s, p| s.print_pat(p));
                 self.word("]");
+            }
+            PatKind::Err(_) => {
+                self.popen();
+                self.word("/*ERROR*/");
+                self.pclose();
             }
         }
         self.ann.post(self, AnnNode::Pat(pat))

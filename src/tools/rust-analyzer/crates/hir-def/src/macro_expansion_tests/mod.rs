@@ -9,9 +9,9 @@
 //! write unit-tests (in fact, we used to do that), but that makes tests brittle
 //! and harder to understand.
 
-mod mbe;
-mod builtin_fn_macro;
 mod builtin_derive_macro;
+mod builtin_fn_macro;
+mod mbe;
 mod proc_macros;
 
 use std::{iter, ops::Range, sync};
@@ -291,15 +291,8 @@ fn pretty_print_macro_expansion(
             let span = map.span_for_range(token.text_range());
             format_to!(res, "#");
             if show_spans {
-                format_to!(
-                    res,
-                    "{:?}:{:?}@{:?}",
-                    span.anchor.file_id,
-                    span.anchor.ast_id.into_raw(),
-                    span.range,
-                );
-            }
-            if show_ctxt {
+                format_to!(res, "{span}",);
+            } else if show_ctxt {
                 format_to!(res, "\\{}", span.ctx);
             }
             format_to!(res, "#");

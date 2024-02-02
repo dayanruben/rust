@@ -8,12 +8,9 @@
 #![feature(let_chains)]
 #![feature(min_specialization)]
 #![feature(never_type)]
-#![feature(lazy_cell)]
 #![feature(rustc_attrs)]
 #![feature(stmt_expr_attributes)]
-#![feature(trusted_step)]
 #![feature(try_blocks)]
-#![recursion_limit = "256"]
 
 #[macro_use]
 extern crate rustc_middle;
@@ -415,7 +412,7 @@ fn do_mir_borrowck<'tcx>(
 
         let mut_span = tcx.sess.source_map().span_until_non_whitespace(span);
 
-        tcx.emit_spanned_lint(UNUSED_MUT, lint_root, span, VarNeedNotMut { span: mut_span })
+        tcx.emit_node_span_lint(UNUSED_MUT, lint_root, span, VarNeedNotMut { span: mut_span })
     }
 
     let tainted_by_errors = mbcx.emit_errors();
@@ -703,7 +700,7 @@ impl<'cx, 'tcx, R> rustc_mir_dataflow::ResultsVisitor<'cx, 'tcx, R> for MirBorro
             } => {
                 self.consume_operand(loc, (func, span), flow_state);
                 for arg in args {
-                    self.consume_operand(loc, (arg, span), flow_state);
+                    self.consume_operand(loc, (&arg.node, arg.span), flow_state);
                 }
                 self.mutate_place(loc, (*destination, span), Deep, flow_state);
             }
@@ -2399,10 +2396,10 @@ mod error {
         /// and we want only the best of those errors.
         ///
         /// The `report_use_of_moved_or_uninitialized` function checks this map and replaces the
-        /// diagnostic (if there is one) if the `Place` of the error being reported is a prefix of the
-        /// `Place` of the previous most diagnostic. This happens instead of buffering the error. Once
-        /// all move errors have been reported, any diagnostics in this map are added to the buffer
-        /// to be emitted.
+        /// diagnostic (if there is one) if the `Place` of the error being reported is a prefix of
+        /// the `Place` of the previous most diagnostic. This happens instead of buffering the
+        /// error. Once all move errors have been reported, any diagnostics in this map are added
+        /// to the buffer to be emitted.
         ///
         /// `BTreeMap` is used to preserve the order of insertions when iterating. This is necessary
         /// when errors in the map are being re-added to the error buffer so that errors with the
@@ -2410,7 +2407,8 @@ mod error {
         buffered_move_errors:
             BTreeMap<Vec<MoveOutIndex>, (PlaceRef<'tcx>, DiagnosticBuilder<'tcx>)>,
         buffered_mut_errors: FxIndexMap<Span, (DiagnosticBuilder<'tcx>, usize)>,
-        /// Diagnostics to be reported buffer.
+        /// Buffer of diagnostics to be reported. Uses `Diagnostic` rather than `DiagnosticBuilder`
+        /// because it has a mixture of error diagnostics and non-error diagnostics.
         buffered: Vec<Diagnostic>,
         /// Set to Some if we emit an error during borrowck
         tainted_by_errors: Option<ErrorGuaranteed>,
@@ -2434,11 +2432,11 @@ mod error {
                     "diagnostic buffered but not emitted",
                 ))
             }
-            t.buffer(&mut self.buffered);
+            self.buffered.push(t.into_diagnostic());
         }
 
         pub fn buffer_non_error_diag(&mut self, t: DiagnosticBuilder<'_, ()>) {
-            t.buffer(&mut self.buffered);
+            self.buffered.push(t.into_diagnostic());
         }
 
         pub fn set_tainted_by_errors(&mut self, e: ErrorGuaranteed) {
@@ -2486,13 +2484,13 @@ mod error {
             // Buffer any move errors that we collected and de-duplicated.
             for (_, (_, diag)) in std::mem::take(&mut self.errors.buffered_move_errors) {
                 // We have already set tainted for this error, so just buffer it.
-                diag.buffer(&mut self.errors.buffered);
+                self.errors.buffered.push(diag.into_diagnostic());
             }
             for (_, (mut diag, count)) in std::mem::take(&mut self.errors.buffered_mut_errors) {
                 if count > 10 {
                     diag.note(format!("...and {} other attempted mutable borrows", count - 10));
                 }
-                diag.buffer(&mut self.errors.buffered);
+                self.errors.buffered.push(diag.into_diagnostic());
             }
 
             if !self.errors.buffered.is_empty() {

@@ -317,12 +317,12 @@ fn load_crate_graph(
     // wait until Vfs has loaded all roots
     for task in receiver {
         match task {
-            vfs::loader::Message::Progress { n_done, n_total, config_version: _ } => {
-                if n_done == n_total {
+            vfs::loader::Message::Progress { n_done, n_total, .. } => {
+                if n_done == Some(n_total) {
                     break;
                 }
             }
-            vfs::loader::Message::Loaded { files } => {
+            vfs::loader::Message::Loaded { files } | vfs::loader::Message::Changed { files } => {
                 for (path, contents) in files {
                     vfs.set_file_contents(path.into(), contents);
                 }
@@ -331,9 +331,8 @@ fn load_crate_graph(
     }
     let changes = vfs.take_changes();
     for file in changes {
-        if file.exists() {
-            let contents = vfs.file_contents(file.file_id);
-            if let Ok(text) = std::str::from_utf8(contents) {
+        if let vfs::Change::Create(v) | vfs::Change::Modify(v) = file.change {
+            if let Ok(text) = std::str::from_utf8(&v) {
                 analysis_change.change_file(file.file_id, Some(text.into()))
             }
         }
@@ -359,7 +358,7 @@ fn expander_to_proc_macro(
         proc_macro_api::ProcMacroKind::Attr => ProcMacroKind::Attr,
     };
     let expander: sync::Arc<dyn ProcMacroExpander> =
-        if dummy_replace.iter().any(|replace| &**replace == name) {
+        if dummy_replace.iter().any(|replace| **replace == name) {
             match kind {
                 ProcMacroKind::Attr => sync::Arc::new(IdentityExpander),
                 _ => sync::Arc::new(EmptyExpander),

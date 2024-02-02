@@ -321,8 +321,6 @@ declare_features! (
     // feature-group-start: actual feature gates
     // -------------------------------------------------------------------------
 
-    /// Allows using the `amdgpu-kernel` ABI.
-    (unstable, abi_amdgpu_kernel, "1.29.0", Some(51575)),
     /// Allows `extern "avr-interrupt" fn()` and `extern "avr-non-blocking-interrupt" fn()`.
     (unstable, abi_avr_interrupt, "1.45.0", Some(69664)),
     /// Allows `extern "C-cmse-nonsecure-call" fn()`.
@@ -450,7 +448,7 @@ declare_features! (
     (unstable, doc_masked, "1.21.0", Some(44027)),
     /// Allows `dyn* Trait` objects.
     (incomplete, dyn_star, "1.65.0", Some(102425)),
-    // Uses generic effect parameters for ~const bounds
+    /// Uses generic effect parameters for ~const bounds
     (unstable, effects, "1.72.0", Some(102090)),
     /// Allows `X..Y` patterns.
     (unstable, exclusive_range_pattern, "1.11.0", Some(37854)),
@@ -516,6 +514,9 @@ declare_features! (
     (unstable, macro_metavar_expr, "1.61.0", Some(83527)),
     /// Allows `#[marker]` on certain traits allowing overlapping implementations.
     (unstable, marker_trait_attr, "1.30.0", Some(29864)),
+    /// Allows exhaustive pattern matching on types that contain uninhabited types in cases that are
+    /// unambiguously sound.
+    (incomplete, min_exhaustive_patterns, "CURRENT_RUSTC_VERSION", Some(119612)),
     /// A minimal, sound subset of specialization intended to be used by the
     /// standard library until the soundness issues with specialization
     /// are fixed.
@@ -549,7 +550,9 @@ declare_features! (
     /// casts in safe Rust to `dyn Trait` for such a `Trait` is also forbidden.
     (unstable, object_safe_for_dispatch, "1.40.0", Some(43561)),
     /// Allows using enums in offset_of!
-    (unstable, offset_of_enum, "1.75.0", Some(106655)),
+    (unstable, offset_of_enum, "1.75.0", Some(120141)),
+    /// Allows using multiple nested field accesses in offset_of!
+    (unstable, offset_of_nested, "CURRENT_RUSTC_VERSION", Some(120140)),
     /// Allows using `#[optimize(X)]`.
     (unstable, optimize_attribute, "1.34.0", Some(54882)),
     /// Allows macro attributes on expressions, statements and non-inline modules.
@@ -582,6 +585,9 @@ declare_features! (
     (unstable, thread_local, "1.0.0", Some(29594)),
     /// Allows defining `trait X = A + B;` alias items.
     (unstable, trait_alias, "1.24.0", Some(41517)),
+    /// Allows dyn upcasting trait objects via supertraits.
+    /// Dyn upcasting is casting, e.g., `dyn Foo -> dyn Bar` where `Foo: Bar`.
+    (unstable, trait_upcasting, "1.56.0", Some(65991)),
     /// Allows for transmuting between arrays with sizes that contain generic consts.
     (unstable, transmute_generic_consts, "1.70.0", Some(109929)),
     /// Allows #[repr(transparent)] on unions (RFC 2645).

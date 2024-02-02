@@ -301,7 +301,7 @@ fn replace_usages(
 
                 // add imports across modules where needed
                 if let Some((import_scope, path)) = import_data {
-                    let scope = match import_scope.clone() {
+                    let scope = match import_scope {
                         ImportScope::File(it) => ImportScope::File(edit.make_mut(it)),
                         ImportScope::Module(it) => ImportScope::Module(edit.make_mut(it)),
                         ImportScope::Block(it) => ImportScope::Block(edit.make_mut(it)),
@@ -329,7 +329,7 @@ fn augment_references_with_imports(
     references
         .into_iter()
         .filter_map(|FileReference { range, name, .. }| {
-            let name = name.clone().into_name_like()?;
+            let name = name.into_name_like()?;
             ctx.sema.scope(name.syntax()).map(|scope| (range, name, scope.module()))
         })
         .map(|(range, name, ref_module)| {
@@ -422,9 +422,7 @@ fn find_record_pat_field_usage(name: &ast::NameLike) -> Option<ast::Pat> {
 
 fn find_assoc_const_usage(name: &ast::NameLike) -> Option<(ast::Type, ast::Expr)> {
     let const_ = name.syntax().parent().and_then(ast::Const::cast)?;
-    if const_.syntax().parent().and_then(ast::AssocItemList::cast).is_none() {
-        return None;
-    }
+    const_.syntax().parent().and_then(ast::AssocItemList::cast)?;
 
     Some((const_.ty()?, const_.body()?))
 }
@@ -986,7 +984,7 @@ fn foo() {
 }
 
 //- /main.rs
-use foo::{Foo, Bool};
+use foo::{Bool, Foo};
 
 mod foo;
 
@@ -1662,7 +1660,7 @@ impl Foo {
 }
 
 //- /foo.rs
-use crate::{Foo, Bool};
+use crate::{Bool, Foo};
 
 fn foo() -> bool {
     Foo::BOOL == Bool::True

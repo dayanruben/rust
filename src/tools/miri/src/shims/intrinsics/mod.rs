@@ -5,6 +5,7 @@ use std::iter;
 
 use log::trace;
 
+use rand::Rng;
 use rustc_apfloat::{Float, Round};
 use rustc_middle::ty::layout::LayoutOf;
 use rustc_middle::{
@@ -141,20 +142,45 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
                 this.write_pointer(Pointer::new(ptr.provenance, masked_addr), dest)?;
             }
 
+            // We want to return either `true` or `false` at random, or else something like
+            // ```
+            // if !is_val_statically_known(0) { unreachable_unchecked(); }
+            // ```
+            // Would not be considered UB, or the other way around (`is_val_statically_known(0)`).
+            "is_val_statically_known" => {
+                let [arg] = check_arg_count(args)?;
+                this.validate_operand(arg)?;
+                let branch: bool = this.machine.rng.get_mut().gen();
+                this.write_scalar(Scalar::from_bool(branch), dest)?;
+            }
+
             // Floating-point operations
             "fabsf32" => {
                 let [f] = check_arg_count(args)?;
                 let f = this.read_scalar(f)?.to_f32()?;
-                // Can be implemented in soft-floats.
                 // This is a "bitwise" operation, so there's no NaN non-determinism.
                 this.write_scalar(Scalar::from_f32(f.abs()), dest)?;
             }
             "fabsf64" => {
                 let [f] = check_arg_count(args)?;
                 let f = this.read_scalar(f)?.to_f64()?;
-                // Can be implemented in soft-floats.
                 // This is a "bitwise" operation, so there's no NaN non-determinism.
                 this.write_scalar(Scalar::from_f64(f.abs()), dest)?;
+            }
+            "floorf32" | "ceilf32" | "truncf32" | "roundf32" | "rintf32" => {
+                let [f] = check_arg_count(args)?;
+                let f = this.read_scalar(f)?.to_f32()?;
+                let mode = match intrinsic_name {
+                    "floorf32" => Round::TowardNegative,
+                    "ceilf32" => Round::TowardPositive,
+                    "truncf32" => Round::TowardZero,
+                    "roundf32" => Round::NearestTiesToAway,
+                    "rintf32" => Round::NearestTiesToEven,
+                    _ => bug!(),
+                };
+                let res = f.round_to_integral(mode).value;
+                let res = this.adjust_nan(res, &[f]);
+                this.write_scalar(res, dest)?;
             }
             #[rustfmt::skip]
             | "sinf32"
@@ -165,11 +191,6 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
             | "logf32"
             | "log10f32"
             | "log2f32"
-            | "floorf32"
-            | "ceilf32"
-            | "truncf32"
-            | "roundf32"
-            | "rintf32"
             => {
                 let [f] = check_arg_count(args)?;
                 let f = this.read_scalar(f)?.to_f32()?;
@@ -184,11 +205,6 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
                     "logf32" => f_host.ln(),
                     "log10f32" => f_host.log10(),
                     "log2f32" => f_host.log2(),
-                    "floorf32" => f_host.floor(),
-                    "ceilf32" => f_host.ceil(),
-                    "truncf32" => f_host.trunc(),
-                    "roundf32" => f_host.round(),
-                    "rintf32" => f_host.round_ties_even(),
                     _ => bug!(),
                 };
                 let res = res.to_soft();
@@ -196,6 +212,21 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
                 this.write_scalar(res, dest)?;
             }
 
+            "floorf64" | "ceilf64" | "truncf64" | "roundf64" | "rintf64" => {
+                let [f] = check_arg_count(args)?;
+                let f = this.read_scalar(f)?.to_f64()?;
+                let mode = match intrinsic_name {
+                    "floorf64" => Round::TowardNegative,
+                    "ceilf64" => Round::TowardPositive,
+                    "truncf64" => Round::TowardZero,
+                    "roundf64" => Round::NearestTiesToAway,
+                    "rintf64" => Round::NearestTiesToEven,
+                    _ => bug!(),
+                };
+                let res = f.round_to_integral(mode).value;
+                let res = this.adjust_nan(res, &[f]);
+                this.write_scalar(res, dest)?;
+            }
             #[rustfmt::skip]
             | "sinf64"
             | "cosf64"
@@ -205,11 +236,6 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
             | "logf64"
             | "log10f64"
             | "log2f64"
-            | "floorf64"
-            | "ceilf64"
-            | "truncf64"
-            | "roundf64"
-            | "rintf64"
             => {
                 let [f] = check_arg_count(args)?;
                 let f = this.read_scalar(f)?.to_f64()?;
@@ -224,11 +250,6 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
                     "logf64" => f_host.ln(),
                     "log10f64" => f_host.log10(),
                     "log2f64" => f_host.log2(),
-                    "floorf64" => f_host.floor(),
-                    "ceilf64" => f_host.ceil(),
-                    "truncf64" => f_host.trunc(),
-                    "roundf64" => f_host.round(),
-                    "rintf64" => f_host.round_ties_even(),
                     _ => bug!(),
                 };
                 let res = res.to_soft();

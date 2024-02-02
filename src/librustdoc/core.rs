@@ -3,7 +3,7 @@ use rustc_data_structures::sync::Lrc;
 use rustc_data_structures::unord::UnordSet;
 use rustc_errors::emitter::{DynEmitter, HumanEmitter};
 use rustc_errors::json::JsonEmitter;
-use rustc_errors::TerminalUrl;
+use rustc_errors::{codes::*, TerminalUrl};
 use rustc_feature::UnstableFeatures;
 use rustc_hir::def::Res;
 use rustc_hir::def_id::{DefId, DefIdMap, DefIdSet, LocalDefId};
@@ -377,7 +377,7 @@ pub(crate) fn run_global_ctxt(
             {}/rustdoc/how-to-write-documentation.html",
             crate::DOC_RUST_LANG_ORG_CHANNEL
         );
-        tcx.struct_lint_node(
+        tcx.node_lint(
             crate::lint::MISSING_CRATE_LEVEL_DOCS,
             DocContext::as_local_hir_id(tcx, krate.module.item_id).unwrap(),
             "no documentation found for this crate's top-level module",
@@ -449,6 +449,7 @@ pub(crate) fn run_global_ctxt(
 
     tcx.sess.time("check_lint_expectations", || tcx.check_expectations(Some(sym::rustdoc)));
 
+    // We must include lint errors here.
     if tcx.dcx().has_errors_or_lint_errors().is_some() {
         rustc_errors::FatalError.raise();
     }
@@ -495,16 +496,16 @@ impl<'tcx> Visitor<'tcx> for EmitIgnoredResolutionErrors<'tcx> {
                     .intersperse("::")
                     .collect::<String>()
             );
-            let mut err = rustc_errors::struct_span_err!(
+            rustc_errors::struct_span_code_err!(
                 self.tcx.dcx(),
                 path.span,
                 E0433,
                 "failed to resolve: {label}",
-            );
-            err.span_label(path.span, label);
-            err.note("this error was originally ignored because you are running `rustdoc`");
-            err.note("try running again with `rustc` or `cargo check` and you may get a more detailed error");
-            err.emit();
+            )
+            .with_span_label(path.span, label)
+            .with_note("this error was originally ignored because you are running `rustdoc`")
+            .with_note("try running again with `rustc` or `cargo check` and you may get a more detailed error")
+            .emit();
         }
         // We could have an outer resolution that succeeded,
         // but with generic parameters that failed.

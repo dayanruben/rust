@@ -116,8 +116,7 @@ pub fn report_unstable(
     if is_soft {
         soft_handler(SOFT_UNSTABLE, span, msg)
     } else {
-        let mut err =
-            feature_err_issue(&sess.parse_sess, feature, span, GateIssue::Library(issue), msg);
+        let mut err = feature_err_issue(sess, feature, span, GateIssue::Library(issue), msg);
         if let Some((inner_types, msg, sugg, applicability)) = suggestion {
             err.span_suggestion(inner_types, msg, sugg, applicability);
         }
@@ -218,7 +217,7 @@ fn late_report_deprecation(
         return;
     }
     let method_span = method_span.unwrap_or(span);
-    tcx.struct_span_lint_hir(lint, hir_id, method_span, message, |diag| {
+    tcx.node_span_lint(lint, hir_id, method_span, message, |diag| {
         if let hir::Node::Expr(_) = tcx.hir_node(hir_id) {
             let kind = tcx.def_descr(def_id);
             deprecation_suggestion(diag, kind, suggestion, method_span);
@@ -586,7 +585,7 @@ impl<'tcx> TyCtxt<'tcx> {
         unmarked: impl FnOnce(Span, DefId),
     ) -> bool {
         let soft_handler = |lint, span, msg: String| {
-            self.struct_span_lint_hir(lint, id.unwrap_or(hir::CRATE_HIR_ID), span, msg, |_| {})
+            self.node_span_lint(lint, id.unwrap_or(hir::CRATE_HIR_ID), span, msg, |_| {})
         };
         let eval_result =
             self.eval_stability_allow_unstable(def_id, id, span, method_span, allow_unstable);

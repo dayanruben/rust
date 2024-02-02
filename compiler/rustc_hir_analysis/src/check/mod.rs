@@ -66,6 +66,7 @@ mod check;
 mod compare_impl_item;
 pub mod dropck;
 mod entry;
+mod errs;
 pub mod intrinsic;
 pub mod intrinsicck;
 mod region;
@@ -77,7 +78,7 @@ use std::num::NonZeroU32;
 
 use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 use rustc_errors::ErrorGuaranteed;
-use rustc_errors::{pluralize, struct_span_err, Diagnostic, DiagnosticBuilder};
+use rustc_errors::{pluralize, struct_span_code_err, Diagnostic, DiagnosticBuilder};
 use rustc_hir::def_id::{DefId, LocalDefId};
 use rustc_hir::intravisit::Visitor;
 use rustc_index::bit_set::BitSet;
@@ -292,7 +293,7 @@ fn default_body_is_unstable(
 
     rustc_session::parse::add_feature_diagnostics_for_issue(
         &mut err,
-        &tcx.sess.parse_sess,
+        &tcx.sess,
         feature,
         rustc_feature::GateIssue::Library(issue),
         false,
@@ -577,7 +578,7 @@ pub fn check_function_signature<'tcx>(
         fn_id: LocalDefId,
     ) -> rustc_span::Span {
         let mut args = {
-            let node = tcx.hir().expect_owner(fn_id);
+            let node = tcx.expect_hir_owner_node(fn_id);
             let decl = node.fn_decl().unwrap_or_else(|| bug!("expected fn decl, found {:?}", node));
             decl.inputs.iter().map(|t| t.span).chain(std::iter::once(decl.output.span()))
         };

@@ -32,7 +32,6 @@ use clap::ValueEnum;
 use once_cell::sync::Lazy;
 
 #[cfg(test)]
-#[path = "../tests/builder.rs"]
 mod tests;
 
 pub struct Builder<'a> {
@@ -1799,15 +1798,20 @@ impl<'a> Builder<'a> {
         }
 
         if self.config.rust_remap_debuginfo {
-            // FIXME: handle vendored sources
-            let registry_src = t!(home::cargo_home()).join("registry").join("src");
             let mut env_var = OsString::new();
-            for entry in t!(std::fs::read_dir(registry_src)) {
-                if !env_var.is_empty() {
-                    env_var.push("\t");
-                }
-                env_var.push(t!(entry).path());
+            if self.config.vendor {
+                let vendor = self.build.src.join("vendor");
+                env_var.push(vendor);
                 env_var.push("=/rust/deps");
+            } else {
+                let registry_src = t!(home::cargo_home()).join("registry").join("src");
+                for entry in t!(std::fs::read_dir(registry_src)) {
+                    if !env_var.is_empty() {
+                        env_var.push("\t");
+                    }
+                    env_var.push(t!(entry).path());
+                    env_var.push("=/rust/deps");
+                }
             }
             cargo.env("RUSTC_CARGO_REGISTRY_SRC_TO_REMAP", env_var);
         }

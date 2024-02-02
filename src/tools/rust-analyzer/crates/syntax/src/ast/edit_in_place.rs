@@ -1,6 +1,6 @@
 //! Structural editing for ast.
 
-use std::iter::{empty, successors};
+use std::iter::{empty, once, successors};
 
 use parser::{SyntaxKind, T};
 
@@ -293,13 +293,12 @@ impl ast::GenericParamList {
     }
 
     /// Removes the corresponding generic arg
-    pub fn remove_generic_arg(&self, generic_arg: &ast::GenericArg) -> Option<GenericParam> {
+    pub fn remove_generic_arg(&self, generic_arg: &ast::GenericArg) {
         let param_to_remove = self.find_generic_arg(generic_arg);
 
         if let Some(param) = &param_to_remove {
             self.remove_generic_param(param.clone());
         }
-        param_to_remove
     }
 
     /// Constructs a matching [`ast::GenericArgList`]
@@ -530,6 +529,25 @@ impl ast::UseTree {
             ted::remove(prefix.syntax());
             Some(())
         }
+    }
+
+    /// Wraps the use tree in use tree list with no top level path (if it isn't already).
+    ///
+    /// # Examples
+    ///
+    /// `foo::bar` -> `{foo::bar}`
+    ///
+    /// `{foo::bar}` -> `{foo::bar}`
+    pub fn wrap_in_tree_list(&self) {
+        if self.path().is_none() {
+            return;
+        }
+        let subtree = self.clone_subtree().clone_for_update();
+        ted::remove_all_iter(self.syntax().children_with_tokens());
+        ted::append_child(
+            self.syntax(),
+            make::use_tree_list(once(subtree)).clone_for_update().syntax(),
+        );
     }
 }
 

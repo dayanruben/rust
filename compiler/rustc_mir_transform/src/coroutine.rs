@@ -675,9 +675,9 @@ fn eliminate_get_context_call<'tcx>(bb_data: &mut BasicBlockData<'tcx>) -> Local
     let terminator = bb_data.terminator.take().unwrap();
     if let TerminatorKind::Call { mut args, destination, target, .. } = terminator.kind {
         let arg = args.pop().unwrap();
-        let local = arg.place().unwrap().local;
+        let local = arg.node.place().unwrap().local;
 
-        let arg = Rvalue::Use(arg);
+        let arg = Rvalue::Use(arg.node);
         let assign = Statement {
             source_info: terminator.source_info,
             kind: StatementKind::Assign(Box::new((destination, arg))),
@@ -1231,7 +1231,12 @@ fn create_coroutine_drop_shim<'tcx>(
     drop_clean: BasicBlock,
 ) -> Body<'tcx> {
     let mut body = body.clone();
-    body.arg_count = 1; // make sure the resume argument is not included here
+    // Take the coroutine info out of the body, since the drop shim is
+    // not a coroutine body itself; it just has its drop built out of it.
+    let _ = body.coroutine.take();
+    // Make sure the resume argument is not included here, since we're
+    // building a body for `drop_in_place`.
+    body.arg_count = 1;
 
     let source_info = SourceInfo::outermost(body.span);
 
@@ -1865,7 +1870,7 @@ impl<'tcx> Visitor<'tcx> for EnsureCoroutineFieldAssignmentsNeverAlias<'_> {
                 self.check_assigned_place(*destination, |this| {
                     this.visit_operand(func, location);
                     for arg in args {
-                        this.visit_operand(arg, location);
+                        this.visit_operand(&arg.node, location);
                     }
                 });
             }
@@ -2071,7 +2076,7 @@ fn check_must_not_suspend_def(
             span: data.source_span,
             reason: s.as_str().to_string(),
         });
-        tcx.emit_spanned_lint(
+        tcx.emit_node_span_lint(
             rustc_session::lint::builtin::MUST_NOT_SUSPEND,
             hir_id,
             data.source_span,

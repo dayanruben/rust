@@ -41,7 +41,7 @@ mod tests;
 use std::{
     fmt::{self, Debug},
     hash::{Hash, Hasher},
-    ops::Index,
+    ops::{Index, Range},
 };
 
 use ast::{AstNode, HasName, StructKind};
@@ -69,7 +69,7 @@ use crate::{
     generics::{GenericParams, LifetimeParamData, TypeOrConstParamData},
     path::{path, AssociatedTypeBinding, GenericArgs, ImportAlias, ModPath, Path, PathKind},
     type_ref::{Mutability, TraitRef, TypeBound, TypeRef},
-    visibility::RawVisibility,
+    visibility::{RawVisibility, VisibilityExplicity},
     BlockId, Lookup,
 };
 
@@ -78,8 +78,9 @@ pub struct RawVisibilityId(u32);
 
 impl RawVisibilityId {
     pub const PUB: Self = RawVisibilityId(u32::max_value());
-    pub const PRIV: Self = RawVisibilityId(u32::max_value() - 1);
-    pub const PUB_CRATE: Self = RawVisibilityId(u32::max_value() - 2);
+    pub const PRIV_IMPLICIT: Self = RawVisibilityId(u32::max_value() - 1);
+    pub const PRIV_EXPLICIT: Self = RawVisibilityId(u32::max_value() - 2);
+    pub const PUB_CRATE: Self = RawVisibilityId(u32::max_value() - 3);
 }
 
 impl fmt::Debug for RawVisibilityId {
@@ -87,7 +88,7 @@ impl fmt::Debug for RawVisibilityId {
         let mut f = f.debug_tuple("RawVisibilityId");
         match *self {
             Self::PUB => f.field(&"pub"),
-            Self::PRIV => f.field(&"pub(self)"),
+            Self::PRIV_IMPLICIT | Self::PRIV_EXPLICIT => f.field(&"pub(self)"),
             Self::PUB_CRATE => f.field(&"pub(crate)"),
             _ => f.field(&self.0),
         };
@@ -249,19 +250,30 @@ impl ItemVisibilities {
     fn alloc(&mut self, vis: RawVisibility) -> RawVisibilityId {
         match &vis {
             RawVisibility::Public => RawVisibilityId::PUB,
-            RawVisibility::Module(path) if path.segments().is_empty() => match &path.kind {
-                PathKind::Super(0) => RawVisibilityId::PRIV,
-                PathKind::Crate => RawVisibilityId::PUB_CRATE,
-                _ => RawVisibilityId(self.arena.alloc(vis).into_raw().into()),
-            },
+            RawVisibility::Module(path, explicitiy) if path.segments().is_empty() => {
+                match (&path.kind, explicitiy) {
+                    (PathKind::Super(0), VisibilityExplicity::Explicit) => {
+                        RawVisibilityId::PRIV_EXPLICIT
+                    }
+                    (PathKind::Super(0), VisibilityExplicity::Implicit) => {
+                        RawVisibilityId::PRIV_IMPLICIT
+                    }
+                    (PathKind::Crate, _) => RawVisibilityId::PUB_CRATE,
+                    _ => RawVisibilityId(self.arena.alloc(vis).into_raw().into()),
+                }
+            }
             _ => RawVisibilityId(self.arena.alloc(vis).into_raw().into()),
         }
     }
 }
 
 static VIS_PUB: RawVisibility = RawVisibility::Public;
-static VIS_PRIV: RawVisibility = RawVisibility::Module(ModPath::from_kind(PathKind::Super(0)));
-static VIS_PUB_CRATE: RawVisibility = RawVisibility::Module(ModPath::from_kind(PathKind::Crate));
+static VIS_PRIV_IMPLICIT: RawVisibility =
+    RawVisibility::Module(ModPath::from_kind(PathKind::Super(0)), VisibilityExplicity::Implicit);
+static VIS_PRIV_EXPLICIT: RawVisibility =
+    RawVisibility::Module(ModPath::from_kind(PathKind::Super(0)), VisibilityExplicity::Explicit);
+static VIS_PUB_CRATE: RawVisibility =
+    RawVisibility::Module(ModPath::from_kind(PathKind::Crate), VisibilityExplicity::Explicit);
 
 #[derive(Default, Debug, Eq, PartialEq)]
 struct ItemTreeData {
@@ -296,7 +308,7 @@ pub enum AttrOwner {
     /// Inner attributes of the source file.
     TopLevel,
 
-    Variant(Idx<Variant>),
+    Variant(FileItemTreeId<Variant>),
     Field(Idx<Field>),
     Param(Idx<Param>),
     TypeOrConstParamData(Idx<TypeOrConstParamData>),
@@ -317,7 +329,7 @@ macro_rules! from_attrs {
 
 from_attrs!(
     ModItem(ModItem),
-    Variant(Idx<Variant>),
+    Variant(FileItemTreeId<Variant>),
     Field(Idx<Field>),
     Param(Idx<Param>),
     TypeOrConstParamData(Idx<TypeOrConstParamData>),
@@ -325,7 +337,7 @@ from_attrs!(
 );
 
 /// Trait implemented by all item nodes in the item tree.
-pub trait ItemTreeNode: Clone {
+pub trait ItemTreeModItemNode: Clone {
     type Source: AstIdNode + Into<ast::Item>;
 
     fn ast_id(&self) -> FileAstId<Self::Source>;
@@ -340,35 +352,44 @@ pub trait ItemTreeNode: Clone {
     fn id_to_mod_item(id: FileItemTreeId<Self>) -> ModItem;
 }
 
-pub struct FileItemTreeId<N: ItemTreeNode>(Idx<N>);
+pub struct FileItemTreeId<N>(Idx<N>);
 
-impl<N: ItemTreeNode> FileItemTreeId<N> {
+impl<N> FileItemTreeId<N> {
+    pub fn range_iter(range: Range<Self>) -> impl Iterator<Item = Self> {
+        (range.start.index().into_raw().into_u32()..range.end.index().into_raw().into_u32())
+            .map(RawIdx::from_u32)
+            .map(Idx::from_raw)
+            .map(Self)
+    }
+}
+
+impl<N> FileItemTreeId<N> {
     pub fn index(&self) -> Idx<N> {
         self.0
     }
 }
 
-impl<N: ItemTreeNode> Clone for FileItemTreeId<N> {
+impl<N> Clone for FileItemTreeId<N> {
     fn clone(&self) -> Self {
         Self(self.0)
     }
 }
-impl<N: ItemTreeNode> Copy for FileItemTreeId<N> {}
+impl<N> Copy for FileItemTreeId<N> {}
 
-impl<N: ItemTreeNode> PartialEq for FileItemTreeId<N> {
+impl<N> PartialEq for FileItemTreeId<N> {
     fn eq(&self, other: &FileItemTreeId<N>) -> bool {
         self.0 == other.0
     }
 }
-impl<N: ItemTreeNode> Eq for FileItemTreeId<N> {}
+impl<N> Eq for FileItemTreeId<N> {}
 
-impl<N: ItemTreeNode> Hash for FileItemTreeId<N> {
+impl<N> Hash for FileItemTreeId<N> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.0.hash(state)
     }
 }
 
-impl<N: ItemTreeNode> fmt::Debug for FileItemTreeId<N> {
+impl<N> fmt::Debug for FileItemTreeId<N> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
     }
@@ -403,12 +424,12 @@ impl TreeId {
 }
 
 #[derive(Debug)]
-pub struct ItemTreeId<N: ItemTreeNode> {
+pub struct ItemTreeId<N> {
     tree: TreeId,
     pub value: FileItemTreeId<N>,
 }
 
-impl<N: ItemTreeNode> ItemTreeId<N> {
+impl<N> ItemTreeId<N> {
     pub fn new(tree: TreeId, idx: FileItemTreeId<N>) -> Self {
         Self { tree, value: idx }
     }
@@ -424,24 +445,31 @@ impl<N: ItemTreeNode> ItemTreeId<N> {
     pub fn item_tree(self, db: &dyn DefDatabase) -> Arc<ItemTree> {
         self.tree.item_tree(db)
     }
+
+    pub fn resolved<R>(self, db: &dyn DefDatabase, cb: impl FnOnce(&N) -> R) -> R
+    where
+        ItemTree: Index<FileItemTreeId<N>, Output = N>,
+    {
+        cb(&self.tree.item_tree(db)[self.value])
+    }
 }
 
-impl<N: ItemTreeNode> Copy for ItemTreeId<N> {}
-impl<N: ItemTreeNode> Clone for ItemTreeId<N> {
+impl<N> Copy for ItemTreeId<N> {}
+impl<N> Clone for ItemTreeId<N> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<N: ItemTreeNode> PartialEq for ItemTreeId<N> {
+impl<N> PartialEq for ItemTreeId<N> {
     fn eq(&self, other: &Self) -> bool {
         self.tree == other.tree && self.value == other.value
     }
 }
 
-impl<N: ItemTreeNode> Eq for ItemTreeId<N> {}
+impl<N> Eq for ItemTreeId<N> {}
 
-impl<N: ItemTreeNode> Hash for ItemTreeId<N> {
+impl<N> Hash for ItemTreeId<N> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.tree.hash(state);
         self.value.hash(state);
@@ -466,7 +494,7 @@ macro_rules! mod_items {
         )+
 
         $(
-            impl ItemTreeNode for $typ {
+            impl ItemTreeModItemNode for $typ {
                 type Source = $ast;
 
                 fn ast_id(&self) -> FileAstId<Self::Source> {
@@ -540,7 +568,8 @@ impl Index<RawVisibilityId> for ItemTree {
     type Output = RawVisibility;
     fn index(&self, index: RawVisibilityId) -> &Self::Output {
         match index {
-            RawVisibilityId::PRIV => &VIS_PRIV,
+            RawVisibilityId::PRIV_IMPLICIT => &VIS_PRIV_IMPLICIT,
+            RawVisibilityId::PRIV_EXPLICIT => &VIS_PRIV_EXPLICIT,
             RawVisibilityId::PUB => &VIS_PUB,
             RawVisibilityId::PUB_CRATE => &VIS_PUB_CRATE,
             _ => &self.data().vis.arena[Idx::from_raw(index.0.into())],
@@ -548,10 +577,17 @@ impl Index<RawVisibilityId> for ItemTree {
     }
 }
 
-impl<N: ItemTreeNode> Index<FileItemTreeId<N>> for ItemTree {
+impl<N: ItemTreeModItemNode> Index<FileItemTreeId<N>> for ItemTree {
     type Output = N;
     fn index(&self, id: FileItemTreeId<N>) -> &N {
         N::lookup(self, id.index())
+    }
+}
+
+impl Index<FileItemTreeId<Variant>> for ItemTree {
+    type Output = Variant;
+    fn index(&self, id: FileItemTreeId<Variant>) -> &Variant {
+        &self[id.index()]
     }
 }
 
@@ -665,7 +701,7 @@ pub struct Enum {
     pub name: Name,
     pub visibility: RawVisibilityId,
     pub generic_params: Interned<GenericParams>,
-    pub variants: IdxRange<Variant>,
+    pub variants: Range<FileItemTreeId<Variant>>,
     pub ast_id: FileAstId<ast::Enum>,
 }
 

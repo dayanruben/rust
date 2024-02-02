@@ -1,8 +1,14 @@
 //! A simplified version of quote-crate like quasi quote macro
+#![allow(clippy::crate_in_macro_def)]
 
 use span::Span;
+use syntax::format_smolstr;
 
 use crate::name::Name;
+
+pub(crate) const fn dollar_crate(span: Span) -> tt::Ident<Span> {
+    tt::Ident { text: syntax::SmolStr::new_static("$crate"), span }
+}
 
 // A helper macro quote macro
 // FIXME:
@@ -13,13 +19,13 @@ use crate::name::Name;
 #[macro_export]
 macro_rules! __quote {
     ($span:ident) => {
-        Vec::<crate::tt::TokenTree>::new()
+        Vec::<$crate::tt::TokenTree>::new()
     };
 
     ( @SUBTREE($span:ident) $delim:ident $($tt:tt)* ) => {
         {
             let children = $crate::__quote!($span $($tt)*);
-            crate::tt::Subtree {
+            $crate::tt::Subtree {
                 delimiter: crate::tt::Delimiter {
                     kind: crate::tt::DelimiterKind::$delim,
                     open: $span,
@@ -210,8 +216,8 @@ impl_to_to_tokentrees! {
     _span: crate::tt::Literal => self { self };
     _span: crate::tt::Ident => self { self };
     _span: crate::tt::Punct => self { self };
-    span: &str => self { crate::tt::Literal{text: format!("\"{}\"", self.escape_default()).into(), span}};
-    span: String => self { crate::tt::Literal{text: format!("\"{}\"", self.escape_default()).into(), span}};
+    span: &str => self { crate::tt::Literal{text: format_smolstr!("\"{}\"", self.escape_default()), span}};
+    span: String => self { crate::tt::Literal{text: format_smolstr!("\"{}\"", self.escape_default()), span}};
     span: Name => self { crate::tt::Ident{text: self.to_smol_str(), span}};
 }
 

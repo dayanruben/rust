@@ -16,8 +16,8 @@ use rustc_ast::{
 use rustc_ast_pretty::pprust::where_bound_predicate_to_string;
 use rustc_data_structures::fx::FxHashSet;
 use rustc_errors::{
-    pluralize, struct_span_err, Applicability, Diagnostic, DiagnosticBuilder, ErrorGuaranteed,
-    MultiSpan, SuggestionStyle,
+    codes::*, pluralize, struct_span_code_err, Applicability, Diagnostic, DiagnosticBuilder,
+    ErrorGuaranteed, MultiSpan, SuggestionStyle,
 };
 use rustc_hir as hir;
 use rustc_hir::def::{self, CtorKind, CtorOf, DefKind};
@@ -429,8 +429,8 @@ impl<'a: 'ast, 'ast, 'tcx> LateResolutionVisitor<'a, '_, 'ast, 'tcx> {
         let base_error = self.make_base_error(path, span, source, res);
 
         let code = source.error_code(res.is_some());
-        let mut err =
-            self.r.dcx().struct_span_err_with_code(base_error.span, base_error.msg.clone(), code);
+        let mut err = self.r.dcx().struct_span_err(base_error.span, base_error.msg.clone());
+        err.code(code);
 
         self.suggest_at_operator_in_slice_pat_with_range(&mut err, path);
         self.suggest_swapping_misplaced_self_ty_and_trait(&mut err, source, res, base_error.span);
@@ -656,7 +656,10 @@ impl<'a: 'ast, 'ast, 'tcx> LateResolutionVisitor<'a, '_, 'ast, 'tcx> {
         let typo_sugg = self
             .lookup_typo_candidate(path, following_seg, source.namespace(), is_expected)
             .to_opt_suggestion();
-        if path.len() == 1 && self.self_type_is_available() {
+        if path.len() == 1
+            && !matches!(source, PathSource::Delegation)
+            && self.self_type_is_available()
+        {
             if let Some(candidate) =
                 self.lookup_assoc_candidate(ident, ns, is_expected, source.is_call())
             {
@@ -919,8 +922,8 @@ impl<'a: 'ast, 'ast, 'tcx> LateResolutionVisitor<'a, '_, 'ast, 'tcx> {
         path: &[Segment],
         span: Span,
     ) {
-        if let Some(err_code) = &err.code {
-            if err_code == &rustc_errors::error_code!(E0425) {
+        if let Some(err_code) = err.code {
+            if err_code == E0425 {
                 for label_rib in &self.label_ribs {
                     for (label_ident, node_id) in &label_rib.bindings {
                         let ident = path.last().unwrap().ident;
@@ -943,7 +946,7 @@ impl<'a: 'ast, 'ast, 'tcx> LateResolutionVisitor<'a, '_, 'ast, 'tcx> {
                         }
                     }
                 }
-            } else if err_code == &rustc_errors::error_code!(E0412) {
+            } else if err_code == E0412 {
                 if let Some(correct) = Self::likely_rust_type(path) {
                     err.span_suggestion(
                         span,
@@ -967,7 +970,7 @@ impl<'a: 'ast, 'ast, 'tcx> LateResolutionVisitor<'a, '_, 'ast, 'tcx> {
         if !is_self_type(path, source.namespace()) {
             return false;
         }
-        err.code(rustc_errors::error_code!(E0411));
+        err.code(E0411);
         err.span_label(span, "`Self` is only available in impls, traits, and type definitions");
         if let Some(item_kind) = self.diagnostic_metadata.current_item {
             if !item_kind.ident.span.is_dummy() {
@@ -996,7 +999,7 @@ impl<'a: 'ast, 'ast, 'tcx> LateResolutionVisitor<'a, '_, 'ast, 'tcx> {
         }
 
         debug!("smart_resolve_path_fragment: E0424, source={:?}", source);
-        err.code(rustc_errors::error_code!(E0424));
+        err.code(E0424);
         err.span_label(
             span,
             match source {
@@ -1742,12 +1745,10 @@ impl<'a: 'ast, 'ast, 'tcx> LateResolutionVisitor<'a, '_, 'ast, 'tcx> {
             // Doing analysis on local `DefId`s would cause infinite recursion.
             return;
         }
+        let Ok(impls) = self.r.tcx.inherent_impls(def_id) else { return };
         // Look at all the associated functions without receivers in the type's
         // inherent impls to look for builders that return `Self`
-        let mut items = self
-            .r
-            .tcx
-            .inherent_impls(def_id)
+        let mut items = impls
             .iter()
             .flat_map(|i| self.r.tcx.associated_items(i).in_definition_order())
             // Only assoc fn with no receivers.
@@ -1899,6 +1900,7 @@ impl<'a: 'ast, 'ast, 'tcx> LateResolutionVisitor<'a, '_, 'ast, 'tcx> {
                 (AssocItemKind::Const(..), Res::Def(DefKind::AssocConst, _)) => true,
                 (AssocItemKind::Fn(_), Res::Def(DefKind::AssocFn, _)) => true,
                 (AssocItemKind::Type(..), Res::Def(DefKind::AssocTy, _)) => true,
+                (AssocItemKind::Delegation(_), Res::Def(DefKind::AssocFn, _)) => true,
                 _ => false,
             })
             .map(|(key, _)| key.ident.name)
@@ -1960,6 +1962,12 @@ impl<'a: 'ast, 'ast, 'tcx> LateResolutionVisitor<'a, '_, 'ast, 'tcx> {
                         }
                         ast::AssocItemKind::Fn(..) => AssocSuggestion::AssocFn { called },
                         ast::AssocItemKind::Type(..) => AssocSuggestion::AssocType,
+                        ast::AssocItemKind::Delegation(..)
+                            if self.r.has_self.contains(&self.r.local_def_id(assoc_item.id)) =>
+                        {
+                            AssocSuggestion::MethodWithSelf { called }
+                        }
+                        ast::AssocItemKind::Delegation(..) => AssocSuggestion::AssocFn { called },
                         ast::AssocItemKind::MacCall(_) => continue,
                     });
                 }
@@ -2559,8 +2567,9 @@ impl<'a: 'ast, 'ast, 'tcx> LateResolutionVisitor<'a, '_, 'ast, 'tcx> {
                     debug!(?param.ident, ?param.ident.span, ?use_span);
 
                     let elidable = matches!(use_ctxt, LifetimeCtxt::Ref);
+                    let deletion_span =
+                        if param.bounds.is_empty() { deletion_span() } else { None };
 
-                    let deletion_span = deletion_span();
                     self.r.lint_buffer.buffer_lint_with_diagnostic(
                         lint::builtin::SINGLE_USE_LIFETIMES,
                         param.id,
@@ -2603,25 +2612,23 @@ impl<'a: 'ast, 'ast, 'tcx> LateResolutionVisitor<'a, '_, 'ast, 'tcx> {
     ) {
         debug_assert_ne!(lifetime_ref.ident.name, kw::UnderscoreLifetime);
         let mut err = if let Some(outer) = outer_lifetime_ref {
-            let mut err = struct_span_err!(
+            struct_span_code_err!(
                 self.r.dcx(),
                 lifetime_ref.ident.span,
                 E0401,
                 "can't use generic parameters from outer item",
-            );
-            err.span_label(lifetime_ref.ident.span, "use of generic parameter from outer item");
-            err.span_label(outer.span, "lifetime parameter from outer item");
-            err
+            )
+            .with_span_label(lifetime_ref.ident.span, "use of generic parameter from outer item")
+            .with_span_label(outer.span, "lifetime parameter from outer item")
         } else {
-            let mut err = struct_span_err!(
+            struct_span_code_err!(
                 self.r.dcx(),
                 lifetime_ref.ident.span,
                 E0261,
                 "use of undeclared lifetime name `{}`",
                 lifetime_ref.ident
-            );
-            err.span_label(lifetime_ref.ident.span, "undeclared lifetime");
-            err
+            )
+            .with_span_label(lifetime_ref.ident.span, "undeclared lifetime")
         };
         self.suggest_introducing_lifetime(
             &mut err,
@@ -2779,7 +2786,7 @@ impl<'a: 'ast, 'ast, 'tcx> LateResolutionVisitor<'a, '_, 'ast, 'tcx> {
         let num_lifetimes: usize = lifetime_refs.iter().map(|lt| lt.count).sum();
         let spans: Vec<_> = lifetime_refs.iter().map(|lt| lt.span).collect();
 
-        let mut err = struct_span_err!(
+        let mut err = struct_span_code_err!(
             self.r.dcx(),
             spans,
             E0106,
@@ -3284,16 +3291,16 @@ fn mk_where_bound_predicate(
 
 /// Report lifetime/lifetime shadowing as an error.
 pub(super) fn signal_lifetime_shadowing(sess: &Session, orig: Ident, shadower: Ident) {
-    let mut err = struct_span_err!(
+    struct_span_code_err!(
         sess.dcx(),
         shadower.span,
         E0496,
         "lifetime name `{}` shadows a lifetime name that is already in scope",
         orig.name,
-    );
-    err.span_label(orig.span, "first declared here");
-    err.span_label(shadower.span, format!("lifetime `{}` already in scope", orig.name));
-    err.emit();
+    )
+    .with_span_label(orig.span, "first declared here")
+    .with_span_label(shadower.span, format!("lifetime `{}` already in scope", orig.name))
+    .emit();
 }
 
 struct LifetimeFinder<'ast> {
@@ -3319,11 +3326,12 @@ impl<'ast> Visitor<'ast> for LifetimeFinder<'ast> {
 pub(super) fn signal_label_shadowing(sess: &Session, orig: Span, shadower: Ident) {
     let name = shadower.name;
     let shadower = shadower.span;
-    let mut err = sess.dcx().struct_span_warn(
-        shadower,
-        format!("label name `{name}` shadows a label name that is already in scope"),
-    );
-    err.span_label(orig, "first declared here");
-    err.span_label(shadower, format!("label `{name}` already in scope"));
-    err.emit();
+    sess.dcx()
+        .struct_span_warn(
+            shadower,
+            format!("label name `{name}` shadows a label name that is already in scope"),
+        )
+        .with_span_label(orig, "first declared here")
+        .with_span_label(shadower, format!("label `{name}` already in scope"))
+        .emit();
 }

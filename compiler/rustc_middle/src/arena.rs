@@ -113,6 +113,8 @@ macro_rules! arena_types {
             [] stripped_cfg_items: rustc_ast::expand::StrippedCfgItem,
             [] mod_child: rustc_middle::metadata::ModChild,
             [] features: rustc_feature::Features,
+            [decode] specialization_graph: rustc_middle::traits::specialization_graph::Graph,
+            [] crate_inherent_impls: rustc_middle::ty::CrateInherentImpls,
         ]);
     )
 }

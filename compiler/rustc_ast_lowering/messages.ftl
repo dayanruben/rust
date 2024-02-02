@@ -14,10 +14,6 @@ ast_lowering_assoc_ty_parentheses =
 ast_lowering_async_coroutines_not_supported =
     `async` coroutines are not yet supported
 
-ast_lowering_async_non_move_closure_not_supported =
-    `async` non-`move` closures with parameters are not currently supported
-    .help = consider using `let` statements to manually capture variables by reference before entering an `async move` closure
-
 ast_lowering_att_syntax_only_x86 =
     the `att_syntax` option is only supported on x86
 
@@ -35,7 +31,7 @@ ast_lowering_bad_return_type_notation_output =
 
 ast_lowering_base_expression_double_dot =
     base expression required after `..`
-    .label = add a base expression here
+    .suggestion = add a base expression here
 
 ast_lowering_clobber_abi_not_supported =
     `clobber_abi` is not supported on this target

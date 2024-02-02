@@ -32,13 +32,11 @@
 #![feature(box_patterns)]
 #![feature(control_flow_enum)]
 #![feature(if_let_guard)]
-#![feature(iter_intersperse)]
 #![feature(iter_order_by)]
 #![feature(let_chains)]
+#![cfg_attr(not(bootstrap), feature(trait_upcasting))]
 #![feature(min_specialization)]
-#![feature(never_type)]
 #![feature(rustc_attrs)]
-#![recursion_limit = "256"]
 #![deny(rustc::untranslatable_diagnostic)]
 #![deny(rustc::diagnostic_outside_of_impl)]
 #![allow(internal_features)]
@@ -512,6 +510,11 @@ fn register_builtins(store: &mut LintStore) {
         "implied_bounds_entailment",
         "converted into hard error, see PR #117984 \
         <https://github.com/rust-lang/rust/pull/117984> for more information",
+    );
+    store.register_removed(
+        "coinductive_overlap_in_coherence",
+        "converted into hard error, see PR #118649 \
+         <https://github.com/rust-lang/rust/pull/118649> for more information",
     );
 }
 
