@@ -1082,7 +1082,7 @@ impl<'p, Cx: TypeCx> Matrix<'p, Cx> {
         pcx: &PlaceCtxt<'_, Cx>,
         ctor: &Constructor<Cx>,
         ctor_is_relevant: bool,
-    ) -> Matrix<'p, Cx> {
+    ) -> Result<Matrix<'p, Cx>, Cx::Error> {
         let ctor_sub_tys = pcx.ctor_sub_tys(ctor);
         let arity = ctor_sub_tys.len();
         let specialized_place_ty = ctor_sub_tys.chain(self.place_ty[1..].iter().cloned()).collect();
@@ -1098,12 +1098,12 @@ impl<'p, Cx: TypeCx> Matrix<'p, Cx> {
             wildcard_row_is_relevant: self.wildcard_row_is_relevant && ctor_is_relevant,
         };
         for (i, row) in self.rows().enumerate() {
-            if ctor.is_covered_by(pcx.cx, row.head().ctor()) {
+            if ctor.is_covered_by(pcx.cx, row.head().ctor())? {
                 let new_row = row.pop_head_constructor(ctor, arity, ctor_is_relevant, i);
                 matrix.expand_and_push(new_row);
             }
         }
-        matrix
+        Ok(matrix)
     }
 }
 
@@ -1207,17 +1207,12 @@ impl<'p, Cx: TypeCx> fmt::Debug for Matrix<'p, Cx> {
 /// The final `Pair(Some(_), true)` is then the resulting witness.
 ///
 /// See the top of the file for more detailed explanations and examples.
+#[derive(Debug)]
 struct WitnessStack<Cx: TypeCx>(Vec<WitnessPat<Cx>>);
 
 impl<Cx: TypeCx> Clone for WitnessStack<Cx> {
     fn clone(&self) -> Self {
         Self(self.0.clone())
-    }
-}
-
-impl<Cx: TypeCx> fmt::Debug for WitnessStack<Cx> {
-    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt.debug_tuple("WitnessStack").field(&self.0).finish()
     }
 }
 
@@ -1265,17 +1260,12 @@ impl<Cx: TypeCx> WitnessStack<Cx> {
 ///
 /// Just as the `Matrix` starts with a single column, by the end of the algorithm, this has a single
 /// column, which contains the patterns that are missing for the match to be exhaustive.
+#[derive(Debug)]
 struct WitnessMatrix<Cx: TypeCx>(Vec<WitnessStack<Cx>>);
 
 impl<Cx: TypeCx> Clone for WitnessMatrix<Cx> {
     fn clone(&self) -> Self {
         Self(self.0.clone())
-    }
-}
-
-impl<Cx: TypeCx> fmt::Debug for WitnessMatrix<Cx> {
-    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt.debug_tuple("WitnessMatrix").field(&self.0).finish()
     }
 }
 
@@ -1533,7 +1523,7 @@ fn compute_exhaustiveness_and_usefulness<'a, 'p, Cx: TypeCx>(
         // strictly fewer rows. In that case we can sometimes skip it. See the top of the file for
         // details.
         let ctor_is_relevant = matches!(ctor, Constructor::Missing) || missing_ctors.is_empty();
-        let mut spec_matrix = matrix.specialize_constructor(pcx, &ctor, ctor_is_relevant);
+        let mut spec_matrix = matrix.specialize_constructor(pcx, &ctor, ctor_is_relevant)?;
         let mut witnesses = ensure_sufficient_stack(|| {
             compute_exhaustiveness_and_usefulness(mcx, &mut spec_matrix, false)
         })?;
