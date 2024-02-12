@@ -959,9 +959,10 @@ impl<'tcx> TypeErrCtxtExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
         obligation: &PredicateObligation<'tcx>,
         trait_ref: ty::PolyTraitRef<'tcx>,
     ) -> Option<ErrorGuaranteed> {
-        if let ty::Closure(closure_def_id, closure_args) = *trait_ref.self_ty().skip_binder().kind()
+        let self_ty = trait_ref.self_ty().skip_binder();
+        if let ty::Closure(closure_def_id, closure_args) = *self_ty.kind()
             && let Some(expected_kind) = self.tcx.fn_trait_kind_from_def_id(trait_ref.def_id())
-            && let Some(found_kind) = self.closure_kind(closure_args)
+            && let Some(found_kind) = self.closure_kind(self_ty)
             && !found_kind.extends(expected_kind)
             && let sig = closure_args.as_closure().sig()
             && self.can_sub(
@@ -992,13 +993,13 @@ impl<'tcx> TypeErrCtxtExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
     ) -> Result<(), ErrorGuaranteed> {
         if let ObligationCauseCode::FunctionArgumentObligation { arg_hir_id, .. } =
             obligation.cause.code()
-            && let Some(Node::Expr(arg)) = self.tcx.opt_hir_node(*arg_hir_id)
+            && let Node::Expr(arg) = self.tcx.hir_node(*arg_hir_id)
             && let arg = arg.peel_borrows()
             && let hir::ExprKind::Path(hir::QPath::Resolved(
                 None,
                 hir::Path { res: hir::def::Res::Local(hir_id), .. },
             )) = arg.kind
-            && let Some(Node::Pat(pat)) = self.tcx.opt_hir_node(*hir_id)
+            && let Node::Pat(pat) = self.tcx.hir_node(*hir_id)
             && let Some((preds, guar)) = self.reported_trait_errors.borrow().get(&pat.span)
             && preds.contains(&obligation.predicate)
         {
@@ -1036,10 +1037,8 @@ impl<'tcx> TypeErrCtxtExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
             }
         }
         let hir_id = self.tcx.local_def_id_to_hir_id(obligation.cause.body_id);
-        let body_id = match self.tcx.opt_hir_node(hir_id) {
-            Some(hir::Node::Item(hir::Item { kind: hir::ItemKind::Fn(_, _, body_id), .. })) => {
-                body_id
-            }
+        let body_id = match self.tcx.hir_node(hir_id) {
+            hir::Node::Item(hir::Item { kind: hir::ItemKind::Fn(_, _, body_id), .. }) => body_id,
             _ => return false,
         };
         let mut v = V { search_span: span, found: None };
@@ -1162,9 +1161,9 @@ impl<'tcx> TypeErrCtxtExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
 
             if let hir::ExprKind::Path(hir::QPath::Resolved(None, path)) = expr.kind
                 && let hir::Path { res: hir::def::Res::Local(hir_id), .. } = path
-                && let Some(hir::Node::Pat(binding)) = self.tcx.opt_hir_node(*hir_id)
-                && let Some(parent) = self.tcx.hir().find_parent(binding.hir_id)
+                && let hir::Node::Pat(binding) = self.tcx.hir_node(*hir_id)
             {
+                let parent = self.tcx.parent_hir_node(binding.hir_id);
                 // We've reached the root of the method call chain...
                 if let hir::Node::Local(local) = parent
                     && let Some(binding_expr) = local.init
@@ -1306,12 +1305,13 @@ impl<'tcx> TypeErrCtxtExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
         let mut pred = obligation.predicate.to_opt_poly_trait_pred();
         while let Some((next_code, next_pred)) = code.parent() {
             if let Some(pred) = pred {
-                let pred = self.instantiate_binder_with_placeholders(pred);
-                diag.note(format!(
-                    "`{}` must implement `{}`, but it does not",
-                    pred.self_ty(),
-                    pred.print_modifiers_and_trait_path()
-                ));
+                self.enter_forall(pred, |pred| {
+                    diag.note(format!(
+                        "`{}` must implement `{}`, but it does not",
+                        pred.self_ty(),
+                        pred.print_modifiers_and_trait_path()
+                    ));
+                })
             }
             code = next_code;
             pred = next_pred;
@@ -1875,6 +1875,7 @@ impl<'tcx> InferCtxtPrivExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
                 ty::Coroutine(..) => Some(18),
                 ty::Foreign(..) => Some(19),
                 ty::CoroutineWitness(..) => Some(20),
+                ty::CoroutineClosure(..) => Some(21),
                 ty::Placeholder(..) | ty::Bound(..) | ty::Infer(..) | ty::Error(_) => None,
             }
         }
@@ -1924,45 +1925,50 @@ impl<'tcx> InferCtxtPrivExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
     fn describe_closure(&self, kind: hir::ClosureKind) -> &'static str {
         match kind {
             hir::ClosureKind::Closure => "a closure",
-            hir::ClosureKind::Coroutine(kind) => match kind {
-                hir::CoroutineKind::Coroutine(_) => "a coroutine",
-                hir::CoroutineKind::Desugared(
-                    hir::CoroutineDesugaring::Async,
-                    hir::CoroutineSource::Block,
-                ) => "an async block",
-                hir::CoroutineKind::Desugared(
-                    hir::CoroutineDesugaring::Async,
-                    hir::CoroutineSource::Fn,
-                ) => "an async function",
-                hir::CoroutineKind::Desugared(
-                    hir::CoroutineDesugaring::Async,
-                    hir::CoroutineSource::Closure,
-                ) => "an async closure",
-                hir::CoroutineKind::Desugared(
-                    hir::CoroutineDesugaring::AsyncGen,
-                    hir::CoroutineSource::Block,
-                ) => "an async gen block",
-                hir::CoroutineKind::Desugared(
-                    hir::CoroutineDesugaring::AsyncGen,
-                    hir::CoroutineSource::Fn,
-                ) => "an async gen function",
-                hir::CoroutineKind::Desugared(
-                    hir::CoroutineDesugaring::AsyncGen,
-                    hir::CoroutineSource::Closure,
-                ) => "an async gen closure",
-                hir::CoroutineKind::Desugared(
-                    hir::CoroutineDesugaring::Gen,
-                    hir::CoroutineSource::Block,
-                ) => "a gen block",
-                hir::CoroutineKind::Desugared(
-                    hir::CoroutineDesugaring::Gen,
-                    hir::CoroutineSource::Fn,
-                ) => "a gen function",
-                hir::CoroutineKind::Desugared(
-                    hir::CoroutineDesugaring::Gen,
-                    hir::CoroutineSource::Closure,
-                ) => "a gen closure",
-            },
+            hir::ClosureKind::Coroutine(hir::CoroutineKind::Coroutine(_)) => "a coroutine",
+            hir::ClosureKind::Coroutine(hir::CoroutineKind::Desugared(
+                hir::CoroutineDesugaring::Async,
+                hir::CoroutineSource::Block,
+            )) => "an async block",
+            hir::ClosureKind::Coroutine(hir::CoroutineKind::Desugared(
+                hir::CoroutineDesugaring::Async,
+                hir::CoroutineSource::Fn,
+            )) => "an async function",
+            hir::ClosureKind::Coroutine(hir::CoroutineKind::Desugared(
+                hir::CoroutineDesugaring::Async,
+                hir::CoroutineSource::Closure,
+            ))
+            | hir::ClosureKind::CoroutineClosure(hir::CoroutineDesugaring::Async) => {
+                "an async closure"
+            }
+            hir::ClosureKind::Coroutine(hir::CoroutineKind::Desugared(
+                hir::CoroutineDesugaring::AsyncGen,
+                hir::CoroutineSource::Block,
+            )) => "an async gen block",
+            hir::ClosureKind::Coroutine(hir::CoroutineKind::Desugared(
+                hir::CoroutineDesugaring::AsyncGen,
+                hir::CoroutineSource::Fn,
+            )) => "an async gen function",
+            hir::ClosureKind::Coroutine(hir::CoroutineKind::Desugared(
+                hir::CoroutineDesugaring::AsyncGen,
+                hir::CoroutineSource::Closure,
+            ))
+            | hir::ClosureKind::CoroutineClosure(hir::CoroutineDesugaring::AsyncGen) => {
+                "an async gen closure"
+            }
+            hir::ClosureKind::Coroutine(hir::CoroutineKind::Desugared(
+                hir::CoroutineDesugaring::Gen,
+                hir::CoroutineSource::Block,
+            )) => "a gen block",
+            hir::ClosureKind::Coroutine(hir::CoroutineKind::Desugared(
+                hir::CoroutineDesugaring::Gen,
+                hir::CoroutineSource::Fn,
+            )) => "a gen function",
+            hir::ClosureKind::Coroutine(hir::CoroutineKind::Desugared(
+                hir::CoroutineDesugaring::Gen,
+                hir::CoroutineSource::Closure,
+            ))
+            | hir::ClosureKind::CoroutineClosure(hir::CoroutineDesugaring::Gen) => "a gen closure",
         }
     }
 
@@ -2010,70 +2016,78 @@ impl<'tcx> InferCtxtPrivExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
         if let [single] = &impl_candidates {
             if self.probe(|_| {
                 let ocx = ObligationCtxt::new(self);
-                let obligation_trait_ref = self.instantiate_binder_with_placeholders(trait_ref);
-                let impl_args = self.fresh_args_for_item(DUMMY_SP, single.impl_def_id);
-                let impl_trait_ref = ocx.normalize(
-                    &ObligationCause::dummy(),
-                    param_env,
-                    ty::EarlyBinder::bind(single.trait_ref).instantiate(self.tcx, impl_args),
-                );
 
-                ocx.register_obligations(
-                    self.tcx
-                        .predicates_of(single.impl_def_id)
-                        .instantiate(self.tcx, impl_args)
-                        .into_iter()
-                        .map(|(clause, _)| {
-                            Obligation::new(self.tcx, ObligationCause::dummy(), param_env, clause)
-                        }),
-                );
-                if !ocx.select_where_possible().is_empty() {
-                    return false;
-                }
+                self.enter_forall(trait_ref, |obligation_trait_ref| {
+                    let impl_args = self.fresh_args_for_item(DUMMY_SP, single.impl_def_id);
+                    let impl_trait_ref = ocx.normalize(
+                        &ObligationCause::dummy(),
+                        param_env,
+                        ty::EarlyBinder::bind(single.trait_ref).instantiate(self.tcx, impl_args),
+                    );
 
-                let mut terrs = vec![];
-                for (obligation_arg, impl_arg) in
-                    std::iter::zip(obligation_trait_ref.args, impl_trait_ref.args)
-                {
-                    if let Err(terr) =
-                        ocx.eq(&ObligationCause::dummy(), param_env, impl_arg, obligation_arg)
-                    {
-                        terrs.push(terr);
-                    }
+                    ocx.register_obligations(
+                        self.tcx
+                            .predicates_of(single.impl_def_id)
+                            .instantiate(self.tcx, impl_args)
+                            .into_iter()
+                            .map(|(clause, _)| {
+                                Obligation::new(
+                                    self.tcx,
+                                    ObligationCause::dummy(),
+                                    param_env,
+                                    clause,
+                                )
+                            }),
+                    );
                     if !ocx.select_where_possible().is_empty() {
                         return false;
                     }
-                }
 
-                // Literally nothing unified, just give up.
-                if terrs.len() == impl_trait_ref.args.len() {
-                    return false;
-                }
+                    let mut terrs = vec![];
+                    for (obligation_arg, impl_arg) in
+                        std::iter::zip(obligation_trait_ref.args, impl_trait_ref.args)
+                    {
+                        if let Err(terr) =
+                            ocx.eq(&ObligationCause::dummy(), param_env, impl_arg, obligation_arg)
+                        {
+                            terrs.push(terr);
+                        }
+                        if !ocx.select_where_possible().is_empty() {
+                            return false;
+                        }
+                    }
 
-                let cand =
-                    self.resolve_vars_if_possible(impl_trait_ref).fold_with(&mut BottomUpFolder {
-                        tcx: self.tcx,
-                        ty_op: |ty| ty,
-                        lt_op: |lt| lt,
-                        ct_op: |ct| ct.normalize(self.tcx, ty::ParamEnv::empty()),
-                    });
-                err.highlighted_help(vec![
-                    StringPart::normal(format!("the trait `{}` ", cand.print_trait_sugared())),
-                    StringPart::highlighted("is"),
-                    StringPart::normal(" implemented for `"),
-                    StringPart::highlighted(cand.self_ty().to_string()),
-                    StringPart::normal("`"),
-                ]);
+                    // Literally nothing unified, just give up.
+                    if terrs.len() == impl_trait_ref.args.len() {
+                        return false;
+                    }
 
-                if let [TypeError::Sorts(exp_found)] = &terrs[..] {
-                    let exp_found = self.resolve_vars_if_possible(*exp_found);
-                    err.help(format!(
-                        "for that trait implementation, expected `{}`, found `{}`",
-                        exp_found.expected, exp_found.found
-                    ));
-                }
+                    let cand = self.resolve_vars_if_possible(impl_trait_ref).fold_with(
+                        &mut BottomUpFolder {
+                            tcx: self.tcx,
+                            ty_op: |ty| ty,
+                            lt_op: |lt| lt,
+                            ct_op: |ct| ct.normalize(self.tcx, ty::ParamEnv::empty()),
+                        },
+                    );
+                    err.highlighted_help(vec![
+                        StringPart::normal(format!("the trait `{}` ", cand.print_trait_sugared())),
+                        StringPart::highlighted("is"),
+                        StringPart::normal(" implemented for `"),
+                        StringPart::highlighted(cand.self_ty().to_string()),
+                        StringPart::normal("`"),
+                    ]);
 
-                true
+                    if let [TypeError::Sorts(exp_found)] = &terrs[..] {
+                        let exp_found = self.resolve_vars_if_possible(*exp_found);
+                        err.help(format!(
+                            "for that trait implementation, expected `{}`, found `{}`",
+                            exp_found.expected, exp_found.found
+                        ));
+                    }
+
+                    true
+                })
             }) {
                 return true;
             }
@@ -2362,6 +2376,12 @@ impl<'tcx> InferCtxtPrivExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
 
                 if let Err(e) = predicate.error_reported() {
                     return e;
+                }
+
+                if let Err(guar) = self.tcx.ensure().coherent_trait(trait_ref.def_id()) {
+                    // Avoid bogus "type annotations needed `Foo: Bar`" errors on `impl Bar for Foo` in case
+                    // other `Foo` impls are incoherent.
+                    return guar;
                 }
 
                 // This is kind of a hack: it frequently happens that some earlier
@@ -2658,6 +2678,14 @@ impl<'tcx> InferCtxtPrivExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
                 }
                 if let Some(e) = self.tainted_by_errors() {
                     return e;
+                }
+
+                if let Err(guar) =
+                    self.tcx.ensure().coherent_trait(self.tcx.parent(data.projection_ty.def_id))
+                {
+                    // Avoid bogus "type annotations needed `Foo: Bar`" errors on `impl Bar for Foo` in case
+                    // other `Foo` impls are incoherent.
+                    return guar;
                 }
                 let subst = data
                     .projection_ty

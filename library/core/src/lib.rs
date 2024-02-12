@@ -111,7 +111,6 @@
 //
 // Library features:
 // tidy-alphabetical-start
-#![cfg_attr(not(bootstrap), feature(offset_of_nested))]
 #![feature(char_indices_offset)]
 #![feature(const_align_of_val)]
 #![feature(const_align_of_val_raw)]
@@ -135,6 +134,7 @@
 #![feature(const_hint_assert_unchecked)]
 #![feature(const_index_range_slice_index)]
 #![feature(const_int_unchecked_arith)]
+#![feature(const_intrinsic_copy)]
 #![feature(const_intrinsic_forget)]
 #![feature(const_ipv4)]
 #![feature(const_ipv6)]
@@ -180,6 +180,7 @@
 #![feature(maybe_uninit_uninit_array)]
 #![feature(non_null_convenience)]
 #![feature(offset_of_enum)]
+#![feature(offset_of_nested)]
 #![feature(panic_internals)]
 #![feature(ptr_alignment_type)]
 #![feature(ptr_metadata)]

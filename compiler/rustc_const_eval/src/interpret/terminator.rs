@@ -377,12 +377,7 @@ impl<'mir, 'tcx: 'mir, M: Machine<'mir, 'tcx>> InterpCx<'mir, 'tcx, M> {
                 // to fields, which can yield non-normalized types. So we need to provide a
                 // normalization function.
                 let normalize = |ty| self.tcx.normalize_erasing_regions(self.param_env, ty);
-                let (meta, only_if_sized) = ty.ptr_metadata_ty(*self.tcx, normalize);
-                assert!(
-                    !only_if_sized,
-                    "there should be no more 'maybe has that metadata' types during interpretation"
-                );
-                meta
+                ty.ptr_metadata_ty(*self.tcx, normalize)
             };
             return Ok(meta_ty(caller) == meta_ty(callee));
         }
@@ -545,6 +540,8 @@ impl<'mir, 'tcx: 'mir, M: Machine<'mir, 'tcx>> InterpCx<'mir, 'tcx, M> {
             ty::InstanceDef::VTableShim(..)
             | ty::InstanceDef::ReifyShim(..)
             | ty::InstanceDef::ClosureOnceShim { .. }
+            | ty::InstanceDef::ConstructCoroutineInClosureShim { .. }
+            | ty::InstanceDef::CoroutineKindShim { .. }
             | ty::InstanceDef::FnPtrShim(..)
             | ty::InstanceDef::DropGlue(..)
             | ty::InstanceDef::CloneShim(..)

@@ -755,6 +755,11 @@ rustc_queries! {
         separate_provide_extern
     }
 
+    query coroutine_for_closure(def_id: DefId) -> DefId {
+        desc { |_tcx| "Given a coroutine-closure def id, return the def id of the coroutine returned by it" }
+        separate_provide_extern
+    }
+
     /// Gets a map with the variance of every item; use `variances_of` instead.
     query crate_variances(_: ()) -> &'tcx ty::CrateVariancesMap<'tcx> {
         arena_cache
@@ -2211,6 +2216,10 @@ rustc_queries! {
     query cross_crate_inlinable(def_id: DefId) -> bool {
         desc { "whether the item should be made inlinable across crates" }
         separate_provide_extern
+    }
+
+    query find_field((def_id, ident): (DefId, rustc_span::symbol::Ident)) -> Option<rustc_target::abi::FieldIdx> {
+        desc { |tcx| "find the index of maybe nested field `{ident}` in `{}`", tcx.def_path_str(def_id) }
     }
 }
 

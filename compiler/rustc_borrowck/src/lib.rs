@@ -3,6 +3,7 @@
 #![allow(internal_features)]
 #![feature(rustdoc_internals)]
 #![doc(rust_logo)]
+#![feature(assert_matches)]
 #![feature(associated_type_bounds)]
 #![feature(box_patterns)]
 #![feature(let_chains)]
@@ -110,14 +111,16 @@ fn mir_borrowck(tcx: TyCtxt<'_>, def: LocalDefId) -> &BorrowCheckResult<'_> {
     let (input_body, promoted) = tcx.mir_promoted(def);
     debug!("run query mir_borrowck: {}", tcx.def_path_str(def));
 
-    if input_body.borrow().should_skip() {
-        debug!("Skipping borrowck because of injected body");
+    let input_body: &Body<'_> = &input_body.borrow();
+
+    if input_body.should_skip() || input_body.tainted_by_errors.is_some() {
+        debug!("Skipping borrowck because of injected body or tainted body");
         // Let's make up a borrowck result! Fun times!
         let result = BorrowCheckResult {
             concrete_opaque_types: FxIndexMap::default(),
             closure_requirements: None,
             used_mut_upvars: SmallVec::new(),
-            tainted_by_errors: None,
+            tainted_by_errors: input_body.tainted_by_errors,
         };
         return tcx.arena.alloc(result);
     }
@@ -126,7 +129,6 @@ fn mir_borrowck(tcx: TyCtxt<'_>, def: LocalDefId) -> &BorrowCheckResult<'_> {
 
     let infcx =
         tcx.infer_ctxt().with_opaque_type_inference(DefiningAnchor::Bind(hir_owner.def_id)).build();
-    let input_body: &Body<'_> = &input_body.borrow();
     let promoted: &IndexSlice<_, _> = &promoted.borrow();
     let opt_closure_req = do_mir_borrowck(&infcx, input_body, promoted, None).0;
     debug!("mir_borrowck done");
@@ -1303,7 +1305,9 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
                 // moved into the closure and subsequently used by the closure,
                 // in order to populate our used_mut set.
                 match **aggregate_kind {
-                    AggregateKind::Closure(def_id, _) | AggregateKind::Coroutine(def_id, _) => {
+                    AggregateKind::Closure(def_id, _)
+                    | AggregateKind::CoroutineClosure(def_id, _)
+                    | AggregateKind::Coroutine(def_id, _) => {
                         let def_id = def_id.expect_local();
                         let BorrowCheckResult { used_mut_upvars, .. } =
                             self.infcx.tcx.mir_borrowck(def_id);
@@ -1609,6 +1613,7 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
                     | ty::FnPtr(_)
                     | ty::Dynamic(_, _, _)
                     | ty::Closure(_, _)
+                    | ty::CoroutineClosure(_, _)
                     | ty::Coroutine(_, _)
                     | ty::CoroutineWitness(..)
                     | ty::Never
@@ -1633,7 +1638,10 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
                             return;
                         }
                     }
-                    ty::Closure(_, _) | ty::Coroutine(_, _) | ty::Tuple(_) => (),
+                    ty::Closure(..)
+                    | ty::CoroutineClosure(..)
+                    | ty::Coroutine(_, _)
+                    | ty::Tuple(_) => (),
                     ty::Bool
                     | ty::Char
                     | ty::Int(_)

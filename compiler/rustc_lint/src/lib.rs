@@ -34,11 +34,8 @@
 #![feature(if_let_guard)]
 #![feature(iter_order_by)]
 #![feature(let_chains)]
-#![cfg_attr(not(bootstrap), feature(trait_upcasting))]
-#![feature(min_specialization)]
+#![feature(trait_upcasting)]
 #![feature(rustc_attrs)]
-#![deny(rustc::untranslatable_diagnostic)]
-#![deny(rustc::diagnostic_outside_of_impl)]
 #![allow(internal_features)]
 
 #[macro_use]
@@ -519,6 +516,11 @@ fn register_builtins(store: &mut LintStore) {
     store.register_removed(
         "illegal_floating_point_literal_pattern",
         "no longer a warning, float patterns behave the same as `==`",
+    );
+    store.register_removed(
+        "nontrivial_structural_match",
+        "no longer needed, see RFC #3535 \
+         <https://rust-lang.github.io/rfcs/3535-constants-in-patterns.html> for more information",
     );
 }
 

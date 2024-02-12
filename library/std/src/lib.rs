@@ -266,12 +266,12 @@
 //
 // Language features:
 // tidy-alphabetical-start
-#![cfg_attr(not(bootstrap), feature(cfg_sanitizer_cfi))]
 #![feature(alloc_error_handler)]
 #![feature(allocator_internals)]
 #![feature(allow_internal_unsafe)]
 #![feature(allow_internal_unstable)]
 #![feature(c_unwind)]
+#![feature(cfg_sanitizer_cfi)]
 #![feature(cfg_target_thread_local)]
 #![feature(cfi_encoding)]
 #![feature(concat_idents)]
@@ -339,12 +339,14 @@
 #![feature(portable_simd)]
 #![feature(prelude_2024)]
 #![feature(ptr_as_uninit)]
+#![feature(ptr_mask)]
 #![feature(slice_internals)]
 #![feature(slice_ptr_get)]
 #![feature(slice_range)]
 #![feature(std_internals)]
 #![feature(str_internals)]
 #![feature(strict_provenance)]
+#![feature(strict_provenance_atomic_ptr)]
 // tidy-alphabetical-end
 //
 // Library features (alloc):

@@ -596,6 +596,11 @@ impl<'cx, 'tcx> WritebackCx<'cx, 'tcx> {
         {
             self.typeck_results.field_indices_mut().insert(hir_id, index);
         }
+        if let Some(nested_fields) =
+            self.fcx.typeck_results.borrow_mut().nested_fields_mut().remove(hir_id)
+        {
+            self.typeck_results.nested_fields_mut().insert(hir_id, nested_fields);
+        }
     }
 
     #[instrument(skip(self, span), level = "debug")]
@@ -753,10 +758,14 @@ impl<'cx, 'tcx> Resolver<'cx, 'tcx> {
     }
 
     fn report_error(&self, p: impl Into<ty::GenericArg<'tcx>>) -> ErrorGuaranteed {
-        match self.fcx.dcx().has_errors() {
-            Some(e) => e,
-            None => self
-                .fcx
+        if let Some(guar) = self.fcx.dcx().has_errors() {
+            guar
+        } else if self.fcx.dcx().stashed_err_count() > 0 {
+            // Without this case we sometimes get uninteresting and extraneous
+            // "type annotations needed" errors.
+            self.fcx.dcx().delayed_bug("error in Resolver")
+        } else {
+            self.fcx
                 .err_ctxt()
                 .emit_inference_failure_err(
                     self.fcx.tcx.hir().body_owner_def_id(self.body.id()),
@@ -765,7 +774,7 @@ impl<'cx, 'tcx> Resolver<'cx, 'tcx> {
                     E0282,
                     false,
                 )
-                .emit(),
+                .emit()
         }
     }
 

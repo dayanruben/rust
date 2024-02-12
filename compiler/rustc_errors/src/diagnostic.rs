@@ -1,8 +1,7 @@
 use crate::snippet::Style;
 use crate::{
-    CodeSuggestion, DelayedBugKind, DiagnosticBuilder, DiagnosticMessage, EmissionGuarantee,
-    ErrCode, Level, MultiSpan, SubdiagnosticMessage, Substitution, SubstitutionPart,
-    SuggestionStyle,
+    CodeSuggestion, DiagnosticBuilder, DiagnosticMessage, EmissionGuarantee, ErrCode, Level,
+    MultiSpan, SubdiagnosticMessage, Substitution, SubstitutionPart, SuggestionStyle,
 };
 use rustc_data_structures::fx::{FxHashMap, FxIndexMap};
 use rustc_error_messages::fluent_value_from_str_list_sep_by_and;
@@ -78,10 +77,11 @@ where
 
     /// Add a subdiagnostic to an existing diagnostic where `f` is invoked on every message used
     /// (to optionally perform eager translation).
-    fn add_to_diagnostic_with<F>(self, diag: &mut Diagnostic, f: F)
-    where
-        F: Fn(&mut Diagnostic, SubdiagnosticMessage) -> SubdiagnosticMessage;
+    fn add_to_diagnostic_with<F: SubdiagnosticMessageOp>(self, diag: &mut Diagnostic, f: F);
 }
+
+pub trait SubdiagnosticMessageOp =
+    Fn(&mut Diagnostic, SubdiagnosticMessage) -> SubdiagnosticMessage;
 
 /// Trait implemented by lint types. This should not be implemented manually. Instead, use
 /// `#[derive(LintDiagnostic)]` -- see [rustc_macros::LintDiagnostic].
@@ -235,19 +235,16 @@ impl Diagnostic {
 
     pub fn is_error(&self) -> bool {
         match self.level {
-            Level::Bug
-            | Level::DelayedBug(DelayedBugKind::Normal)
-            | Level::Fatal
-            | Level::Error
-            | Level::FailureNote => true,
+            Level::Bug | Level::Fatal | Level::Error | Level::DelayedBug => true,
 
-            Level::ForceWarning(_)
+            Level::GoodPathDelayedBug
+            | Level::ForceWarning(_)
             | Level::Warning
-            | Level::DelayedBug(DelayedBugKind::GoodPath)
             | Level::Note
             | Level::OnceNote
             | Level::Help
             | Level::OnceHelp
+            | Level::FailureNote
             | Level::Allow
             | Level::Expect(_) => false,
         }
@@ -306,11 +303,11 @@ impl Diagnostic {
     #[track_caller]
     pub fn downgrade_to_delayed_bug(&mut self) {
         assert!(
-            self.is_error(),
+            matches!(self.level, Level::Error | Level::DelayedBug),
             "downgrade_to_delayed_bug: cannot downgrade {:?} to DelayedBug: not an error",
             self.level
         );
-        self.level = Level::DelayedBug(DelayedBugKind::Normal);
+        self.level = Level::DelayedBug;
     }
 
     /// Appends a labeled span to the diagnostic.
@@ -519,6 +516,17 @@ impl Diagnostic {
 
     /// Helper for pushing to `self.suggestions`, if available (not disable).
     fn push_suggestion(&mut self, suggestion: CodeSuggestion) {
+        for subst in &suggestion.substitutions {
+            for part in &subst.parts {
+                let span = part.span;
+                let call_site = span.ctxt().outer_expn_data().call_site;
+                if span.in_derive_expansion() && span.overlaps_or_adjacent(call_site) {
+                    // Ignore if spans is from derive macro.
+                    return;
+                }
+            }
+        }
+
         if let Ok(suggestions) = &mut self.suggestions {
             suggestions.push(suggestion);
         }

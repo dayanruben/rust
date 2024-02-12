@@ -17,7 +17,9 @@
 #![feature(let_chains)]
 #![feature(rustc_attrs)]
 #![allow(rustdoc::private_intra_doc_links)]
+#![allow(rustc::diagnostic_outside_of_impl)]
 #![allow(rustc::potential_query_instability)]
+#![allow(rustc::untranslatable_diagnostic)]
 #![allow(internal_features)]
 
 #[macro_use]
@@ -184,7 +186,7 @@ struct BindingError {
 #[derive(Debug)]
 enum ResolutionError<'a> {
     /// Error E0401: can't use type or const parameters from outer item.
-    GenericParamsFromOuterItem(Res, HasGenericParams),
+    GenericParamsFromOuterItem(Res, HasGenericParams, DefKind),
     /// Error E0403: the name is already used for a type or const parameter in this generic
     /// parameter list.
     NameAlreadyUsedInParameterList(Symbol, Span),
@@ -1014,6 +1016,8 @@ pub struct Resolver<'a, 'tcx> {
     binding_parent_modules: FxHashMap<NameBinding<'a>, Module<'a>>,
 
     underscore_disambiguator: u32,
+    /// Disambiguator for anonymous adts.
+    empty_disambiguator: u32,
 
     /// Maps glob imports to the names of items actually imported.
     glob_map: FxHashMap<LocalDefId, FxHashSet<Symbol>>,
@@ -1217,6 +1221,10 @@ impl<'tcx> Resolver<'_, 'tcx> {
         self.opt_local_def_id(node).unwrap_or_else(|| panic!("no entry for node id: `{node:?}`"))
     }
 
+    fn local_def_kind(&self, node: NodeId) -> DefKind {
+        self.tcx.def_kind(self.local_def_id(node))
+    }
+
     /// Adds a definition with a parent definition.
     fn create_def(
         &mut self,
@@ -1361,6 +1369,7 @@ impl<'a, 'tcx> Resolver<'a, 'tcx> {
             module_children: Default::default(),
             trait_map: NodeMap::default(),
             underscore_disambiguator: 0,
+            empty_disambiguator: 0,
             empty_module,
             module_map,
             block_map: Default::default(),
@@ -1625,6 +1634,7 @@ impl<'a, 'tcx> Resolver<'a, 'tcx> {
             self.tcx
                 .sess
                 .time("resolve_postprocess", || self.crate_loader(|c| c.postprocess(krate)));
+            self.crate_loader(|c| c.unload_unused_crates());
         });
 
         // Make sure we don't mutate the cstore from here on.
@@ -1727,6 +1737,9 @@ impl<'a, 'tcx> Resolver<'a, 'tcx> {
         let disambiguator = if ident.name == kw::Underscore {
             self.underscore_disambiguator += 1;
             self.underscore_disambiguator
+        } else if ident.name == kw::Empty {
+            self.empty_disambiguator += 1;
+            self.empty_disambiguator
         } else {
             0
         };

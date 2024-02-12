@@ -715,8 +715,16 @@ impl<'tcx> TyCtxt<'tcx> {
         kind: AdtKind,
         variants: IndexVec<VariantIdx, ty::VariantDef>,
         repr: ReprOptions,
+        is_anonymous: bool,
     ) -> ty::AdtDef<'tcx> {
-        self.mk_adt_def_from_data(ty::AdtDefData::new(self, did, kind, variants, repr))
+        self.mk_adt_def_from_data(ty::AdtDefData::new(
+            self,
+            did,
+            kind,
+            variants,
+            repr,
+            is_anonymous,
+        ))
     }
 
     /// Allocates a read-only byte or string literal for `mir::interpret`.
@@ -1193,7 +1201,7 @@ impl<'tcx> TyCtxt<'tcx> {
         let (suitable_region_binding_scope, bound_region) = loop {
             let def_id = match region.kind() {
                 ty::ReLateParam(fr) => fr.bound_region.get_id()?.as_local()?,
-                ty::ReEarlyParam(ebr) => ebr.def_id.expect_local(),
+                ty::ReEarlyParam(ebr) => ebr.def_id.as_local()?,
                 _ => return None, // not a free region
             };
             let scope = self.local_parent(def_id);
@@ -1544,6 +1552,7 @@ impl<'tcx> TyCtxt<'tcx> {
                     CoroutineWitness,
                     Dynamic,
                     Closure,
+                    CoroutineClosure,
                     Tuple,
                     Bound,
                     Param,
