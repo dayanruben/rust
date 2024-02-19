@@ -114,4 +114,14 @@ pub const CONFIG_CHANGE_HISTORY: &[ChangeInfo] = &[
         severity: ChangeSeverity::Warning,
         summary: "A new `optimized-compiler-builtins` option has been introduced. Whether to build llvm's `compiler-rt` from source is no longer implicitly controlled by git state. See the PR for more details.",
     },
+    ChangeInfo {
+        change_id: 120348,
+        severity: ChangeSeverity::Info,
+        summary: "New option `target.<triple>.codegen-backends` added to config.toml.",
+    },
+    ChangeInfo {
+        change_id: 121203,
+        severity: ChangeSeverity::Info,
+        summary: "A new `rust.frame-pointers` option has been introduced and made the default in the compiler and codegen profiles.",
+    },
 ];

@@ -1605,6 +1605,8 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
         on_ambiguity: impl FnOnce(),
     ) -> ControlFlow<T, ()> {
         let mut idx = 0;
+        let mut in_parent_alias_type = false;
+
         loop {
             let (kind, alias_ty) = match *self_ty.kind() {
                 ty::Alias(kind @ (ty::Projection | ty::Opaque), alias_ty) => (kind, alias_ty),
@@ -1618,6 +1620,18 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
             for bound in
                 self.tcx().item_bounds(alias_ty.def_id).instantiate(self.tcx(), alias_ty.args)
             {
+                // HACK: On subsequent recursions, we only care about bounds that don't
+                // share the same type as `self_ty`. This is because for truly rigid
+                // projections, we will never be able to equate, e.g. `<T as Tr>::A`
+                // with `<<T as Tr>::A as Tr>::A`.
+                if in_parent_alias_type {
+                    match bound.kind().skip_binder() {
+                        ty::ClauseKind::Trait(tr) if tr.self_ty() == self_ty => continue,
+                        ty::ClauseKind::Projection(p) if p.self_ty() == self_ty => continue,
+                        _ => {}
+                    }
+                }
+
                 for_each(self, bound, idx)?;
                 idx += 1;
             }
@@ -1627,6 +1641,8 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
             } else {
                 return ControlFlow::Continue(());
             }
+
+            in_parent_alias_type = true;
         }
     }
 
@@ -2510,6 +2526,17 @@ impl<'tcx> SelectionContext<'_, 'tcx> {
         let tcx = self.tcx();
         let mut nested = vec![];
 
+        // We may upcast to auto traits that are either explicitly listed in
+        // the object type's bounds, or implied by the principal trait ref's
+        // supertraits.
+        let a_auto_traits: FxIndexSet<DefId> = a_data
+            .auto_traits()
+            .chain(a_data.principal_def_id().into_iter().flat_map(|principal_def_id| {
+                util::supertrait_def_ids(tcx, principal_def_id)
+                    .filter(|def_id| tcx.trait_is_auto(*def_id))
+            }))
+            .collect();
+
         let upcast_principal = normalize_with_depth_to(
             self,
             obligation.param_env,
@@ -2572,7 +2599,7 @@ impl<'tcx> SelectionContext<'_, 'tcx> {
                 }
                 // Check that b_ty's auto traits are present in a_ty's bounds.
                 ty::ExistentialPredicate::AutoTrait(def_id) => {
-                    if !a_data.auto_traits().any(|source_def_id| source_def_id == def_id) {
+                    if !a_auto_traits.contains(&def_id) {
                         return Err(SelectionError::Unimplemented);
                     }
                 }

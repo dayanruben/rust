@@ -480,12 +480,16 @@ cc = ["@lcnr", "@compiler-errors"]
 message = "Some changes occurred in diagnostic error codes"
 cc = ["@GuillaumeGomez"]
 
+[mentions."compiler/rustc_mir_build/src/build/matches"]
+message = "Some changes occurred in match lowering"
+cc = ["@Nadrieril"]
+
 [mentions."compiler/rustc_mir_build/src/thir/pattern"]
-message = "Some changes might have occurred in exhaustiveness checking"
+message = "Some changes occurred in match checking"
 cc = ["@Nadrieril"]
 
 [mentions."compiler/rustc_pattern_analysis"]
-message = "Some changes might have occurred in exhaustiveness checking"
+message = "Some changes occurred in exhaustiveness checking"
 cc = ["@Nadrieril"]
 
 [mentions."library/core/src/intrinsics/simd.rs"]
@@ -651,6 +655,7 @@ compiler-team = [
     "@petrochenkov",
     "@davidtwco",
     "@estebank",
+    "@lcnr",
     "@oli-obk",
     "@pnkfelix",
     "@wesleywiser",
@@ -658,6 +663,7 @@ compiler-team = [
 ]
 compiler-team-contributors = [
     "@TaKO8Ki",
+    "@Nadrieril",
     "@nnethercote",
     "@fmease",
 ]
@@ -680,7 +686,6 @@ infra-ci = [
     "@Kobzol",
 ]
 rustdoc = [
-    "@jsha",
     "@GuillaumeGomez",
     "@notriddle",
     "@fmease",

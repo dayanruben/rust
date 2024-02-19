@@ -61,7 +61,7 @@ use std::fmt::Debug;
 use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 use std::mem;
-use std::num::NonZeroUsize;
+use std::num::NonZero;
 use std::ops::ControlFlow;
 use std::ptr::NonNull;
 use std::{fmt, str};
@@ -252,6 +252,7 @@ pub struct ImplHeader<'tcx> {
 pub struct ImplTraitHeader<'tcx> {
     pub trait_ref: ty::TraitRef<'tcx>,
     pub polarity: ImplPolarity,
+    pub unsafety: hir::Unsafety,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug, TypeFoldable, TypeVisitable)]
@@ -503,6 +504,16 @@ impl<'tcx> IntoKind for Ty<'tcx> {
     }
 }
 
+impl<'tcx> rustc_type_ir::visit::Flags for Ty<'tcx> {
+    fn flags(&self) -> TypeFlags {
+        self.0.flags
+    }
+
+    fn outer_exclusive_binder(&self) -> DebruijnIndex {
+        self.0.outer_exclusive_binder
+    }
+}
+
 impl EarlyParamRegion {
     /// Does this early bound region have a name? Early bound regions normally
     /// always have names except when using anonymous lifetimes (`'_`).
@@ -606,9 +617,8 @@ impl<'tcx, D: TyDecoder<I = TyCtxt<'tcx>>> Decodable<D> for Term<'tcx> {
 impl<'tcx> Term<'tcx> {
     #[inline]
     pub fn unpack(self) -> TermKind<'tcx> {
-        let ptr = unsafe {
-            self.ptr.map_addr(|addr| NonZeroUsize::new_unchecked(addr.get() & !TAG_MASK))
-        };
+        let ptr =
+            unsafe { self.ptr.map_addr(|addr| NonZero::new_unchecked(addr.get() & !TAG_MASK)) };
         // SAFETY: use of `Interned::new_unchecked` here is ok because these
         // pointers were originally created from `Interned` types in `pack()`,
         // and this is just going in the other direction.

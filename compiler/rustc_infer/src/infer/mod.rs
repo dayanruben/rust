@@ -626,11 +626,8 @@ pub struct InferCtxtBuilder<'tcx> {
     next_trait_solver: bool,
 }
 
-pub trait TyCtxtInferExt<'tcx> {
-    fn infer_ctxt(self) -> InferCtxtBuilder<'tcx>;
-}
-
-impl<'tcx> TyCtxtInferExt<'tcx> for TyCtxt<'tcx> {
+#[extension(pub trait TyCtxtInferExt<'tcx>)]
+impl<'tcx> TyCtxt<'tcx> {
     fn infer_ctxt(self) -> InferCtxtBuilder<'tcx> {
         InferCtxtBuilder {
             tcx: self,
@@ -1323,6 +1320,12 @@ impl<'tcx> InferCtxt<'tcx> {
     pub fn take_opaque_types(&self) -> opaque_types::OpaqueTypeMap<'tcx> {
         debug_assert_ne!(self.defining_use_anchor, DefiningAnchor::Error);
         std::mem::take(&mut self.inner.borrow_mut().opaque_type_storage.opaque_types)
+    }
+
+    #[instrument(level = "debug", skip(self), ret)]
+    pub fn clone_opaque_types(&self) -> opaque_types::OpaqueTypeMap<'tcx> {
+        debug_assert_ne!(self.defining_use_anchor, DefiningAnchor::Error);
+        self.inner.borrow().opaque_type_storage.opaque_types.clone()
     }
 
     pub fn ty_to_string(&self, t: Ty<'tcx>) -> String {

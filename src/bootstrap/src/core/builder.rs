@@ -858,6 +858,11 @@ impl<'a> Builder<'a> {
             Kind::Install => describe!(
                 install::Docs,
                 install::Std,
+                // During the Rust compiler (rustc) installation process, we copy the entire sysroot binary
+                // path (build/host/stage2/bin). Since the building tools also make their copy in the sysroot
+                // binary path, we must install rustc before the tools. Otherwise, the rust-installer will
+                // install the same binaries twice for each tool, leaving backup files (*.old) as a result.
+                install::Rustc,
                 install::Cargo,
                 install::RustAnalyzer,
                 install::Rustfmt,
@@ -866,7 +871,6 @@ impl<'a> Builder<'a> {
                 install::Miri,
                 install::LlvmTools,
                 install::Src,
-                install::Rustc,
             ),
             Kind::Run => describe!(
                 run::ExpandYamlAnchors,
@@ -1229,7 +1233,7 @@ impl<'a> Builder<'a> {
     /// Note that this returns `None` if LLVM is disabled, or if we're in a
     /// check build or dry-run, where there's no need to build all of LLVM.
     fn llvm_config(&self, target: TargetSelection) -> Option<PathBuf> {
-        if self.config.llvm_enabled() && self.kind != Kind::Check && !self.config.dry_run() {
+        if self.config.llvm_enabled(target) && self.kind != Kind::Check && !self.config.dry_run() {
             let llvm::LlvmResult { llvm_config, .. } = self.ensure(llvm::Llvm { target });
             if llvm_config.is_file() {
                 return Some(llvm_config);
@@ -1870,6 +1874,10 @@ impl<'a> Builder<'a> {
             rustflags.arg("-Wrustc::internal");
         }
 
+        if self.config.rust_frame_pointers {
+            rustflags.arg("-Cforce-frame-pointers=true");
+        }
+
         // If Control Flow Guard is enabled, pass the `control-flow-guard` flag to rustc
         // when compiling the standard library, since this might be linked into the final outputs
         // produced by rustc. Since this mitigation is only available on Windows, only enable it
@@ -1991,7 +1999,8 @@ impl<'a> Builder<'a> {
             };
 
             if let Some(limit) = limit {
-                if stage == 0 || self.config.default_codegen_backend().unwrap_or_default() == "llvm"
+                if stage == 0
+                    || self.config.default_codegen_backend(target).unwrap_or_default() == "llvm"
                 {
                     rustflags.arg(&format!("-Cllvm-args=-import-instr-limit={limit}"));
                 }

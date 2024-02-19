@@ -399,7 +399,7 @@ impl<'body, 'tcx> VnState<'body, 'tcx> {
                     };
                     for (field_index, op) in fields.into_iter().enumerate() {
                         let field_dest = self.ecx.project_field(&variant_dest, field_index).ok()?;
-                        self.ecx.copy_op(op, &field_dest, /*allow_transmute*/ false).ok()?;
+                        self.ecx.copy_op(op, &field_dest).ok()?;
                     }
                     self.ecx.write_discriminant(variant.unwrap_or(FIRST_VARIANT), &dest).ok()?;
                     self.ecx
@@ -561,9 +561,14 @@ impl<'body, 'tcx> VnState<'body, 'tcx> {
                         .ok()?;
                     dest.into()
                 }
-                CastKind::FnPtrToPtr
-                | CastKind::PtrToPtr
-                | CastKind::PointerCoercion(
+                CastKind::FnPtrToPtr | CastKind::PtrToPtr => {
+                    let src = self.evaluated[value].as_ref()?;
+                    let src = self.ecx.read_immediate(src).ok()?;
+                    let to = self.ecx.layout_of(to).ok()?;
+                    let ret = self.ecx.ptr_to_ptr(&src, to).ok()?;
+                    ret.into()
+                }
+                CastKind::PointerCoercion(
                     ty::adjustment::PointerCoercion::MutToConstPointer
                     | ty::adjustment::PointerCoercion::ArrayToPointer
                     | ty::adjustment::PointerCoercion::UnsafeFnPointer,
@@ -571,8 +576,7 @@ impl<'body, 'tcx> VnState<'body, 'tcx> {
                     let src = self.evaluated[value].as_ref()?;
                     let src = self.ecx.read_immediate(src).ok()?;
                     let to = self.ecx.layout_of(to).ok()?;
-                    let ret = self.ecx.ptr_to_ptr(&src, to).ok()?;
-                    ret.into()
+                    ImmTy::from_immediate(*src, to).into()
                 }
                 _ => return None,
             },
@@ -1177,8 +1181,7 @@ fn op_to_prop_const<'tcx>(
     }
 
     // Everything failed: create a new allocation to hold the data.
-    let alloc_id =
-        ecx.intern_with_temp_alloc(op.layout, |ecx, dest| ecx.copy_op(op, dest, false)).ok()?;
+    let alloc_id = ecx.intern_with_temp_alloc(op.layout, |ecx, dest| ecx.copy_op(op, dest)).ok()?;
     let value = ConstValue::Indirect { alloc_id, offset: Size::ZERO };
 
     // Check that we do not leak a pointer.

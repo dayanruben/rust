@@ -53,7 +53,7 @@ use crate::expectation::Expectation;
 use crate::fn_ctxt::LoweredTy;
 use crate::gather_locals::GatherLocalsVisitor;
 use rustc_data_structures::unord::UnordSet;
-use rustc_errors::{codes::*, struct_span_code_err, ErrCode, ErrorGuaranteed};
+use rustc_errors::{codes::*, struct_span_code_err, ErrorGuaranteed};
 use rustc_hir as hir;
 use rustc_hir::def::{DefKind, Res};
 use rustc_hir::intravisit::Visitor;
@@ -303,6 +303,10 @@ fn typeck_with_fallback<'tcx>(
     fcx.check_asms();
 
     let typeck_results = fcx.resolve_type_vars_in_body(body);
+
+    // We clone the defined opaque types during writeback in the new solver
+    // because we have to use them during normalization.
+    let _ = fcx.infcx.take_opaque_types();
 
     // Consistency check our TypeckResults instance can hold all ItemLocalIds
     // it will need to hold.

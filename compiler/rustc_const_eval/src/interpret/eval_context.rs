@@ -288,7 +288,7 @@ impl<'tcx> fmt::Display for FrameInfo<'tcx> {
             if tcx.def_key(self.instance.def_id()).disambiguated_data.data == DefPathData::Closure {
                 write!(f, "inside closure")
             } else {
-                // Note: this triggers a `good_path_delayed_bug` state, which means that if we ever
+                // Note: this triggers a `must_produce_diag` state, which means that if we ever
                 // get here we must emit a diagnostic. We should never display a `FrameInfo` unless
                 // we actually want to emit a warning or error to the user.
                 write!(f, "inside `{}`", self.instance)
@@ -304,7 +304,7 @@ impl<'tcx> FrameInfo<'tcx> {
             errors::FrameNote { where_: "closure", span, instance: String::new(), times: 0 }
         } else {
             let instance = format!("{}", self.instance);
-            // Note: this triggers a `good_path_delayed_bug` state, which means that if we ever get
+            // Note: this triggers a `must_produce_diag` state, which means that if we ever get
             // here we must emit a diagnostic. We should never display a `FrameInfo` unless we
             // actually want to emit a warning or error to the user.
             errors::FrameNote { where_: "instance", span, instance, times: 0 }
@@ -899,7 +899,19 @@ impl<'mir, 'tcx: 'mir, M: Machine<'mir, 'tcx>> InterpCx<'mir, 'tcx, M> {
                 .local_to_op(self.frame(), mir::RETURN_PLACE, None)
                 .expect("return place should always be live");
             let dest = self.frame().return_place.clone();
-            let err = self.copy_op(&op, &dest, /*allow_transmute*/ true);
+            let err = if self.stack().len() == 1 {
+                // The initializer of constants and statics will get validated separately
+                // after the constant has been fully evaluated. While we could fall back to the default
+                // code path, that will cause -Zenforce-validity to cycle on static initializers.
+                // Reading from a static's memory is not allowed during its evaluation, and will always
+                // trigger a cycle error. Validation must read from the memory of the current item.
+                // For Miri this means we do not validate the root frame return value,
+                // but Miri anyway calls `read_target_isize` on that so separate validation
+                // is not needed.
+                self.copy_op_no_dest_validation(&op, &dest)
+            } else {
+                self.copy_op_allow_transmute(&op, &dest)
+            };
             trace!("return value: {:?}", self.dump_place(&dest));
             // We delay actually short-circuiting on this error until *after* the stack frame is
             // popped, since we want this error to be attributed to the caller, whose type defines
