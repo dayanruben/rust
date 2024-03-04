@@ -213,6 +213,8 @@ declare_features! (
     (internal, negative_bounds, "1.71.0", None),
     /// Allows using `#[omit_gdb_pretty_printer_section]`.
     (internal, omit_gdb_pretty_printer_section, "1.5.0", None),
+    /// Set the maximum pattern complexity allowed (not limited by default).
+    (internal, pattern_complexity, "CURRENT_RUSTC_VERSION", None),
     /// Allows using `#[prelude_import]` on glob `use` items.
     (internal, prelude_import, "1.2.0", None),
     /// Used to identify crates that contain the profiler runtime.
@@ -259,8 +261,6 @@ declare_features! (
     (internal, needs_panic_runtime, "1.10.0", Some(32837)),
     /// Allows using the `#![panic_runtime]` attribute.
     (internal, panic_runtime, "1.10.0", Some(32837)),
-    /// Allows `extern "platform-intrinsic" { ... }`.
-    (internal, platform_intrinsics, "1.4.0", Some(27731)),
     /// Allows using `#[rustc_allow_const_fn_unstable]`.
     /// This is an attribute on `const fn` for the same
     /// purpose as `#[allow_internal_unstable]`.
@@ -373,8 +373,6 @@ declare_features! (
     (unstable, cfg_sanitize, "1.41.0", Some(39699)),
     /// Allows `cfg(sanitizer_cfi_generalize_pointers)` and `cfg(sanitizer_cfi_normalize_integers)`.
     (unstable, cfg_sanitizer_cfi, "1.77.0", Some(89653)),
-    /// Allows `cfg(target_abi = "...")`.
-    (unstable, cfg_target_abi, "1.55.0", Some(80970)),
     /// Allows `cfg(target(abi = "..."))`.
     (unstable, cfg_target_compact, "1.63.0", Some(96901)),
     /// Allows `cfg(target_has_atomic_load_store = "...")`.

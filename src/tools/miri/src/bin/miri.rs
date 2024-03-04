@@ -68,7 +68,7 @@ impl rustc_driver::Callbacks for MiriCompilerCalls {
         queries: &'tcx rustc_interface::Queries<'tcx>,
     ) -> Compilation {
         queries.global_ctxt().unwrap().enter(|tcx| {
-            if tcx.sess.dcx().has_errors().is_some() {
+            if tcx.sess.dcx().has_errors_or_delayed_bugs().is_some() {
                 tcx.dcx().fatal("miri cannot be run on programs that fail compilation");
             }
 
@@ -534,6 +534,8 @@ fn main() {
                     ),
             };
             miri_config.tracked_alloc_ids.extend(ids);
+        } else if arg == "-Zmiri-track-alloc-accesses" {
+            miri_config.track_alloc_accesses = true;
         } else if let Some(param) = arg.strip_prefix("-Zmiri-compare-exchange-weak-failure-rate=") {
             let rate = match param.parse::<f64>() {
                 Ok(rate) if rate >= 0.0 && rate <= 1.0 => rate,
