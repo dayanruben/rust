@@ -248,6 +248,8 @@ fn check_item<'tcx>(tcx: TyCtxt<'tcx>, item: &'tcx hir::Item<'tcx>) -> Result<()
             let header = tcx.impl_trait_header(def_id);
             let is_auto = header
                 .is_some_and(|header| tcx.trait_is_auto(header.skip_binder().trait_ref.def_id));
+
+            crate::impl_wf_check::check_impl_wf(tcx, def_id)?;
             let mut res = Ok(());
             if let (hir::Defaultness::Default { .. }, true) = (impl_.defaultness, is_auto) {
                 let sp = impl_.of_trait.as_ref().map_or(item.span, |t| t.path.span);
@@ -809,9 +811,7 @@ impl<'tcx> GATArgsCollector<'tcx> {
 }
 
 impl<'tcx> TypeVisitor<TyCtxt<'tcx>> for GATArgsCollector<'tcx> {
-    type BreakTy = !;
-
-    fn visit_ty(&mut self, t: Ty<'tcx>) -> ControlFlow<Self::BreakTy> {
+    fn visit_ty(&mut self, t: Ty<'tcx>) {
         match t.kind() {
             ty::Alias(ty::Projection, p) if p.def_id == self.gat => {
                 for (idx, arg) in p.args.iter().enumerate() {
@@ -1456,20 +1456,19 @@ fn check_where_clauses<'tcx>(wfcx: &WfCheckingCtxt<'_, 'tcx>, span: Span, def_id
                 params: FxHashSet<u32>,
             }
             impl<'tcx> ty::visit::TypeVisitor<TyCtxt<'tcx>> for CountParams {
-                type BreakTy = ();
-
-                fn visit_ty(&mut self, t: Ty<'tcx>) -> ControlFlow<Self::BreakTy> {
+                type Result = ControlFlow<()>;
+                fn visit_ty(&mut self, t: Ty<'tcx>) -> Self::Result {
                     if let ty::Param(param) = t.kind() {
                         self.params.insert(param.index);
                     }
                     t.super_visit_with(self)
                 }
 
-                fn visit_region(&mut self, _: ty::Region<'tcx>) -> ControlFlow<Self::BreakTy> {
+                fn visit_region(&mut self, _: ty::Region<'tcx>) -> Self::Result {
                     ControlFlow::Break(())
                 }
 
-                fn visit_const(&mut self, c: ty::Const<'tcx>) -> ControlFlow<Self::BreakTy> {
+                fn visit_const(&mut self, c: ty::Const<'tcx>) -> Self::Result {
                     if let ty::ConstKind::Param(param) = c.kind() {
                         self.params.insert(param.index);
                     }
