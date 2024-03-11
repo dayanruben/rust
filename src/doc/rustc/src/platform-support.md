@@ -237,6 +237,7 @@ target | std | host | notes
 -------|:---:|:----:|-------
 [`arm64e-apple-ios`](platform-support/arm64e-apple-ios.md) | ✓ | | ARM64e Apple iOS
 [`arm64e-apple-darwin`](platform-support/arm64e-apple-darwin.md)  | ✓ | ✓ | ARM64e Apple Darwin
+[`arm64ec-pc-windows-msvc`](platform-support/arm64ec-pc-windows-msvc.md) | ? | | Arm64EC Windows MSVC
 `aarch64-apple-ios-macabi` | ? |  | Apple Catalyst on ARM64
 [`aarch64-apple-tvos`](platform-support/apple-tvos.md) | ? |  | ARM64 tvOS
 [`aarch64-apple-tvos-sim`](platform-support/apple-tvos.md) | ? |  | ARM64 tvOS Simulator
@@ -301,6 +302,7 @@ target | std | host | notes
 `i686-uwp-windows-msvc` | ? |  | [^x86_32-floats-return-ABI]
 [`i686-win7-windows-msvc`](platform-support/win7-windows-msvc.md) | ✓ |   | 32-bit Windows 7 support [^x86_32-floats-return-ABI]
 `i686-wrs-vxworks` | ? |  | [^x86_32-floats-return-ABI]
+[`loongarch64-unknown-linux-musl`](platform-support/loongarch-linux.md) | ? |  | LoongArch64 Linux (LP64D ABI) with musl 1.2.3
 [`m68k-unknown-linux-gnu`](platform-support/m68k-unknown-linux-gnu.md) | ? |  | Motorola 680x0 Linux
 `mips-unknown-linux-gnu` | ✓ | ✓ | MIPS Linux (kernel 4.4, glibc 2.23)
 `mips-unknown-linux-musl` | ✓ |  | MIPS Linux with musl 1.2.3

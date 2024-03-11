@@ -41,7 +41,6 @@ use crate::core::builder::Kind;
 use crate::core::config::{flags, LldMode};
 use crate::core::config::{DryRun, Target};
 use crate::core::config::{LlvmLibunwind, TargetSelection};
-use crate::utils::cache::{Interned, INTERNER};
 use crate::utils::exec::{BehaviorOnFailure, BootstrapCommand, OutputMode};
 use crate::utils::helpers::{self, dir_is_empty, exe, libdir, mtime, output, symlink_dir};
 
@@ -91,7 +90,7 @@ const EXTRA_CHECK_CFGS: &[(Option<Mode>, &str, Option<&[&'static str]>)] = &[
     /* Extra values not defined in the built-in targets yet, but used in std */
     (Some(Mode::Std), "target_env", Some(&["libnx", "p2"])),
     // (Some(Mode::Std), "target_os", Some(&[])),
-    (Some(Mode::Std), "target_arch", Some(&["spirv", "nvptx", "xtensa"])),
+    (Some(Mode::Std), "target_arch", Some(&["arm64ec", "spirv", "nvptx", "xtensa"])),
     /* Extra names used by dependencies */
     // FIXME: Used by serde_json, but we should not be triggering on external dependencies.
     (Some(Mode::Rustc), "no_btreemap_remove_entry", None),
@@ -172,9 +171,11 @@ pub struct Build {
     doc_tests: DocTests,
     verbosity: usize,
 
-    // Targets for which to build
+    /// Build triple for the pre-compiled snapshot compiler.
     build: TargetSelection,
+    /// Which triples to produce a compiler toolchain for.
     hosts: Vec<TargetSelection>,
+    /// Which triples to build libraries (core/alloc/std/test/proc_macro) for.
     targets: Vec<TargetSelection>,
 
     initial_rustc: PathBuf,
@@ -191,8 +192,8 @@ pub struct Build {
     ranlib: RefCell<HashMap<TargetSelection, PathBuf>>,
     // Miscellaneous
     // allow bidirectional lookups: both name -> path and path -> name
-    crates: HashMap<Interned<String>, Crate>,
-    crate_paths: HashMap<PathBuf, Interned<String>>,
+    crates: HashMap<String, Crate>,
+    crate_paths: HashMap<PathBuf, String>,
     is_sudo: bool,
     ci_env: CiEnv,
     delayed_failures: RefCell<Vec<String>>,
@@ -204,8 +205,8 @@ pub struct Build {
 
 #[derive(Debug, Clone)]
 struct Crate {
-    name: Interned<String>,
-    deps: HashSet<Interned<String>>,
+    name: String,
+    deps: HashSet<String>,
     path: PathBuf,
     has_lib: bool,
 }
@@ -829,8 +830,8 @@ impl Build {
     }
 
     /// Output directory for some generated md crate documentation for a target (temporary)
-    fn md_doc_out(&self, target: TargetSelection) -> Interned<PathBuf> {
-        INTERNER.intern_path(self.out.join(&*target.triple).join("md-doc"))
+    fn md_doc_out(&self, target: TargetSelection) -> PathBuf {
+        self.out.join(&*target.triple).join("md-doc")
     }
 
     /// Returns `true` if this is an external version of LLVM not managed by bootstrap.
@@ -1353,6 +1354,17 @@ impl Build {
             || env::var_os("TEST_DEVICE_ADDR").is_some()
     }
 
+    /// Returns an optional "runner" to pass to `compiletest` when executing
+    /// test binaries.
+    ///
+    /// An example of this would be a WebAssembly runtime when testing the wasm
+    /// targets.
+    fn runner(&self, target: TargetSelection) -> Option<String> {
+        let target = self.config.target_config.get(&target)?;
+        let runner = target.runner.as_ref()?;
+        Some(runner.to_owned())
+    }
+
     /// Returns the root of the "rootfs" image that this target will be using,
     /// if one was configured.
     ///
@@ -1538,7 +1550,7 @@ impl Build {
     /// "local" crates (those in the local source tree, not from a registry).
     fn in_tree_crates(&self, root: &str, target: Option<TargetSelection>) -> Vec<&Crate> {
         let mut ret = Vec::new();
-        let mut list = vec![INTERNER.intern_str(root)];
+        let mut list = vec![root.to_owned()];
         let mut visited = HashSet::new();
         while let Some(krate) = list.pop() {
             let krate = self
@@ -1564,11 +1576,11 @@ impl Build {
                     && (dep != "rustc_codegen_llvm"
                         || self.config.hosts.iter().any(|host| self.config.llvm_enabled(*host)))
                 {
-                    list.push(*dep);
+                    list.push(dep.clone());
                 }
             }
         }
-        ret.sort_unstable_by_key(|krate| krate.name); // reproducible order needed for tests
+        ret.sort_unstable_by_key(|krate| krate.name.clone()); // reproducible order needed for tests
         ret
     }
 

@@ -467,16 +467,12 @@ pub fn maybe_create_entry_wrapper<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
 
         let (start_fn, start_ty, args) = if let EntryFnType::Main { sigpipe } = entry_type {
             let start_def_id = cx.tcx().require_lang_item(LangItem::Start, None);
-            let start_fn = cx.get_fn_addr(
-                ty::Instance::resolve(
-                    cx.tcx(),
-                    ty::ParamEnv::reveal_all(),
-                    start_def_id,
-                    cx.tcx().mk_args(&[main_ret_ty.into()]),
-                )
-                .unwrap()
-                .unwrap(),
-            );
+            let start_fn = cx.get_fn_addr(ty::Instance::expect_resolve(
+                cx.tcx(),
+                ty::ParamEnv::reveal_all(),
+                start_def_id,
+                cx.tcx().mk_args(&[main_ret_ty.into()]),
+            ));
 
             let i8_ty = cx.type_i8();
             let arg_sigpipe = bx.const_u8(sigpipe);
@@ -510,11 +506,13 @@ fn get_argc_argv<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
         // Params for UEFI
         let param_handle = bx.get_param(0);
         let param_system_table = bx.get_param(1);
+        let ptr_size = bx.tcx().data_layout.pointer_size;
+        let ptr_align = bx.tcx().data_layout.pointer_align.abi;
         let arg_argc = bx.const_int(cx.type_isize(), 2);
-        let arg_argv = bx.alloca(cx.type_array(cx.type_ptr(), 2), Align::ONE);
-        bx.store(param_handle, arg_argv, Align::ONE);
-        let arg_argv_el1 = bx.gep(cx.type_ptr(), arg_argv, &[bx.const_int(cx.type_int(), 1)]);
-        bx.store(param_system_table, arg_argv_el1, Align::ONE);
+        let arg_argv = bx.alloca(cx.type_array(cx.type_ptr(), 2), ptr_align);
+        bx.store(param_handle, arg_argv, ptr_align);
+        let arg_argv_el1 = bx.inbounds_ptradd(arg_argv, bx.const_usize(ptr_size.bytes()));
+        bx.store(param_system_table, arg_argv_el1, ptr_align);
         (arg_argc, arg_argv)
     } else if cx.sess().target.main_needs_argc_argv {
         // Params from native `main()` used as args for rust start function
@@ -907,7 +905,11 @@ impl CrateInfo {
                     lang_items::required(tcx, l).then_some(name)
                 })
                 .collect();
-            let prefix = if target.is_like_windows && target.arch == "x86" { "_" } else { "" };
+            let prefix = match (target.is_like_windows, target.arch.as_ref()) {
+                (true, "x86") => "_",
+                (true, "arm64ec") => "#",
+                _ => "",
+            };
 
             // This loop only adds new items to values of the hash map, so the order in which we
             // iterate over the values is not important.

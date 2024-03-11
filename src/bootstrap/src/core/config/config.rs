@@ -264,7 +264,7 @@ pub struct Config {
     pub rustc_default_linker: Option<String>,
     pub rust_optimize_tests: bool,
     pub rust_dist_src: bool,
-    pub rust_codegen_backends: Vec<Interned<String>>,
+    pub rust_codegen_backends: Vec<String>,
     pub rust_verify_llvm_ir: bool,
     pub rust_thin_lto_import_instr_limit: Option<u32>,
     pub rust_remap_debuginfo: bool,
@@ -458,6 +458,8 @@ impl std::str::FromStr for RustcLto {
 }
 
 #[derive(Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+// N.B.: This type is used everywhere, and the entire codebase relies on it being Copy.
+// Making !Copy is highly nontrivial!
 pub struct TargetSelection {
     pub triple: Interned<String>,
     file: Option<Interned<String>>,
@@ -579,8 +581,9 @@ pub struct Target {
     pub musl_libdir: Option<PathBuf>,
     pub wasi_root: Option<PathBuf>,
     pub qemu_rootfs: Option<PathBuf>,
+    pub runner: Option<String>,
     pub no_std: bool,
-    pub codegen_backends: Option<Vec<Interned<String>>>,
+    pub codegen_backends: Option<Vec<String>>,
 }
 
 impl Target {
@@ -812,8 +815,8 @@ define_config! {
         host: Option<Vec<String>> = "host",
         target: Option<Vec<String>> = "target",
         build_dir: Option<String> = "build-dir",
-        cargo: Option<String> = "cargo",
-        rustc: Option<String> = "rustc",
+        cargo: Option<PathBuf> = "cargo",
+        rustc: Option<PathBuf> = "rustc",
         rustfmt: Option<PathBuf> = "rustfmt",
         docs: Option<bool> = "docs",
         compiler_docs: Option<bool> = "compiler-docs",
@@ -1142,6 +1145,7 @@ define_config! {
         qemu_rootfs: Option<String> = "qemu-rootfs",
         no_std: Option<bool> = "no-std",
         codegen_backends: Option<Vec<String>> = "codegen-backends",
+        runner: Option<String> = "runner",
     }
 }
 
@@ -1163,7 +1167,7 @@ impl Config {
             channel: "dev".to_string(),
             codegen_tests: true,
             rust_dist_src: true,
-            rust_codegen_backends: vec![INTERNER.intern_str("llvm")],
+            rust_codegen_backends: vec!["llvm".to_owned()],
             deny_warnings: true,
             bindir: "bin".into(),
             dist_include_mingw_linker: true,
@@ -1433,7 +1437,7 @@ impl Config {
             if !flags.skip_stage0_validation {
                 config.check_stage0_version(&rustc, "rustc");
             }
-            PathBuf::from(rustc)
+            rustc
         } else {
             config.download_beta_toolchain();
             config.out.join(config.build.triple).join("stage0/bin/rustc")
@@ -1443,7 +1447,7 @@ impl Config {
             if !flags.skip_stage0_validation {
                 config.check_stage0_version(&cargo, "cargo");
             }
-            PathBuf::from(cargo)
+            cargo
         } else {
             config.download_beta_toolchain();
             config.out.join(config.build.triple).join("stage0/bin/cargo")
@@ -1693,7 +1697,7 @@ impl Config {
                         }
                     }
 
-                    INTERNER.intern_str(s)
+                    s.clone()
                 }).collect();
             }
 
@@ -1862,6 +1866,7 @@ impl Config {
                 target.musl_libdir = cfg.musl_libdir.map(PathBuf::from);
                 target.wasi_root = cfg.wasi_root.map(PathBuf::from);
                 target.qemu_rootfs = cfg.qemu_rootfs.map(PathBuf::from);
+                target.runner = cfg.runner;
                 target.sanitizers = cfg.sanitizers;
                 target.profiler = cfg.profiler;
                 target.rpath = cfg.rpath;
@@ -1880,7 +1885,7 @@ impl Config {
                             }
                         }
 
-                        INTERNER.intern_str(s)
+                        s.clone()
                     }).collect());
                 }
 
@@ -2267,7 +2272,7 @@ impl Config {
     }
 
     pub fn llvm_enabled(&self, target: TargetSelection) -> bool {
-        self.codegen_backends(target).contains(&INTERNER.intern_str("llvm"))
+        self.codegen_backends(target).contains(&"llvm".to_owned())
     }
 
     pub fn llvm_libunwind(&self, target: TargetSelection) -> LlvmLibunwind {
@@ -2286,14 +2291,14 @@ impl Config {
         self.submodules.unwrap_or(rust_info.is_managed_git_subrepository())
     }
 
-    pub fn codegen_backends(&self, target: TargetSelection) -> &[Interned<String>] {
+    pub fn codegen_backends(&self, target: TargetSelection) -> &[String] {
         self.target_config
             .get(&target)
             .and_then(|cfg| cfg.codegen_backends.as_deref())
             .unwrap_or(&self.rust_codegen_backends)
     }
 
-    pub fn default_codegen_backend(&self, target: TargetSelection) -> Option<Interned<String>> {
+    pub fn default_codegen_backend(&self, target: TargetSelection) -> Option<String> {
         self.codegen_backends(target).first().cloned()
     }
 
@@ -2305,7 +2310,7 @@ impl Config {
     }
 
     // check rustc/cargo version is same or lower with 1 apart from the building one
-    pub fn check_stage0_version(&self, program_path: &str, component_name: &'static str) {
+    pub fn check_stage0_version(&self, program_path: &Path, component_name: &'static str) {
         if self.dry_run() {
             return;
         }
@@ -2316,7 +2321,8 @@ impl Config {
         let stage0_name = stage0_output.next().unwrap();
         if stage0_name != component_name {
             fail(&format!(
-                "Expected to find {component_name} at {program_path} but it claims to be {stage0_name}"
+                "Expected to find {component_name} at {} but it claims to be {stage0_name}",
+                program_path.display()
             ));
         }
 
