@@ -43,10 +43,10 @@ pub enum Condition<R> {
 /// Answers "why wasn't the source type transmutable into the destination type?"
 #[derive(Debug, Hash, Eq, PartialEq, PartialOrd, Ord, Clone)]
 pub enum Reason<T> {
-    /// The layout of the source type is unspecified.
-    SrcIsUnspecified,
-    /// The layout of the destination type is unspecified.
-    DstIsUnspecified,
+    /// The layout of the source type is not yet supported.
+    SrcIsNotYetSupported,
+    /// The layout of the destination type is not yet supported.
+    DstIsNotYetSupported,
     /// The layout of the destination type is bit-incompatible with the source type.
     DstIsBitIncompatible,
     /// The destination type may carry safety invariants.
@@ -89,6 +89,7 @@ mod rustc {
     use rustc_middle::ty::Ty;
     use rustc_middle::ty::TyCtxt;
     use rustc_middle::ty::ValTree;
+    use rustc_span::DUMMY_SP;
 
     /// The source and destination types of a transmutation.
     #[derive(TypeVisitable, Debug, Clone, Copy)]
@@ -135,7 +136,7 @@ mod rustc {
             use rustc_middle::ty::ScalarInt;
             use rustc_span::symbol::sym;
 
-            let Ok(cv) = c.eval(tcx, param_env, None) else {
+            let Ok(cv) = c.eval(tcx, param_env, DUMMY_SP) else {
                 return Some(Self {
                     alignment: true,
                     lifetimes: true,

@@ -7,7 +7,6 @@ use rustc_hir::{ItemId, Node, CRATE_HIR_ID};
 use rustc_middle::query::Providers;
 use rustc_middle::ty::TyCtxt;
 use rustc_session::config::{sigpipe, CrateType, EntryFnType};
-use rustc_session::parse::feature_err;
 use rustc_span::symbol::sym;
 use rustc_span::{Span, Symbol};
 
@@ -127,22 +126,12 @@ fn configure_main(tcx: TyCtxt<'_>, visitor: &EntryContext<'_>) -> Option<(DefId,
         {
             // non-local main imports are handled below
             if let Some(def_id) = def_id.as_local()
-                && matches!(tcx.opt_hir_node_by_def_id(def_id), Some(Node::ForeignItem(_)))
+                && matches!(tcx.hir_node_by_def_id(def_id), Node::ForeignItem(_))
             {
                 tcx.dcx().emit_err(ExternMain { span: tcx.def_span(def_id) });
                 return None;
             }
 
-            if main_def.is_import && !tcx.features().imported_main {
-                let span = main_def.span;
-                feature_err(
-                    &tcx.sess,
-                    sym::imported_main,
-                    span,
-                    "using an imported function as entry point `main` is experimental",
-                )
-                .emit();
-            }
             return Some((def_id, EntryFnType::Main { sigpipe: sigpipe(tcx, def_id) }));
         }
         no_main_err(tcx, visitor);

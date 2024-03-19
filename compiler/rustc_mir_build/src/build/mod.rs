@@ -1,7 +1,7 @@
 use crate::build::expr::as_place::PlaceBuilder;
 use crate::build::scope::DropKind;
 use itertools::Itertools;
-use rustc_apfloat::ieee::{Double, Single};
+use rustc_apfloat::ieee::{Double, Half, Quad, Single};
 use rustc_apfloat::Float;
 use rustc_ast::attr;
 use rustc_data_structures::fx::FxHashMap;
@@ -1013,8 +1013,13 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
         if let Some(source_scope) = scope {
             self.source_scope = source_scope;
         }
-
-        self.expr_into_dest(Place::return_place(), block, expr_id)
+        if self.tcx.intrinsic(self.def_id).is_some_and(|i| i.must_be_overridden) {
+            let source_info = self.source_info(rustc_span::DUMMY_SP);
+            self.cfg.terminate(block, source_info, TerminatorKind::Unreachable);
+            self.cfg.start_new_block().unit()
+        } else {
+            self.expr_into_dest(Place::return_place(), block, expr_id)
+        }
     }
 
     fn set_correct_source_scope_for_arg(
@@ -1060,7 +1065,8 @@ pub(crate) fn parse_float_into_scalar(
 ) -> Option<Scalar> {
     let num = num.as_str();
     match float_ty {
-        ty::FloatTy::F16 => unimplemented!("f16_f128"),
+        // FIXME(f16_f128): When available, compare to the library parser as with `f32` and `f64`
+        ty::FloatTy::F16 => num.parse::<Half>().ok().map(Scalar::from_f16),
         ty::FloatTy::F32 => {
             let Ok(rust_f) = num.parse::<f32>() else { return None };
             let mut f = num
@@ -1107,7 +1113,8 @@ pub(crate) fn parse_float_into_scalar(
 
             Some(Scalar::from_f64(f))
         }
-        ty::FloatTy::F128 => unimplemented!("f16_f128"),
+        // FIXME(f16_f128): When available, compare to the library parser as with `f32` and `f64`
+        ty::FloatTy::F128 => num.parse::<Quad>().ok().map(Scalar::from_f128),
     }
 }
 

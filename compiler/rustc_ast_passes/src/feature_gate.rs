@@ -1,7 +1,7 @@
 use rustc_ast as ast;
 use rustc_ast::visit::{self, AssocCtxt, FnCtxt, FnKind, Visitor};
 use rustc_ast::{attr, AssocConstraint, AssocConstraintKind, NodeId};
-use rustc_ast::{PatKind, RangeEnd};
+use rustc_ast::{token, PatKind, RangeEnd};
 use rustc_feature::{AttributeGate, BuiltinAttribute, Features, GateIssue, BUILTIN_ATTRIBUTE_MAP};
 use rustc_session::parse::{feature_err, feature_err_issue, feature_warn};
 use rustc_session::Session;
@@ -378,6 +378,17 @@ impl<'a> Visitor<'a> for PostExpansionVisitor<'a> {
             ast::ExprKind::TryBlock(_) => {
                 gate!(&self, try_blocks, e.span, "`try` expression is experimental");
             }
+            ast::ExprKind::Lit(token::Lit { kind: token::LitKind::Float, suffix, .. }) => {
+                match suffix {
+                    Some(sym::f16) => {
+                        gate!(&self, f16, e.span, "the type `f16` is unstable")
+                    }
+                    Some(sym::f128) => {
+                        gate!(&self, f128, e.span, "the type `f128` is unstable")
+                    }
+                    _ => (),
+                }
+            }
             _ => {}
         }
         visit::walk_expr(self, e)
@@ -451,13 +462,6 @@ impl<'a> Visitor<'a> for PostExpansionVisitor<'a> {
                     return_type_notation,
                     constraint.span,
                     "return type notation is experimental"
-                );
-            } else {
-                gate!(
-                    &self,
-                    associated_type_bounds,
-                    constraint.span,
-                    "associated type bounds are unstable"
                 );
             }
         }
@@ -604,7 +608,6 @@ pub fn check_crate(krate: &ast::Crate, sess: &Session, features: &Features) {
     }
 
     gate_all_legacy_dont_use!(trait_alias, "trait aliases are experimental");
-    gate_all_legacy_dont_use!(associated_type_bounds, "associated type bounds are unstable");
     // Despite being a new feature, `where T: Trait<Assoc(): Sized>`, which is RTN syntax now,
     // used to be gated under associated_type_bounds, which are right above, so RTN needs to
     // be too.

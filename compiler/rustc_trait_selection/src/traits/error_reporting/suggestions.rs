@@ -194,8 +194,7 @@ pub fn suggest_restriction<'tcx, G: EmissionGuarantee>(
         sugg.extend(ty_spans.into_iter().map(|s| (s, type_param_name.to_string())));
 
         // Suggest `fn foo<T: Trait>(t: T) where <T as Trait>::A: Bound`.
-        // FIXME: once `#![feature(associated_type_bounds)]` is stabilized, we should suggest
-        // `fn foo(t: impl Trait<A: Bound>)` instead.
+        // FIXME: we should suggest `fn foo(t: impl Trait<A: Bound>)` instead.
         err.multipart_suggestion(
             "introduce a type parameter with a trait bound instead of using `impl Trait`",
             sugg,
@@ -261,7 +260,8 @@ impl<'tcx> TypeErrCtxt<'_, 'tcx> {
 
         // FIXME: Add check for trait bound that is already present, particularly `?Sized` so we
         //        don't suggest `T: Sized + ?Sized`.
-        while let Some(node) = self.tcx.opt_hir_node_by_def_id(body_id) {
+        loop {
+            let node = self.tcx.hir_node_by_def_id(body_id);
             match node {
                 hir::Node::Item(hir::Item {
                     ident,
@@ -1725,8 +1725,8 @@ impl<'tcx> TypeErrCtxt<'_, 'tcx> {
         trait_pred: ty::PolyTraitPredicate<'tcx>,
     ) -> bool {
         let hir = self.tcx.hir();
-        let node = self.tcx.opt_hir_node_by_def_id(obligation.cause.body_id);
-        if let Some(hir::Node::Item(hir::Item { kind: hir::ItemKind::Fn(sig, _, body_id), .. })) = node
+        let node = self.tcx.hir_node_by_def_id(obligation.cause.body_id);
+        if let hir::Node::Item(hir::Item { kind: hir::ItemKind::Fn(sig, _, body_id), .. }) = node
             && let hir::ExprKind::Block(blk, _) = &hir.body(*body_id).value.kind
             && sig.decl.output.span().overlaps(span)
             && blk.expr.is_none()
@@ -1760,8 +1760,8 @@ impl<'tcx> TypeErrCtxt<'_, 'tcx> {
     }
 
     fn return_type_span(&self, obligation: &PredicateObligation<'tcx>) -> Option<Span> {
-        let Some(hir::Node::Item(hir::Item { kind: hir::ItemKind::Fn(sig, ..), .. })) =
-            self.tcx.opt_hir_node_by_def_id(obligation.cause.body_id)
+        let hir::Node::Item(hir::Item { kind: hir::ItemKind::Fn(sig, ..), .. }) =
+            self.tcx.hir_node_by_def_id(obligation.cause.body_id)
         else {
             return None;
         };
@@ -1853,10 +1853,8 @@ impl<'tcx> TypeErrCtxt<'_, 'tcx> {
         }
 
         let hir = self.tcx.hir();
-        let node = self.tcx.opt_hir_node_by_def_id(obligation.cause.body_id);
-        if let Some(hir::Node::Item(hir::Item { kind: hir::ItemKind::Fn(_, _, body_id), .. })) =
-            node
-        {
+        let node = self.tcx.hir_node_by_def_id(obligation.cause.body_id);
+        if let hir::Node::Item(hir::Item { kind: hir::ItemKind::Fn(_, _, body_id), .. }) = node {
             let body = hir.body(*body_id);
             // Point at all the `return`s in the function as they have failed trait bounds.
             let mut visitor = ReturnsVisitor::default();
@@ -3511,9 +3509,11 @@ impl<'tcx> TypeErrCtxt<'_, 'tcx> {
             }
             ObligationCauseCode::TrivialBound => {
                 err.help("see issue #48214");
-                if tcx.sess.opts.unstable_features.is_nightly_build() {
-                    err.help("add `#![feature(trivial_bounds)]` to the crate attributes to enable");
-                }
+                tcx.disabled_nightly_features(
+                    err,
+                    Some(tcx.local_def_id_to_hir_id(body_id)),
+                    [(String::new(), sym::trivial_bounds)],
+                );
             }
             ObligationCauseCode::OpaqueReturnType(expr_info) => {
                 if let Some((expr_ty, expr_span)) = expr_info {
@@ -4490,7 +4490,7 @@ impl<'tcx> TypeErrCtxt<'_, 'tcx> {
             }
             return;
         };
-        let Some(hir::Node::TraitItem(item)) = self.tcx.opt_hir_node_by_def_id(fn_def_id) else {
+        let hir::Node::TraitItem(item) = self.tcx.hir_node_by_def_id(fn_def_id) else {
             return;
         };
 

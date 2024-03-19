@@ -2049,7 +2049,7 @@ impl LoopSource {
     }
 }
 
-#[derive(Copy, Clone, Debug, HashStable_Generic)]
+#[derive(Copy, Clone, Debug, PartialEq, HashStable_Generic)]
 pub enum LoopIdError {
     OutsideLoopScope,
     UnlabeledCfInWhileCondition,
@@ -2444,7 +2444,7 @@ pub enum PrimTy {
 
 impl PrimTy {
     /// All of the primitive types
-    pub const ALL: [Self; 17] = [
+    pub const ALL: [Self; 19] = [
         // any changes here should also be reflected in `PrimTy::from_name`
         Self::Int(IntTy::I8),
         Self::Int(IntTy::I16),
@@ -2458,9 +2458,10 @@ impl PrimTy {
         Self::Uint(UintTy::U64),
         Self::Uint(UintTy::U128),
         Self::Uint(UintTy::Usize),
+        Self::Float(FloatTy::F16),
         Self::Float(FloatTy::F32),
         Self::Float(FloatTy::F64),
-        // FIXME(f16_f128): add these when enabled below
+        Self::Float(FloatTy::F128),
         Self::Bool,
         Self::Char,
         Self::Str,
@@ -2508,12 +2509,10 @@ impl PrimTy {
             sym::u64 => Self::Uint(UintTy::U64),
             sym::u128 => Self::Uint(UintTy::U128),
             sym::usize => Self::Uint(UintTy::Usize),
+            sym::f16 => Self::Float(FloatTy::F16),
             sym::f32 => Self::Float(FloatTy::F32),
             sym::f64 => Self::Float(FloatTy::F64),
-            // FIXME(f16_f128): enabling these will open the gates of f16 and f128 being
-            // understood by rustc.
-            // sym::f16 => Self::Float(FloatTy::F16),
-            // sym::f128 => Self::Float(FloatTy::F128),
+            sym::f128 => Self::Float(FloatTy::F128),
             sym::bool => Self::Bool,
             sym::char => Self::Char,
             sym::str => Self::Str,
@@ -2551,11 +2550,6 @@ pub struct OpaqueTy<'hir> {
     /// originating from a trait method. This makes it so that the opaque is
     /// lowered as an associated type.
     pub in_trait: bool,
-}
-
-#[derive(Copy, Clone, Debug, HashStable_Generic)]
-pub struct AssocOpaqueTy {
-    // Add some data if necessary
 }
 
 /// From whence the opaque type came.
@@ -3368,7 +3362,7 @@ pub enum OwnerNode<'hir> {
     TraitItem(&'hir TraitItem<'hir>),
     ImplItem(&'hir ImplItem<'hir>),
     Crate(&'hir Mod<'hir>),
-    AssocOpaqueTy(&'hir AssocOpaqueTy),
+    Synthetic,
 }
 
 impl<'hir> OwnerNode<'hir> {
@@ -3378,7 +3372,7 @@ impl<'hir> OwnerNode<'hir> {
             | OwnerNode::ForeignItem(ForeignItem { ident, .. })
             | OwnerNode::ImplItem(ImplItem { ident, .. })
             | OwnerNode::TraitItem(TraitItem { ident, .. }) => Some(*ident),
-            OwnerNode::Crate(..) | OwnerNode::AssocOpaqueTy(..) => None,
+            OwnerNode::Crate(..) | OwnerNode::Synthetic => None,
         }
     }
 
@@ -3391,7 +3385,7 @@ impl<'hir> OwnerNode<'hir> {
             | OwnerNode::ImplItem(ImplItem { span, .. })
             | OwnerNode::TraitItem(TraitItem { span, .. }) => span,
             OwnerNode::Crate(Mod { spans: ModSpans { inner_span, .. }, .. }) => inner_span,
-            OwnerNode::AssocOpaqueTy(..) => unreachable!(),
+            OwnerNode::Synthetic => unreachable!(),
         }
     }
 
@@ -3450,7 +3444,7 @@ impl<'hir> OwnerNode<'hir> {
             | OwnerNode::ImplItem(ImplItem { owner_id, .. })
             | OwnerNode::ForeignItem(ForeignItem { owner_id, .. }) => *owner_id,
             OwnerNode::Crate(..) => crate::CRATE_HIR_ID.owner,
-            OwnerNode::AssocOpaqueTy(..) => unreachable!(),
+            OwnerNode::Synthetic => unreachable!(),
         }
     }
 
@@ -3494,7 +3488,7 @@ impl<'hir> Into<Node<'hir>> for OwnerNode<'hir> {
             OwnerNode::ImplItem(n) => Node::ImplItem(n),
             OwnerNode::TraitItem(n) => Node::TraitItem(n),
             OwnerNode::Crate(n) => Node::Crate(n),
-            OwnerNode::AssocOpaqueTy(n) => Node::AssocOpaqueTy(n),
+            OwnerNode::Synthetic => Node::Synthetic,
         }
     }
 }
@@ -3532,7 +3526,8 @@ pub enum Node<'hir> {
     WhereBoundPredicate(&'hir WhereBoundPredicate<'hir>),
     // FIXME: Merge into `Node::Infer`.
     ArrayLenInfer(&'hir InferArg),
-    AssocOpaqueTy(&'hir AssocOpaqueTy),
+    // Created by query feeding
+    Synthetic,
     // Span by reference to minimize `Node`'s size
     #[allow(rustc::pass_by_value)]
     Err(&'hir Span),
@@ -3583,7 +3578,7 @@ impl<'hir> Node<'hir> {
             | Node::Infer(..)
             | Node::WhereBoundPredicate(..)
             | Node::ArrayLenInfer(..)
-            | Node::AssocOpaqueTy(..)
+            | Node::Synthetic
             | Node::Err(..) => None,
         }
     }
@@ -3641,33 +3636,40 @@ impl<'hir> Node<'hir> {
         }
     }
 
-    pub fn body_id(&self) -> Option<BodyId> {
+    #[inline]
+    pub fn associated_body(&self) -> Option<(LocalDefId, BodyId)> {
         match self {
             Node::Item(Item {
+                owner_id,
                 kind:
-                    ItemKind::Static(_, _, body)
-                    | ItemKind::Const(_, _, body)
-                    | ItemKind::Fn(_, _, body),
+                    ItemKind::Const(_, _, body) | ItemKind::Static(.., body) | ItemKind::Fn(.., body),
                 ..
             })
             | Node::TraitItem(TraitItem {
+                owner_id,
                 kind:
-                    TraitItemKind::Fn(_, TraitFn::Provided(body)) | TraitItemKind::Const(_, Some(body)),
+                    TraitItemKind::Const(_, Some(body)) | TraitItemKind::Fn(_, TraitFn::Provided(body)),
                 ..
             })
             | Node::ImplItem(ImplItem {
-                kind: ImplItemKind::Fn(_, body) | ImplItemKind::Const(_, body),
+                owner_id,
+                kind: ImplItemKind::Const(_, body) | ImplItemKind::Fn(_, body),
                 ..
-            })
-            | Node::Expr(Expr {
-                kind:
-                    ExprKind::ConstBlock(ConstBlock { body, .. })
-                    | ExprKind::Closure(Closure { body, .. })
-                    | ExprKind::Repeat(_, ArrayLen::Body(AnonConst { body, .. })),
-                ..
-            }) => Some(*body),
+            }) => Some((owner_id.def_id, *body)),
+
+            Node::Expr(Expr { kind: ExprKind::Closure(Closure { def_id, body, .. }), .. }) => {
+                Some((*def_id, *body))
+            }
+
+            Node::AnonConst(constant) => Some((constant.def_id, constant.body)),
+            Node::ConstBlock(constant) => Some((constant.def_id, constant.body)),
+
             _ => None,
         }
+    }
+
+    pub fn body_id(&self) -> Option<BodyId> {
+        Some(self.associated_body()?.1)
     }
 
     pub fn generics(self) -> Option<&'hir Generics<'hir>> {
@@ -3689,7 +3691,7 @@ impl<'hir> Node<'hir> {
             Node::TraitItem(i) => Some(OwnerNode::TraitItem(i)),
             Node::ImplItem(i) => Some(OwnerNode::ImplItem(i)),
             Node::Crate(i) => Some(OwnerNode::Crate(i)),
-            Node::AssocOpaqueTy(i) => Some(OwnerNode::AssocOpaqueTy(i)),
+            Node::Synthetic => Some(OwnerNode::Synthetic),
             _ => None,
         }
     }
