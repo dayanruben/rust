@@ -2,11 +2,7 @@
 //!
 //! In this module, a "vector" is any `repr(simd)` type.
 
-// Temporary macro while we switch the ABI from "platform-intrinsics" to "intrinsics".
-#[rustfmt::skip]
-macro_rules! declare_intrinsics {
-($abi:tt) => {
-extern $abi {
+extern "rust-intrinsic" {
     /// Insert an element into a vector, returning the updated vector.
     ///
     /// `T` must be a vector with element type `U`.
@@ -474,7 +470,7 @@ extern $abi {
     /// No matter whether the output is an array or an unsigned integer, it is treated as a single
     /// contiguous list of bits. The bitmask is always packed on the least-significant side of the
     /// output, and padded with 0s in the most-significant bits. The order of the bits depends on
-    /// endianess:
+    /// endianness:
     ///
     /// * On little endian, the least significant bit corresponds to the first vector element.
     /// * On big endian, the least significant bit corresponds to the last vector element.
@@ -659,10 +655,3 @@ extern $abi {
     #[rustc_nounwind]
     pub fn simd_flog<T>(a: T) -> T;
 }
-}
-}
-
-#[cfg(bootstrap)]
-declare_intrinsics!("platform-intrinsic");
-#[cfg(not(bootstrap))]
-declare_intrinsics!("rust-intrinsic");

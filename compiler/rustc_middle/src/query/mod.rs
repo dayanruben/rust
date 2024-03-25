@@ -343,11 +343,14 @@ rustc_queries! {
         }
     }
 
-    /// Returns the list of bounds that can be used for
-    /// `SelectionCandidate::ProjectionCandidate(_)` and
-    /// `ProjectionTyCandidate::TraitDef`.
-    /// Specifically this is the bounds written on the trait's type
-    /// definition, or those after the `impl` keyword
+    /// Returns the list of bounds that are required to be satsified
+    /// by a implementation or definition. For associated types, these
+    /// must be satisfied for an implementation to be well-formed,
+    /// and for opaque types, these are required to be satisfied by
+    /// the hidden-type of the opaque.
+    ///
+    /// Syntactially, these are the bounds written on the trait's type
+    /// definition, or those after the `impl` keyword for an opaque:
     ///
     /// ```ignore (incomplete)
     /// type X: Bound + 'lt
@@ -363,7 +366,16 @@ rustc_queries! {
         desc { |tcx| "finding item bounds for `{}`", tcx.def_path_str(key) }
         cache_on_disk_if { key.is_local() }
         separate_provide_extern
-        feedable
+    }
+
+    /// The set of item bounds (see [`TyCtxt::explicit_item_bounds`]) that
+    /// share the `Self` type of the item. These are a subset of the bounds
+    /// that may explicitly be used for things like closure signature
+    /// deduction.
+    query explicit_item_super_predicates(key: DefId) -> ty::EarlyBinder<&'tcx [(ty::Clause<'tcx>, Span)]> {
+        desc { |tcx| "finding item bounds for `{}`", tcx.def_path_str(key) }
+        cache_on_disk_if { key.is_local() }
+        separate_provide_extern
     }
 
     /// Elaborated version of the predicates from `explicit_item_bounds`.
@@ -388,6 +400,14 @@ rustc_queries! {
     /// Bounds from the parent (e.g. with nested impl trait) are not included.
     query item_bounds(key: DefId) -> ty::EarlyBinder<&'tcx ty::List<ty::Clause<'tcx>>> {
         desc { |tcx| "elaborating item bounds for `{}`", tcx.def_path_str(key) }
+    }
+
+    query item_super_predicates(key: DefId) -> ty::EarlyBinder<&'tcx ty::List<ty::Clause<'tcx>>> {
+        desc { |tcx| "elaborating item assumptions for `{}`", tcx.def_path_str(key) }
+    }
+
+    query item_non_self_assumptions(key: DefId) -> ty::EarlyBinder<&'tcx ty::List<ty::Clause<'tcx>>> {
+        desc { |tcx| "elaborating item assumptions for `{}`", tcx.def_path_str(key) }
     }
 
     /// Look up all native libraries this crate depends on.
@@ -485,19 +505,13 @@ rustc_queries! {
         separate_provide_extern
     }
 
-    /// Fetch the MIR for a given `DefId` right after it's built - this includes
-    /// unreachable code.
+    /// Build the MIR for a given `DefId` and prepare it for const qualification.
+    ///
+    /// See the [rustc dev guide] for more info.
+    ///
+    /// [rustc dev guide]: https://rustc-dev-guide.rust-lang.org/mir/construction.html
     query mir_built(key: LocalDefId) -> &'tcx Steal<mir::Body<'tcx>> {
         desc { |tcx| "building MIR for `{}`", tcx.def_path_str(key) }
-    }
-
-    /// Fetch the MIR for a given `DefId` up till the point where it is
-    /// ready for const qualification.
-    ///
-    /// See the README for the `mir` module for details.
-    query mir_const(key: LocalDefId) -> &'tcx Steal<mir::Body<'tcx>> {
-        desc { |tcx| "preparing `{}` for borrow checking", tcx.def_path_str(key) }
-        no_hash
     }
 
     /// Try to build an abstract representation of the given constant.
@@ -1040,6 +1054,13 @@ rustc_queries! {
             "computing all local function calls in `{}`",
             tcx.def_path_str(key.def_id()),
         }
+    }
+
+    /// Computes the tag (if any) for a given type and variant.
+    query tag_for_variant(
+        key: (Ty<'tcx>, abi::VariantIdx)
+    ) -> Option<ty::ScalarInt> {
+        desc { "computing variant tag for enum" }
     }
 
     /// Evaluates a constant and returns the computed allocation.

@@ -206,10 +206,12 @@ impl IntoArgs for (CrateNum, SimplifiedType) {
 
 provide! { tcx, def_id, other, cdata,
     explicit_item_bounds => { cdata.get_explicit_item_bounds(def_id.index, tcx) }
+    explicit_item_super_predicates => { cdata.get_explicit_item_super_predicates(def_id.index, tcx) }
     explicit_predicates_of => { table }
     generics_of => { table }
     inferred_outlives_of => { table_defaulted_array }
     super_predicates_of => { table }
+    implied_predicates_of => { table }
     type_of => { table }
     type_alias_is_lazy => { cdata.root.tables.type_alias_is_lazy.get(cdata, def_id.index) }
     variances_of => { table }
@@ -274,18 +276,6 @@ provide! { tcx, def_id, other, cdata,
             .get(cdata, def_id.index)
             .map(|lazy| lazy.decode((cdata, tcx)))
             .process_decoded(tcx, || panic!("{def_id:?} does not have trait_impl_trait_tys")))
-    }
-    implied_predicates_of => {
-        cdata
-            .root
-            .tables
-            .implied_predicates_of
-            .get(cdata, def_id.index)
-            .map(|lazy| lazy.decode((cdata, tcx)))
-            .unwrap_or_else(|| {
-                debug_assert_eq!(tcx.def_kind(def_id), DefKind::Trait);
-                tcx.super_predicates_of(def_id)
-            })
     }
 
     associated_types_for_impl_traits_in_associated_fn => { table_defaulted_array }

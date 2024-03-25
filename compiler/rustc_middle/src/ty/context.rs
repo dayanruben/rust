@@ -27,8 +27,8 @@ use crate::traits::solve::{
 use crate::ty::{
     self, AdtDef, AdtDefData, AdtKind, Binder, Clause, Const, ConstData, GenericParamDefKind,
     ImplPolarity, List, ParamConst, ParamTy, PolyExistentialPredicate, PolyFnSig, Predicate,
-    PredicateKind, Region, RegionKind, ReprOptions, TraitObjectVisitor, Ty, TyKind, TyVid,
-    TypeVisitable, Visibility,
+    PredicateKind, PredicatePolarity, Region, RegionKind, ReprOptions, TraitObjectVisitor, Ty,
+    TyKind, TyVid, TypeVisitable, Visibility,
 };
 use crate::ty::{GenericArg, GenericArgs, GenericArgsRef};
 use rustc_ast::{self as ast, attr};
@@ -1526,7 +1526,7 @@ macro_rules! nop_slice_lift {
 nop_slice_lift! {ty::ValTree<'a> => ty::ValTree<'tcx>}
 
 TrivialLiftImpls! {
-    ImplPolarity, Promoted
+    ImplPolarity, PredicatePolarity, Promoted
 }
 
 macro_rules! sty_debug_print {
@@ -1828,12 +1828,12 @@ impl<'tcx> TyCtxt<'tcx> {
         let ty::Alias(ty::Opaque, ty::AliasTy { def_id, .. }) = ty.kind() else { return false };
         let future_trait = self.require_lang_item(LangItem::Future, None);
 
-        self.explicit_item_bounds(def_id).skip_binder().iter().any(|&(predicate, _)| {
+        self.explicit_item_super_predicates(def_id).skip_binder().iter().any(|&(predicate, _)| {
             let ty::ClauseKind::Trait(trait_predicate) = predicate.kind().skip_binder() else {
                 return false;
             };
             trait_predicate.trait_ref.def_id == future_trait
-                && trait_predicate.polarity == ImplPolarity::Positive
+                && trait_predicate.polarity == PredicatePolarity::Positive
         })
     }
 

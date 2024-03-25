@@ -7,7 +7,6 @@
 #![allow(internal_features)]
 #![allow(rustc::diagnostic_outside_of_impl)]
 #![allow(rustc::untranslatable_diagnostic)]
-#![cfg_attr(bootstrap, feature(min_specialization))]
 #![doc(html_root_url = "https://doc.rust-lang.org/nightly/nightly-rustc/")]
 #![doc(rust_logo)]
 #![feature(array_windows)]
@@ -613,12 +612,18 @@ impl DiagCtxt {
         Self { inner: Lock::new(DiagCtxtInner::new(emitter)) }
     }
 
-    pub fn make_silent(&mut self, fallback_bundle: LazyFallbackBundle, fatal_note: Option<String>) {
+    pub fn make_silent(
+        &mut self,
+        fallback_bundle: LazyFallbackBundle,
+        fatal_note: Option<String>,
+        emit_fatal_diagnostic: bool,
+    ) {
         self.wrap_emitter(|old_dcx| {
             Box::new(emitter::SilentEmitter {
                 fallback_bundle,
                 fatal_dcx: DiagCtxt { inner: Lock::new(old_dcx) },
                 fatal_note,
+                emit_fatal_diagnostic,
             })
         });
     }

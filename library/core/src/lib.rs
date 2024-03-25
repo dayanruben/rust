@@ -112,6 +112,7 @@
 //
 // Library features:
 // tidy-alphabetical-start
+#![cfg_attr(bootstrap, feature(associated_type_bounds))]
 #![feature(array_ptr_get)]
 #![feature(char_indices_offset)]
 #![feature(const_align_of_val)]
@@ -169,6 +170,8 @@
 #![feature(const_try)]
 #![feature(const_type_id)]
 #![feature(const_type_name)]
+#![feature(const_typed_swap)]
+#![feature(const_ub_checks)]
 #![feature(const_unicode_case_lookup)]
 #![feature(const_unsafecell_get_mut)]
 #![feature(const_waker)]
@@ -188,7 +191,6 @@
 #![feature(ptr_metadata)]
 #![feature(set_ptr_value)]
 #![feature(slice_ptr_get)]
-#![feature(slice_split_at_unchecked)]
 #![feature(split_at_checked)]
 #![feature(str_internals)]
 #![feature(str_split_inclusive_remainder)]
@@ -203,12 +205,6 @@
 //
 // Language features:
 // tidy-alphabetical-start
-#![cfg_attr(bootstrap, feature(associated_type_bounds))]
-#![cfg_attr(bootstrap, feature(diagnostic_namespace))]
-#![cfg_attr(bootstrap, feature(exhaustive_patterns))]
-#![cfg_attr(bootstrap, feature(platform_intrinsics))]
-#![cfg_attr(not(bootstrap), feature(freeze_impls))]
-#![cfg_attr(not(bootstrap), feature(min_exhaustive_patterns))]
 #![feature(abi_unadjusted)]
 #![feature(adt_const_params)]
 #![feature(allow_internal_unsafe)]
@@ -233,6 +229,7 @@
 #![feature(doc_notable_trait)]
 #![feature(effects)]
 #![feature(extern_types)]
+#![feature(freeze_impls)]
 #![feature(fundamental)]
 #![feature(generic_arg_infer)]
 #![feature(if_let_guard)]
@@ -243,6 +240,7 @@
 #![feature(let_chains)]
 #![feature(link_llvm_intrinsics)]
 #![feature(macro_metavar_expr)]
+#![feature(min_exhaustive_patterns)]
 #![feature(min_specialization)]
 #![feature(multiple_supertrait_upcastable)]
 #![feature(must_not_suspend)]
@@ -369,6 +367,7 @@ pub mod hint;
 pub mod intrinsics;
 pub mod mem;
 pub mod ptr;
+mod ub_checks;
 
 /* Core language traits */
 

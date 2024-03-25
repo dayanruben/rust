@@ -1435,6 +1435,7 @@ impl<'a, 'tcx> EncodeContext<'a, 'tcx> {
             if let DefKind::Trait = def_kind {
                 record!(self.tables.trait_def[def_id] <- self.tcx.trait_def(def_id));
                 record!(self.tables.super_predicates_of[def_id] <- self.tcx.super_predicates_of(def_id));
+                record!(self.tables.implied_predicates_of[def_id] <- self.tcx.implied_predicates_of(def_id));
 
                 let module_children = self.tcx.module_children_local(local_id);
                 record_array!(self.tables.module_children_non_reexports[def_id] <-
@@ -1491,6 +1492,7 @@ impl<'a, 'tcx> EncodeContext<'a, 'tcx> {
             }
             if let DefKind::OpaqueTy = def_kind {
                 self.encode_explicit_item_bounds(def_id);
+                self.encode_explicit_item_super_predicates(def_id);
                 self.tables
                     .is_type_alias_impl_trait
                     .set(def_id.index, self.tcx.is_type_alias_impl_trait(def_id));
@@ -1599,6 +1601,12 @@ impl<'a, 'tcx> EncodeContext<'a, 'tcx> {
         record_defaulted_array!(self.tables.explicit_item_bounds[def_id] <- bounds);
     }
 
+    fn encode_explicit_item_super_predicates(&mut self, def_id: DefId) {
+        debug!("EncodeContext::encode_explicit_item_super_predicates({:?})", def_id);
+        let bounds = self.tcx.explicit_item_super_predicates(def_id).skip_binder();
+        record_defaulted_array!(self.tables.explicit_item_super_predicates[def_id] <- bounds);
+    }
+
     #[instrument(level = "debug", skip(self))]
     fn encode_info_for_assoc_item(&mut self, def_id: DefId) {
         let tcx = self.tcx;
@@ -1611,6 +1619,7 @@ impl<'a, 'tcx> EncodeContext<'a, 'tcx> {
             AssocItemContainer::TraitContainer => {
                 if let ty::AssocKind::Type = item.kind {
                     self.encode_explicit_item_bounds(def_id);
+                    self.encode_explicit_item_super_predicates(def_id);
                 }
             }
             AssocItemContainer::ImplContainer => {
