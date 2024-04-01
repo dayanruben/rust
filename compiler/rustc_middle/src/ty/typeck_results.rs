@@ -3,8 +3,8 @@ use crate::{
     infer::canonical::Canonical,
     traits::ObligationCause,
     ty::{
-        self, tls, BindingMode, BoundVar, CanonicalPolyFnSig, ClosureSizeProfileData,
-        GenericArgKind, GenericArgs, GenericArgsRef, Ty, UserArgs,
+        self, tls, BoundVar, CanonicalPolyFnSig, ClosureSizeProfileData, GenericArgKind,
+        GenericArgs, GenericArgsRef, Ty, UserArgs,
     },
 };
 use rustc_data_structures::{
@@ -12,12 +12,12 @@ use rustc_data_structures::{
     unord::{ExtendUnord, UnordItems, UnordSet},
 };
 use rustc_errors::ErrorGuaranteed;
-use rustc_hir as hir;
 use rustc_hir::{
+    self as hir,
     def::{DefKind, Res},
     def_id::{DefId, LocalDefId, LocalDefIdMap},
     hir_id::OwnerId,
-    HirId, ItemLocalId, ItemLocalMap, ItemLocalSet,
+    BindingAnnotation, ByRef, HirId, ItemLocalId, ItemLocalMap, ItemLocalSet, Mutability,
 };
 use rustc_index::{Idx, IndexVec};
 use rustc_macros::HashStable;
@@ -78,8 +78,8 @@ pub struct TypeckResults<'tcx> {
 
     adjustments: ItemLocalMap<Vec<ty::adjustment::Adjustment<'tcx>>>,
 
-    /// Stores the actual binding mode for all instances of hir::BindingAnnotation.
-    pat_binding_modes: ItemLocalMap<BindingMode>,
+    /// Stores the actual binding mode for all instances of [`BindingAnnotation`].
+    pat_binding_modes: ItemLocalMap<BindingAnnotation>,
 
     /// Stores the types which were implicitly dereferenced in pattern binding modes
     /// for later usage in THIR lowering. For example,
@@ -408,17 +408,22 @@ impl<'tcx> TypeckResults<'tcx> {
         matches!(self.type_dependent_defs().get(expr.hir_id), Some(Ok((DefKind::AssocFn, _))))
     }
 
-    pub fn extract_binding_mode(&self, s: &Session, id: HirId, sp: Span) -> Option<BindingMode> {
+    pub fn extract_binding_mode(
+        &self,
+        s: &Session,
+        id: HirId,
+        sp: Span,
+    ) -> Option<BindingAnnotation> {
         self.pat_binding_modes().get(id).copied().or_else(|| {
             s.dcx().span_bug(sp, "missing binding mode");
         })
     }
 
-    pub fn pat_binding_modes(&self) -> LocalTableInContext<'_, BindingMode> {
+    pub fn pat_binding_modes(&self) -> LocalTableInContext<'_, BindingAnnotation> {
         LocalTableInContext { hir_owner: self.hir_owner, data: &self.pat_binding_modes }
     }
 
-    pub fn pat_binding_modes_mut(&mut self) -> LocalTableInContextMut<'_, BindingMode> {
+    pub fn pat_binding_modes_mut(&mut self) -> LocalTableInContextMut<'_, BindingAnnotation> {
         LocalTableInContextMut { hir_owner: self.hir_owner, data: &mut self.pat_binding_modes }
     }
 
@@ -428,6 +433,31 @@ impl<'tcx> TypeckResults<'tcx> {
 
     pub fn pat_adjustments_mut(&mut self) -> LocalTableInContextMut<'_, Vec<Ty<'tcx>>> {
         LocalTableInContextMut { hir_owner: self.hir_owner, data: &mut self.pat_adjustments }
+    }
+
+    /// Does the pattern recursively contain a `ref mut` binding in it?
+    ///
+    /// This is used to determined whether a `deref` pattern should emit a `Deref`
+    /// or `DerefMut` call for its pattern scrutinee.
+    ///
+    /// This is computed from the typeck results since we want to make
+    /// sure to apply any match-ergonomics adjustments, which we cannot
+    /// determine from the HIR alone.
+    pub fn pat_has_ref_mut_binding(&self, pat: &'tcx hir::Pat<'tcx>) -> bool {
+        let mut has_ref_mut = false;
+        pat.walk(|pat| {
+            if let hir::PatKind::Binding(_, id, _, _) = pat.kind
+                && let Some(BindingAnnotation(ByRef::Yes(Mutability::Mut), _)) =
+                    self.pat_binding_modes().get(id)
+            {
+                has_ref_mut = true;
+                // No need to continue recursing
+                false
+            } else {
+                true
+            }
+        });
+        has_ref_mut
     }
 
     /// For a given closure, returns the iterator of `ty::CapturedPlace`s that are captured

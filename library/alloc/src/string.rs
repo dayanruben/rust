@@ -72,9 +72,9 @@ use crate::vec::Vec;
 
 /// A UTF-8–encoded, growable string.
 ///
-/// The `String` type is the most common string type that has ownership over the
-/// contents of the string. It has a close relationship with its borrowed
-/// counterpart, the primitive [`str`].
+/// `String` is the most common string type. It has ownership over the contents
+/// of the string, stored in a heap-allocated buffer (see [Representation](#representation)).
+/// It is closely related to its borrowed counterpart, the primitive [`str`].
 ///
 /// # Examples
 ///
@@ -2478,6 +2478,9 @@ impl ops::Deref for String {
         unsafe { str::from_utf8_unchecked(&self.vec) }
     }
 }
+
+#[unstable(feature = "deref_pure_trait", issue = "87121")]
+unsafe impl ops::DerefPure for String {}
 
 #[stable(feature = "derefmut_for_string", since = "1.3.0")]
 impl ops::DerefMut for String {

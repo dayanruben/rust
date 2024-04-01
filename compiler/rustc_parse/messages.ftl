@@ -14,10 +14,6 @@ parse_array_index_offset_of = array indexing not supported in offset_of
 
 parse_assignment_else_not_allowed = <assignment> ... else {"{"} ... {"}"} is not allowed
 
-parse_assoc_lifetime = associated lifetimes are not supported
-    .label = the lifetime is given here
-    .help = if you meant to specify a trait object, write `dyn Trait + 'lifetime`
-
 parse_associated_static_item_not_allowed = associated `static` items are not allowed
 
 parse_async_block_in_2015 = `async` blocks are only allowed in Rust 2018 or later
@@ -445,6 +441,12 @@ parse_lifetime_in_borrow_expression = borrow expressions cannot be annotated wit
     .suggestion = remove the lifetime annotation
     .label = annotated with lifetime here
 
+parse_lifetime_in_eq_constraint = lifetimes are not permitted in this context
+    .label = lifetime is not allowed here
+    .context_label = this introduces an associated item binding
+    .help = if you meant to specify a trait object, write `dyn /* Trait */ + {$lifetime}`
+    .colon_sugg = you might have meant to write a bound here
+
 parse_lone_slash = invalid trailing slash in literal
     .label = {parse_lone_slash}
 
@@ -652,9 +654,6 @@ parse_question_mark_in_type = invalid `?` in type
 
 parse_recover_import_as_use = expected item, found {$token_name}
     .suggestion = items are imported using the `use` keyword
-
-parse_ref_mut_order_incorrect = the order of `mut` and `ref` is incorrect
-    .suggestion = try switching the order
 
 parse_remove_let = expected pattern, found `let`
     .suggestion = remove the unnecessary `let` keyword

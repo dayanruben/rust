@@ -225,9 +225,14 @@ impl Thread {
         // Newlib, Emscripten, and VxWorks have no way to set a thread name.
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "netbsd",))]
     pub fn get_name() -> Option<CString> {
+        #[cfg(target_os = "linux")]
         const TASK_COMM_LEN: usize = 16;
+        #[cfg(target_os = "freebsd")]
+        const TASK_COMM_LEN: usize = libc::MAXCOMLEN + 1;
+        #[cfg(target_os = "netbsd")]
+        const TASK_COMM_LEN: usize = 32;
         let mut name = vec![0u8; TASK_COMM_LEN];
         let res = unsafe {
             libc::pthread_getname_np(libc::pthread_self(), name.as_mut_ptr().cast(), name.len())
@@ -252,12 +257,32 @@ impl Thread {
         CString::new(name).ok()
     }
 
+    #[cfg(target_os = "haiku")]
+    pub fn get_name() -> Option<CString> {
+        unsafe {
+            let mut tinfo = mem::MaybeUninit::<libc::thread_info>::uninit();
+            // See BeOS teams group and threads api.
+            // https://www.haiku-os.org/legacy-docs/bebook/TheKernelKit_ThreadsAndTeams_Overview.html
+            let thread_self = libc::find_thread(ptr::null_mut());
+            let res = libc::get_thread_info(thread_self, tinfo.as_mut_ptr());
+            if res != libc::B_OK {
+                return None;
+            }
+            let info = tinfo.assume_init();
+            let name = slice::from_raw_parts(info.name.as_ptr() as *const u8, info.name.len());
+            CStr::from_bytes_until_nul(name).map(CStr::to_owned).ok()
+        }
+    }
+
     #[cfg(not(any(
         target_os = "linux",
+        target_os = "freebsd",
+        target_os = "netbsd",
         target_os = "macos",
         target_os = "ios",
         target_os = "tvos",
-        target_os = "watchos"
+        target_os = "watchos",
+        target_os = "haiku"
     )))]
     pub fn get_name() -> Option<CString> {
         None
@@ -424,7 +449,7 @@ pub fn available_parallelism() -> io::Result<NonZero<usize>> {
                     if !set.is_null() {
                         let mut count: usize = 0;
                         if libc::pthread_getaffinity_np(libc::pthread_self(), libc::_cpuset_size(set), set) == 0 {
-                            for i in 0..u64::MAX {
+                            for i in 0..libc::cpuid_t::MAX {
                                 match libc::_cpuset_isset(i, set) {
                                     -1 => break,
                                     0 => continue,

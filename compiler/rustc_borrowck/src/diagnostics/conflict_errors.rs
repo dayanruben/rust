@@ -4,6 +4,7 @@
 #![allow(rustc::untranslatable_diagnostic)]
 
 use either::Either;
+use hir::ClosureKind;
 use rustc_data_structures::captures::Captures;
 use rustc_data_structures::fx::FxIndexSet;
 use rustc_errors::{codes::*, struct_span_code_err, Applicability, Diag, MultiSpan};
@@ -336,7 +337,7 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
     }
 
     fn suggest_ref_or_clone(
-        &mut self,
+        &self,
         mpi: MovePathIndex,
         move_span: Span,
         err: &mut Diag<'tcx>,
@@ -463,6 +464,15 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
                 } else if let UseSpans::FnSelfUse { kind: CallKind::Normal { .. }, .. } = move_spans
                 {
                     // We already suggest cloning for these cases in `explain_captures`.
+                } else if let UseSpans::ClosureUse {
+                    closure_kind:
+                        ClosureKind::Coroutine(CoroutineKind::Desugared(_, CoroutineSource::Block)),
+                    args_span: _,
+                    capture_kind_span: _,
+                    path_span,
+                } = move_spans
+                {
+                    self.suggest_cloning(err, ty, expr, path_span);
                 } else if self.suggest_hoisting_call_outside_loop(err, expr) {
                     // The place where the the type moves would be misleading to suggest clone.
                     // #121466
@@ -621,7 +631,7 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
                     }
 
                     // FIXME: We make sure that this is a normal top-level binding,
-                    // but we could suggest `todo!()` for all uninitalized bindings in the pattern pattern
+                    // but we could suggest `todo!()` for all uninitialized bindings in the pattern pattern
                     if let hir::StmtKind::Let(hir::LetStmt { span, ty, init: None, pat, .. }) =
                         &ex.kind
                         && let hir::PatKind::Binding(..) = pat.kind
@@ -749,7 +759,7 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
         true
     }
 
-    /// In a move error that occurs on a call wihtin a loop, we try to identify cases where cloning
+    /// In a move error that occurs on a call within a loop, we try to identify cases where cloning
     /// the value would lead to a logic error. We infer these cases by seeing if the moved value is
     /// part of the logic to break the loop, either through an explicit `break` or if the expression
     /// is part of a `while let`.
@@ -950,7 +960,7 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
             {
                 // FIXME: We could check that the call's *parent* takes `&mut val` to make the
                 // suggestion more targeted to the `mk_iter(val).next()` case. Maybe do that only to
-                // check for wheter to suggest `let value` or `let mut value`.
+                // check for whether to suggest `let value` or `let mut value`.
 
                 let span = in_loop.span;
                 if !finder.found_breaks.is_empty()
@@ -1115,7 +1125,7 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
     }
 
     pub(crate) fn report_use_while_mutably_borrowed(
-        &mut self,
+        &self,
         location: Location,
         (place, _span): (Place<'tcx>, Span),
         borrow: &BorrowData<'tcx>,
@@ -1164,7 +1174,7 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
     }
 
     pub(crate) fn report_conflicting_borrow(
-        &mut self,
+        &self,
         location: Location,
         (place, span): (Place<'tcx>, Span),
         gen_borrow_kind: BorrowKind,
@@ -2453,7 +2463,7 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
     }
 
     fn report_local_value_does_not_live_long_enough(
-        &mut self,
+        &self,
         location: Location,
         name: &str,
         borrow: &BorrowData<'tcx>,
@@ -2632,7 +2642,7 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
     }
 
     fn report_thread_local_value_does_not_live_long_enough(
-        &mut self,
+        &self,
         drop_span: Span,
         borrow_span: Span,
     ) -> Diag<'tcx> {
@@ -2653,7 +2663,7 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
 
     #[instrument(level = "debug", skip(self))]
     fn report_temporary_value_does_not_live_long_enough(
-        &mut self,
+        &self,
         location: Location,
         borrow: &BorrowData<'tcx>,
         drop_span: Span,
@@ -2911,7 +2921,7 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
 
     #[instrument(level = "debug", skip(self))]
     fn report_escaping_closure_capture(
-        &mut self,
+        &self,
         use_span: UseSpans<'tcx>,
         var_span: Span,
         fr_name: &RegionName,
@@ -3021,7 +3031,7 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
     }
 
     fn report_escaping_data(
-        &mut self,
+        &self,
         borrow_span: Span,
         name: &Option<String>,
         upvar_span: Span,
@@ -3055,7 +3065,7 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
     }
 
     fn get_moved_indexes(
-        &mut self,
+        &self,
         location: Location,
         mpi: MovePathIndex,
     ) -> (Vec<MoveSite>, Vec<Location>) {
@@ -3844,7 +3854,7 @@ enum AnnotatedBorrowFnSignature<'tcx> {
 impl<'tcx> AnnotatedBorrowFnSignature<'tcx> {
     /// Annotate the provided diagnostic with information about borrow from the fn signature that
     /// helps explain.
-    pub(crate) fn emit(&self, cx: &mut MirBorrowckCtxt<'_, 'tcx>, diag: &mut Diag<'_>) -> String {
+    pub(crate) fn emit(&self, cx: &MirBorrowckCtxt<'_, 'tcx>, diag: &mut Diag<'_>) -> String {
         match self {
             &AnnotatedBorrowFnSignature::Closure { argument_ty, argument_span } => {
                 diag.span_label(
