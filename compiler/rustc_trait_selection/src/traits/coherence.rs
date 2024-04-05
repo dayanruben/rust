@@ -477,7 +477,8 @@ fn plug_infer_with_placeholders<'tcx>(
             if ty.is_ty_var() {
                 let Ok(InferOk { value: (), obligations }) =
                     self.infcx.at(&ObligationCause::dummy(), ty::ParamEnv::empty()).eq(
-                        DefineOpaqueTypes::No,
+                        // Comparing against a type variable never registers hidden types anyway
+                        DefineOpaqueTypes::Yes,
                         ty,
                         Ty::new_placeholder(
                             self.infcx.tcx,
@@ -504,7 +505,9 @@ fn plug_infer_with_placeholders<'tcx>(
             if ct.is_ct_infer() {
                 let Ok(InferOk { value: (), obligations }) =
                     self.infcx.at(&ObligationCause::dummy(), ty::ParamEnv::empty()).eq(
-                        DefineOpaqueTypes::No,
+                        // The types of the constants are the same, so there is no hidden type
+                        // registration happening anyway.
+                        DefineOpaqueTypes::Yes,
                         ct,
                         ty::Const::new_placeholder(
                             self.infcx.tcx,
@@ -532,7 +535,8 @@ fn plug_infer_with_placeholders<'tcx>(
                 if r.is_var() {
                     let Ok(InferOk { value: (), obligations }) =
                         self.infcx.at(&ObligationCause::dummy(), ty::ParamEnv::empty()).eq(
-                            DefineOpaqueTypes::No,
+                            // Lifetimes don't contain opaque types (or any types for that matter).
+                            DefineOpaqueTypes::Yes,
                             r,
                             ty::Region::new_placeholder(
                                 self.infcx.tcx,
@@ -554,11 +558,7 @@ fn plug_infer_with_placeholders<'tcx>(
         }
     }
 
-    value.visit_with(&mut PlugInferWithPlaceholder {
-        infcx,
-        universe,
-        var: ty::BoundVar::from_u32(0),
-    });
+    value.visit_with(&mut PlugInferWithPlaceholder { infcx, universe, var: ty::BoundVar::ZERO });
 }
 
 fn try_prove_negated_where_clause<'tcx>(
