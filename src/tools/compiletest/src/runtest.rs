@@ -752,6 +752,19 @@ impl<'test> TestCx<'test> {
             Lazy::new(|| Regex::new(r"(?m:^)(?<prefix>(?:  \|)+  Branch \()[0-9]+:").unwrap());
         let coverage = BRANCH_LINE_NUMBER_RE.replace_all(&coverage, "${prefix}LL:");
 
+        // `  |---> MC/DC Decision Region (1:30) to (2:`     => `  |---> MC/DC Decision Region (LL:30) to (LL:`
+        static MCDC_DECISION_LINE_NUMBER_RE: Lazy<Regex> = Lazy::new(|| {
+            Regex::new(r"(?m:^)(?<prefix>(?:  \|)+---> MC/DC Decision Region \()[0-9]+:(?<middle>[0-9]+\) to \()[0-9]+:").unwrap()
+        });
+        let coverage =
+            MCDC_DECISION_LINE_NUMBER_RE.replace_all(&coverage, "${prefix}LL:${middle}LL:");
+
+        // `  |     Condition C1 --> (1:`     => `  |     Condition C1 --> (LL:`
+        static MCDC_CONDITION_LINE_NUMBER_RE: Lazy<Regex> = Lazy::new(|| {
+            Regex::new(r"(?m:^)(?<prefix>(?:  \|)+     Condition C[0-9]+ --> \()[0-9]+:").unwrap()
+        });
+        let coverage = MCDC_CONDITION_LINE_NUMBER_RE.replace_all(&coverage, "${prefix}LL:");
+
         coverage.into_owned()
     }
 
@@ -2354,6 +2367,11 @@ impl<'test> TestCx<'test> {
             "ignore-directory-in-diagnostics-source-blocks={}",
             home::cargo_home().expect("failed to find cargo home").to_str().unwrap()
         ));
+        // Similarly, vendored sources shouldn't be shown when running from a dist tarball.
+        rustc.arg("-Z").arg(format!(
+            "ignore-directory-in-diagnostics-source-blocks={}",
+            self.config.find_rust_src_root().unwrap().join("vendor").display(),
+        ));
 
         // Optionally prevent default --sysroot if specified in test compile-flags.
         if !self.props.compile_flags.iter().any(|flag| flag.starts_with("--sysroot"))
@@ -3926,11 +3944,17 @@ impl<'test> TestCx<'test> {
             cmd.env("IS_MSVC", "1")
                 .env("IS_WINDOWS", "1")
                 .env("MSVC_LIB", format!("'{}' -nologo", lib.display()))
-                .env("CC", format!("'{}' {}", self.config.cc, cflags))
-                .env("CXX", format!("'{}' {}", &self.config.cxx, cxxflags));
+                // Note: we diverge from legacy run_make and don't lump `CC` the compiler and
+                // default flags together.
+                .env("CC_DEFAULT_FLAGS", &cflags)
+                .env("CC", &self.config.cc)
+                .env("CXX_DEFAULT_FLAGS", &cxxflags)
+                .env("CXX", &self.config.cxx);
         } else {
-            cmd.env("CC", format!("{} {}", self.config.cc, self.config.cflags))
-                .env("CXX", format!("{} {}", self.config.cxx, self.config.cxxflags))
+            cmd.env("CC_DEFAULT_FLAGS", &self.config.cflags)
+                .env("CC", &self.config.cc)
+                .env("CXX_DEFAULT_FLAGS", &self.config.cxxflags)
+                .env("CXX", &self.config.cxx)
                 .env("AR", &self.config.ar);
 
             if self.config.target.contains("windows") {
@@ -4246,7 +4270,7 @@ impl<'test> TestCx<'test> {
         if self.props.run_rustfix && self.config.compare_mode.is_none() {
             // And finally, compile the fixed code and make sure it both
             // succeeds and has no diagnostics.
-            let rustc = self.make_compile_args(
+            let mut rustc = self.make_compile_args(
                 &self.expected_output_path(UI_FIXED),
                 TargetLocation::ThisFile(self.make_exe_name()),
                 emit_metadata,
@@ -4254,6 +4278,26 @@ impl<'test> TestCx<'test> {
                 LinkToAux::Yes,
                 Vec::new(),
             );
+
+            // If a test is revisioned, it's fixed source file can be named "a.foo.fixed", which,
+            // well, "a.foo" isn't a valid crate name. So we explicitly mangle the test name
+            // (including the revision) here to avoid the test writer having to manually specify a
+            // `#![crate_name = "..."]` as a workaround. This is okay since we're only checking if
+            // the fixed code is compilable.
+            if self.revision.is_some() {
+                let crate_name =
+                    self.testpaths.file.file_stem().expect("test must have a file stem");
+                // crate name must be alphanumeric or `_`.
+                let crate_name =
+                    crate_name.to_str().expect("crate name implies file name must be valid UTF-8");
+                // replace `a.foo` -> `a__foo` for crate name purposes.
+                // replace `revision-name-with-dashes` -> `revision_name_with_underscore`
+                let crate_name = crate_name.replace(".", "__");
+                let crate_name = crate_name.replace("-", "_");
+                rustc.arg("--crate-name");
+                rustc.arg(crate_name);
+            }
+
             let res = self.compose_and_run_compiler(rustc, None);
             if !res.status.success() {
                 self.fatal_proc_rec("failed to compile fixed code", &res);

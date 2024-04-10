@@ -9,7 +9,6 @@ use crate::sys::handle::Handle;
 use crate::sys::stack_overflow;
 use crate::sys_common::FromInner;
 use crate::time::Duration;
-use alloc::ffi::CString;
 use core::ffi::c_void;
 
 use super::time::WaitableTimer;
@@ -60,34 +59,15 @@ impl Thread {
     pub fn set_name(name: &CStr) {
         if let Ok(utf8) = name.to_str() {
             if let Ok(utf16) = to_u16s(utf8) {
-                unsafe {
-                    c::SetThreadDescription(c::GetCurrentThread(), utf16.as_ptr());
-                };
+                Self::set_name_wide(&utf16)
             };
         };
     }
 
-    pub fn get_name() -> Option<CString> {
+    pub fn set_name_wide(name: &[u16]) {
         unsafe {
-            let mut ptr = core::ptr::null_mut();
-            let result = c::GetThreadDescription(c::GetCurrentThread(), &mut ptr);
-            if result < 0 {
-                return None;
-            }
-            let name = String::from_utf16_lossy({
-                let mut len = 0;
-                while *ptr.add(len) != 0 {
-                    len += 1;
-                }
-                core::slice::from_raw_parts(ptr, len)
-            })
-            .into_bytes();
-            // Attempt to free the memory.
-            // This should never fail but if it does then there's not much we can do about it.
-            let result = c::LocalFree(ptr.cast::<c_void>());
-            debug_assert!(result.is_null());
-            if name.is_empty() { None } else { Some(CString::from_vec_unchecked(name)) }
-        }
+            c::SetThreadDescription(c::GetCurrentThread(), name.as_ptr());
+        };
     }
 
     pub fn join(self) {
