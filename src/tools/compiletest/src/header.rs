@@ -581,6 +581,16 @@ impl TestProps {
             self.incremental = true;
         }
 
+        if config.mode == Mode::Crashes {
+            // we don't want to pollute anything with backtrace-files
+            // also turn off backtraces in order to save some execution
+            // time on the tests; we only need to know IF it crashes
+            self.rustc_env = vec![
+                ("RUST_BACKTRACE".to_string(), "0".to_string()),
+                ("RUSTC_ICE".to_string(), "0".to_string()),
+            ];
+        }
+
         for key in &["RUST_TEST_NOCAPTURE", "RUST_TEST_THREADS"] {
             if let Ok(val) = env::var(key) {
                 if self.exec_env.iter().find(|&&(ref x, _)| x == key).is_none() {
@@ -596,7 +606,8 @@ impl TestProps {
 
     fn update_fail_mode(&mut self, ln: &str, config: &Config) {
         let check_ui = |mode: &str| {
-            if config.mode != Mode::Ui {
+            // Mode::Crashes may need build-fail in order to trigger llvm errors or stack overflows
+            if config.mode != Mode::Ui && config.mode != Mode::Crashes {
                 panic!("`{}-fail` header is only supported in UI tests", mode);
             }
         };
@@ -625,6 +636,7 @@ impl TestProps {
     fn update_pass_mode(&mut self, ln: &str, revision: Option<&str>, config: &Config) {
         let check_no_run = |s| match (config.mode, s) {
             (Mode::Ui, _) => (),
+            (Mode::Crashes, _) => (),
             (Mode::Codegen, "build-pass") => (),
             (Mode::Incremental, _) => {
                 if revision.is_some() && !self.revisions.iter().all(|r| r.starts_with("cfail")) {
@@ -757,6 +769,7 @@ const KNOWN_DIRECTIVE_NAMES: &[&str] = &[
     "ignore-mode-codegen-units",
     "ignore-mode-coverage-map",
     "ignore-mode-coverage-run",
+    "ignore-mode-crashes",
     "ignore-mode-debuginfo",
     "ignore-mode-incremental",
     "ignore-mode-js-doc-test",
@@ -790,15 +803,18 @@ const KNOWN_DIRECTIVE_NAMES: &[&str] = &[
     "ignore-thumb",
     "ignore-thumbv8m.base-none-eabi",
     "ignore-thumbv8m.main-none-eabi",
+    "ignore-tvos",
     "ignore-unix",
     "ignore-unknown",
     "ignore-uwp",
+    "ignore-visionos",
     "ignore-vxworks",
     "ignore-wasi",
     "ignore-wasm",
     "ignore-wasm32",
     "ignore-wasm32-bare",
     "ignore-wasm64",
+    "ignore-watchos",
     "ignore-windows",
     "ignore-windows-gnu",
     "ignore-x32",
@@ -856,6 +872,7 @@ const KNOWN_DIRECTIVE_NAMES: &[&str] = &[
     "only-cdb",
     "only-gnu",
     "only-i686-pc-windows-msvc",
+    "only-ios",
     "only-linux",
     "only-loongarch64",
     "only-loongarch64-unknown-linux-gnu",
@@ -871,10 +888,13 @@ const KNOWN_DIRECTIVE_NAMES: &[&str] = &[
     "only-sparc64",
     "only-stable",
     "only-thumb",
+    "only-tvos",
     "only-unix",
+    "only-visionos",
     "only-wasm32",
     "only-wasm32-bare",
     "only-wasm32-wasip1",
+    "only-watchos",
     "only-windows",
     "only-x86",
     "only-x86_64",
