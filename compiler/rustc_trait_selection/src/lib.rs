@@ -22,6 +22,7 @@
 #![feature(box_patterns)]
 #![feature(control_flow_enum)]
 #![feature(extract_if)]
+#![feature(if_let_guard)]
 #![feature(let_chains)]
 #![feature(option_take_if)]
 #![feature(never_type)]
@@ -30,7 +31,7 @@
 
 #[macro_use]
 extern crate rustc_macros;
-#[cfg(all(any(target_arch = "x86_64", target_arch = "aarch64"), target_pointer_width = "64"))]
+#[cfg(target_pointer_width = "64")]
 #[macro_use]
 extern crate rustc_data_structures;
 #[macro_use]

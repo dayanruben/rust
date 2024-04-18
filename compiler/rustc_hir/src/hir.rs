@@ -7,7 +7,7 @@ use crate::LangItem;
 use rustc_ast as ast;
 use rustc_ast::util::parser::ExprPrecedence;
 use rustc_ast::{Attribute, FloatTy, IntTy, Label, LitKind, TraitObjectSyntax, UintTy};
-pub use rustc_ast::{BinOp, BinOpKind, BindingAnnotation, BorrowKind, ByRef, CaptureBy};
+pub use rustc_ast::{BinOp, BinOpKind, BindingMode, BorrowKind, ByRef, CaptureBy};
 pub use rustc_ast::{ImplPolarity, IsAuto, Movability, Mutability, UnOp};
 use rustc_ast::{InlineAsmOptions, InlineAsmTemplatePiece};
 use rustc_data_structures::fingerprint::Fingerprint;
@@ -1151,7 +1151,7 @@ pub enum PatKind<'hir> {
     /// The `HirId` is the canonical ID for the variable being bound,
     /// (e.g., in `Ok(x) | Err(x)`, both `x` use the same canonical ID),
     /// which is the pattern ID of the first `x`.
-    Binding(BindingAnnotation, HirId, Ident, Option<&'hir Pat<'hir>>),
+    Binding(BindingMode, HirId, Ident, Option<&'hir Pat<'hir>>),
 
     /// A struct or struct variant pattern (e.g., `Variant {x, y, ..}`).
     /// The `bool` is `true` in the presence of a `..`.
@@ -2557,6 +2557,27 @@ pub struct OpaqueTy<'hir> {
     /// originating from a trait method. This makes it so that the opaque is
     /// lowered as an associated type.
     pub in_trait: bool,
+    /// List of arguments captured via `impl use<'a, P, ...> Trait` syntax.
+    pub precise_capturing_args: Option<&'hir [PreciseCapturingArg<'hir>]>,
+}
+
+#[derive(Debug, Clone, Copy, HashStable_Generic)]
+pub enum PreciseCapturingArg<'hir> {
+    Lifetime(&'hir Lifetime),
+    /// Non-lifetime argument (type or const)
+    Param(PreciseCapturingNonLifetimeArg),
+}
+
+/// We need to have a [`Node`] for the [`HirId`] that we attach the type/const param
+/// resolution to. Lifetimes don't have this problem, and for them, it's actually
+/// kind of detrimental to use a custom node type versus just using [`Lifetime`],
+/// since resolve_bound_vars operates on `Lifetime`s.
+// FIXME(precise_capturing): Investigate storing this as a path instead?
+#[derive(Debug, Clone, Copy, HashStable_Generic)]
+pub struct PreciseCapturingNonLifetimeArg {
+    pub hir_id: HirId,
+    pub ident: Ident,
+    pub res: Res,
 }
 
 /// From whence the opaque type came.
@@ -3535,6 +3556,7 @@ pub enum Node<'hir> {
     WhereBoundPredicate(&'hir WhereBoundPredicate<'hir>),
     // FIXME: Merge into `Node::Infer`.
     ArrayLenInfer(&'hir InferArg),
+    PreciseCapturingNonLifetimeArg(&'hir PreciseCapturingNonLifetimeArg),
     // Created by query feeding
     Synthetic,
     // Span by reference to minimize `Node`'s size
@@ -3571,6 +3593,7 @@ impl<'hir> Node<'hir> {
             Node::TypeBinding(b) => Some(b.ident),
             Node::PatField(f) => Some(f.ident),
             Node::ExprField(f) => Some(f.ident),
+            Node::PreciseCapturingNonLifetimeArg(a) => Some(a.ident),
             Node::Param(..)
             | Node::AnonConst(..)
             | Node::ConstBlock(..)
@@ -3763,7 +3786,7 @@ impl<'hir> Node<'hir> {
 }
 
 // Some nodes are used a lot. Make sure they don't unintentionally get bigger.
-#[cfg(all(any(target_arch = "x86_64", target_arch = "aarch64"), target_pointer_width = "64"))]
+#[cfg(target_pointer_width = "64")]
 mod size_asserts {
     use super::*;
     // tidy-alphabetical-start

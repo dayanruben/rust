@@ -34,10 +34,10 @@ impl<'tcx> Tree {
         id: AllocId,
         size: Size,
         state: &mut GlobalStateInner,
-        _kind: MemoryKind<machine::MiriMemoryKind>,
+        _kind: MemoryKind,
         machine: &MiriMachine<'_, 'tcx>,
     ) -> Self {
-        let tag = state.base_ptr_tag(id, machine); // Fresh tag for the root
+        let tag = state.root_ptr_tag(id, machine); // Fresh tag for the root
         let span = machine.current_span();
         Tree::new(tag, size, span)
     }

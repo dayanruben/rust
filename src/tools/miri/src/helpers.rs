@@ -9,16 +9,21 @@ use rand::RngCore;
 
 use rustc_apfloat::ieee::{Double, Single};
 use rustc_apfloat::Float;
-use rustc_hir::def::{DefKind, Namespace};
-use rustc_hir::def_id::{DefId, CRATE_DEF_INDEX};
+use rustc_hir::{
+    def::{DefKind, Namespace},
+    def_id::{CrateNum, DefId, CRATE_DEF_INDEX, LOCAL_CRATE},
+};
 use rustc_index::IndexVec;
+use rustc_middle::middle::dependency_format::Linkage;
+use rustc_middle::middle::exported_symbols::ExportedSymbol;
 use rustc_middle::mir;
 use rustc_middle::ty::{
     self,
     layout::{LayoutOf, TyAndLayout},
     FloatTy, IntTy, Ty, TyCtxt, UintTy,
 };
-use rustc_span::{def_id::CrateNum, sym, Span, Symbol};
+use rustc_session::config::CrateType;
+use rustc_span::{sym, Span, Symbol};
 use rustc_target::abi::{Align, FieldIdx, FieldsShape, Size, Variants};
 use rustc_target::spec::abi::Abi;
 
@@ -76,6 +81,17 @@ const UNIX_IO_ERROR_TABLE: &[(&str, std::io::ErrorKind)] = {
         ("EACCES", PermissionDenied),
         ("EWOULDBLOCK", WouldBlock),
         ("EAGAIN", WouldBlock),
+    ]
+};
+// This mapping should match `decode_error_kind` in
+// <https://github.com/rust-lang/rust/blob/master/library/std/src/sys/pal/windows/mod.rs>.
+const WINDOWS_IO_ERROR_TABLE: &[(&str, std::io::ErrorKind)] = {
+    use std::io::ErrorKind::*;
+    // FIXME: this is still incomplete.
+    &[
+        ("ERROR_ACCESS_DENIED", PermissionDenied),
+        ("ERROR_FILE_NOT_FOUND", NotFound),
+        ("ERROR_INVALID_PARAMETER", InvalidInput),
     ]
 };
 
@@ -140,6 +156,38 @@ fn try_resolve_did(tcx: TyCtxt<'_>, path: &[&str], namespace: Option<Namespace>)
     }
     // Item not found in any of the crates with the right name.
     None
+}
+
+/// Call `f` for each exported symbol.
+pub fn iter_exported_symbols<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    mut f: impl FnMut(CrateNum, DefId) -> InterpResult<'tcx>,
+) -> InterpResult<'tcx> {
+    // `dependency_formats` includes all the transitive informations needed to link a crate,
+    // which is what we need here since we need to dig out `exported_symbols` from all transitive
+    // dependencies.
+    let dependency_formats = tcx.dependency_formats(());
+    let dependency_format = dependency_formats
+        .iter()
+        .find(|(crate_type, _)| *crate_type == CrateType::Executable)
+        .expect("interpreting a non-executable crate");
+    for cnum in iter::once(LOCAL_CRATE).chain(dependency_format.1.iter().enumerate().filter_map(
+        |(num, &linkage)| {
+            // We add 1 to the number because that's what rustc also does everywhere it
+            // calls `CrateNum::new`...
+            #[allow(clippy::arithmetic_side_effects)]
+            (linkage != Linkage::NotLinked).then_some(CrateNum::new(num + 1))
+        },
+    )) {
+        // We can ignore `_export_info` here: we are a Rust crate, and everything is exported
+        // from a Rust crate.
+        for &(symbol, _export_info) in tcx.exported_symbols(cnum) {
+            if let ExportedSymbol::NonGeneric(def_id) = symbol {
+                f(cnum, def_id)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Convert a softfloat type to its corresponding hostfloat type.
@@ -712,20 +760,12 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
             }
             throw_unsup_format!("io error {:?} cannot be translated into a raw os error", err_kind)
         } else if target.families.iter().any(|f| f == "windows") {
-            // FIXME: we have to finish implementing the Windows equivalent of this.
-            use std::io::ErrorKind::*;
-            Ok(this.eval_windows(
-                "c",
-                match err_kind {
-                    NotFound => "ERROR_FILE_NOT_FOUND",
-                    PermissionDenied => "ERROR_ACCESS_DENIED",
-                    _ =>
-                        throw_unsup_format!(
-                            "io error {:?} cannot be translated into a raw os error",
-                            err_kind
-                        ),
-                },
-            ))
+            for &(name, kind) in WINDOWS_IO_ERROR_TABLE {
+                if err_kind == kind {
+                    return Ok(this.eval_windows("c", name));
+                }
+            }
+            throw_unsup_format!("io error {:?} cannot be translated into a raw os error", err_kind);
         } else {
             throw_unsup_format!(
                 "converting io::Error into errnum is unsupported for OS {}",
@@ -749,8 +789,14 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
                     return Ok(Some(kind));
                 }
             }
-            // Our table is as complete as the mapping in std, so we are okay with saying "that's a
-            // strange one" here.
+            return Ok(None);
+        } else if target.families.iter().any(|f| f == "windows") {
+            let errnum = errnum.to_u32()?;
+            for &(name, kind) in WINDOWS_IO_ERROR_TABLE {
+                if errnum == this.eval_windows("c", name).to_u32()? {
+                    return Ok(Some(kind));
+                }
+            }
             return Ok(None);
         } else {
             throw_unsup_format!(
@@ -1180,6 +1226,37 @@ pub trait EvalContextExt<'mir, 'tcx: 'mir>: crate::MiriInterpCxExt<'mir, 'tcx> {
         }
         Ok(())
     }
+
+    /// Lookup an array of immediates stored as a linker section of name `name`.
+    fn lookup_link_section(
+        &mut self,
+        name: &str,
+    ) -> InterpResult<'tcx, Vec<ImmTy<'tcx, Provenance>>> {
+        let this = self.eval_context_mut();
+        let tcx = this.tcx.tcx;
+
+        let mut array = vec![];
+
+        iter_exported_symbols(tcx, |_cnum, def_id| {
+            let attrs = tcx.codegen_fn_attrs(def_id);
+            let Some(link_section) = attrs.link_section else {
+                return Ok(());
+            };
+            if link_section.as_str() == name {
+                let instance = ty::Instance::mono(tcx, def_id);
+                let const_val = this.eval_global(instance).unwrap_or_else(|err| {
+                    panic!(
+                        "failed to evaluate static in required link_section: {def_id:?}\n{err:?}"
+                    )
+                });
+                let val = this.read_immediate(&const_val)?;
+                array.push(val);
+            }
+            Ok(())
+        })?;
+
+        Ok(array)
+    }
 }
 
 impl<'mir, 'tcx> MiriMachine<'mir, 'tcx> {
@@ -1275,4 +1352,19 @@ pub(crate) fn simd_element_to_bool(elem: ImmTy<'_, Provenance>) -> InterpResult<
         -1 => true,
         _ => throw_ub_format!("each element of a SIMD mask must be all-0-bits or all-1-bits"),
     })
+}
+
+/// Check whether an operation that writes to a target buffer was successful.
+/// Accordingly select return value.
+/// Local helper function to be used in Windows shims.
+pub(crate) fn windows_check_buffer_size((success, len): (bool, u64)) -> u32 {
+    if success {
+        // If the function succeeds, the return value is the number of characters stored in the target buffer,
+        // not including the terminating null character.
+        u32::try_from(len.checked_sub(1).unwrap()).unwrap()
+    } else {
+        // If the target buffer was not large enough to hold the data, the return value is the buffer size, in characters,
+        // required to hold the string and its terminating null character.
+        u32::try_from(len).unwrap()
+    }
 }

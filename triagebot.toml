@@ -384,7 +384,7 @@ trigger_files = [
 
 [autolabel."PG-exploit-mitigations"]
 trigger_files = [
-    "compiler/rustc_symbol_mangling/src/typeid",
+    "compiler/rustc_sanitizers",
     "src/doc/rustc/src/exploit-mitigations.md",
     "src/doc/unstable-book/src/compiler-flags/branch-protection.md",
     "src/doc/unstable-book/src/compiler-flags/cf-protection.md",
@@ -416,6 +416,54 @@ message_on_add = """\
 message_on_remove = "Issue #{number}'s prioritization request has been removed."
 message_on_close = "Issue #{number} has been closed while requested for prioritization."
 message_on_reopen = "Issue #{number} has been reopened."
+
+# FIXME: Patch triagebot to support `notify-zulip.<label>` getting mapped to an array of actions.
+#        At the moment, the beta-nominated+T-rustdoc action fully occupies the beta-nominated slot
+#        preventing others from adding more beta-nominated actions.
+[notify-zulip."beta-nominated"]
+required_labels = ["T-rustdoc"]
+zulip_stream = 266220 # #t-rustdoc
+topic = "beta-nominated: #{number}"
+# Zulip polls may not be preceded by any other text and pings & short links inside
+# the title of a poll don't get recognized. Therefore we need to send two messages.
+message_on_add = [
+    """\
+@*T-rustdoc* PR #{number} "{title}" has been nominated for beta backport.
+""",
+    """\
+/poll Approve beta backport of #{number}?
+approve
+decline
+don't know
+""",
+]
+message_on_remove = "PR #{number}'s beta-nomination has been removed."
+message_on_close = "PR #{number} has been closed. Thanks for participating!"
+message_on_reopen = "PR #{number} has been reopened. Pinging @*T-rustdoc*."
+
+# FIXME: Patch triagebot to support `notify-zulip.<label>` getting mapped to an array of actions.
+#        At the moment, the stable-nominated+T-rustdoc action fully occupies the stable-nominated slot
+#        preventing others from adding more stable-nominated actions.
+[notify-zulip."stable-nominated"]
+required_labels = ["T-rustdoc"]
+zulip_stream = 266220 # #t-rustdoc
+topic = "stable-nominated: #{number}"
+# Zulip polls may not be preceded by any other text and pings & short links inside
+# the title of a poll don't get recognized. Therefore we need to send two messages.
+message_on_add = [
+    """\
+@*T-rustdoc* PR #{number} "{title}" has been nominated for stable backport.
+""",
+    """\
+/poll Approve stable backport of #{number}?
+approve
+decline
+don't know
+""",
+]
+message_on_remove = "PR #{number}'s stable-nomination has been removed."
+message_on_close = "PR #{number} has been closed. Thanks for participating!"
+message_on_reopen = "PR #{number} has been reopened. Pinging @*T-rustdoc*."
 
 [notify-zulip."I-types-nominated"]
 zulip_stream = 326866 # #T-types/nominated
@@ -701,7 +749,7 @@ cc = ["@nnethercote"]
 message = "Changes to the size of AST and/or HIR nodes."
 cc = ["@nnethercote"]
 
-[mentions."compiler/rustc_symbol_mangling/src/typeid"]
+[mentions."compiler/rustc_sanitizers"]
 cc = ["@rust-lang/project-exploit-mitigations", "@rcvalle"]
 
 [mentions."src/doc/rustc/src/exploit-mitigations.md"]
@@ -728,7 +776,7 @@ cc = ["@rust-lang/project-exploit-mitigations", "@rcvalle"]
 [mentions."src/doc/unstable-book/src/language-features/no-sanitize.md"]
 cc = ["@rust-lang/project-exploit-mitigations", "@rcvalle"]
 
-[mentions."src/doc/unstable-book/src/compiler-flags/check-cfg.md"]
+[mentions."src/doc/rustc/src/check-cfg.md"]
 cc = ["@Urgau"]
 
 [mentions."src/doc/rustc/src/platform-support"]
@@ -800,6 +848,7 @@ compiler-team = [
 compiler-team-contributors = [
     "@TaKO8Ki",
     "@Nadrieril",
+    "@nnethercote",
     "@fmease",
     "@fee1-dead",
     "@BoxyUwU",
@@ -857,14 +906,17 @@ parser = [
     "@compiler-errors",
     "@davidtwco",
     "@estebank",
+    "@nnethercote",
     "@petrochenkov",
     "@spastorino",
 ]
 lexer = [
+    "@nnethercote",
     "@petrochenkov",
     "@estebank",
 ]
 arena = [
+    "@nnethercote",
     "@spastorino",
 ]
 mir = [

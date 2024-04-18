@@ -109,7 +109,7 @@ macro_rules! maybe_recover_from_interpolated_ty_qpath {
     ($self: expr, $allow_qpath_recovery: expr) => {
         if $allow_qpath_recovery
             && $self.may_recover()
-            && $self.look_ahead(1, |t| t == &token::ModSep)
+            && $self.look_ahead(1, |t| t == &token::PathSep)
             && let token::Interpolated(nt) = &$self.token.kind
             && let token::NtTy(ty) = &nt.0
         {
@@ -179,7 +179,7 @@ pub struct Parser<'a> {
 
 // This type is used a lot, e.g. it's cloned when matching many declarative macro rules with nonterminals. Make sure
 // it doesn't unintentionally get bigger.
-#[cfg(all(any(target_arch = "x86_64", target_arch = "aarch64"), target_pointer_width = "64"))]
+#[cfg(target_pointer_width = "64")]
 rustc_data_structures::static_assert_size!(Parser<'_>, 264);
 
 /// Stores span information about a closure.
@@ -1532,7 +1532,7 @@ impl<'a> Parser<'a> {
 
     /// `::{` or `::*`
     fn is_import_coupler(&mut self) -> bool {
-        self.check(&token::ModSep)
+        self.check(&token::PathSep)
             && self.look_ahead(1, |t| {
                 *t == token::OpenDelim(Delimiter::Brace) || *t == token::BinOp(token::Star)
             })

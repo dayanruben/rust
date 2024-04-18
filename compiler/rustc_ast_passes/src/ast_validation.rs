@@ -276,8 +276,8 @@ impl<'a> AstValidator<'a> {
     fn check_decl_no_pat(decl: &FnDecl, mut report_err: impl FnMut(Span, Option<Ident>, bool)) {
         for Param { pat, .. } in &decl.inputs {
             match pat.kind {
-                PatKind::Ident(BindingAnnotation::NONE, _, None) | PatKind::Wild => {}
-                PatKind::Ident(BindingAnnotation::MUT, ident, None) => {
+                PatKind::Ident(BindingMode::NONE, _, None) | PatKind::Wild => {}
+                PatKind::Ident(BindingMode::MUT, ident, None) => {
                     report_err(pat.span, Some(ident), true)
                 }
                 _ => report_err(pat.span, None, false),
@@ -737,7 +737,7 @@ impl<'a> AstValidator<'a> {
                     }
                 }
             }
-            TyKind::ImplTrait(_, bounds) => {
+            TyKind::ImplTrait(_, bounds, _) => {
                 if self.is_impl_trait_banned {
                     self.dcx().emit_err(errors::ImplTraitPath { span: ty.span });
                 }

@@ -17,7 +17,7 @@ use rustc_ast::util::classify;
 use rustc_ast::util::comments::{Comment, CommentStyle};
 use rustc_ast::util::parser;
 use rustc_ast::{self as ast, AttrArgs, AttrArgsEq, BlockCheckMode, PatKind};
-use rustc_ast::{attr, BindingAnnotation, ByRef, DelimArgs, RangeEnd, RangeSyntax, Term};
+use rustc_ast::{attr, BindingMode, ByRef, DelimArgs, RangeEnd, RangeSyntax, Term};
 use rustc_ast::{GenericArg, GenericBound, SelfKind};
 use rustc_ast::{InlineAsmOperand, InlineAsmRegOrRegClass};
 use rustc_ast::{InlineAsmOptions, InlineAsmTemplatePiece};
@@ -893,7 +893,7 @@ pub trait PrintState<'a>: std::ops::Deref<Target = pp::Printer> + std::ops::Dere
             token::Comma => ",".into(),
             token::Semi => ";".into(),
             token::Colon => ":".into(),
-            token::ModSep => "::".into(),
+            token::PathSep => "::".into(),
             token::RArrow => "->".into(),
             token::LArrow => "<-".into(),
             token::FatArrow => "=>".into(),
@@ -1150,8 +1150,17 @@ impl<'a> State<'a> {
                 }
                 self.print_type_bounds(bounds);
             }
-            ast::TyKind::ImplTrait(_, bounds) => {
+            ast::TyKind::ImplTrait(_, bounds, precise_capturing_args) => {
                 self.word_nbsp("impl");
+                if let Some((precise_capturing_args, ..)) = precise_capturing_args.as_deref() {
+                    self.word("use");
+                    self.word("<");
+                    self.commasep(Inconsistent, precise_capturing_args, |s, arg| match arg {
+                        ast::PreciseCapturingArg::Arg(p, _) => s.print_path(p, false, 0),
+                        ast::PreciseCapturingArg::Lifetime(lt) => s.print_lifetime(*lt),
+                    });
+                    self.word(">")
+                }
                 self.print_type_bounds(bounds);
             }
             ast::TyKind::Array(ty, length) => {
@@ -1549,7 +1558,7 @@ impl<'a> State<'a> {
         match &pat.kind {
             PatKind::Wild => self.word("_"),
             PatKind::Never => self.word("!"),
-            PatKind::Ident(BindingAnnotation(by_ref, mutbl), ident, sub) => {
+            PatKind::Ident(BindingMode(by_ref, mutbl), ident, sub) => {
                 if mutbl.is_mut() {
                     self.word_nbsp("mut");
                 }
@@ -1645,7 +1654,7 @@ impl<'a> State<'a> {
                 if mutbl.is_mut() {
                     self.word("mut ");
                 }
-                if let PatKind::Ident(ast::BindingAnnotation::MUT, ..) = inner.kind {
+                if let PatKind::Ident(ast::BindingMode::MUT, ..) = inner.kind {
                     self.popen();
                     self.print_pat(inner);
                     self.pclose();
