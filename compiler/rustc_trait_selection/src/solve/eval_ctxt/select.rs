@@ -4,6 +4,7 @@ use rustc_infer::infer::{DefineOpaqueTypes, InferCtxt};
 use rustc_infer::traits::{
     Obligation, PolyTraitObligation, PredicateObligation, Selection, SelectionResult, TraitEngine,
 };
+use rustc_macros::extension;
 use rustc_middle::traits::solve::{CandidateSource, CanonicalInput, Certainty, Goal};
 use rustc_middle::traits::{
     BuiltinImplSource, ImplSource, ImplSourceUserDefinedData, ObligationCause, SelectionError,
@@ -106,6 +107,8 @@ impl<'tcx> InferCtxt<'tcx> {
                 (Certainty::Yes, CandidateSource::ParamEnv(_) | CandidateSource::AliasBound) => {
                     Ok(Some(ImplSource::Param(vec![])))
                 }
+
+                (_, CandidateSource::CoherenceUnknowable) => bug!(),
 
                 (Certainty::Maybe(_), _) => Ok(None),
             }
