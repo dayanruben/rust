@@ -19,6 +19,7 @@ use rustc_middle::ty::{
     self, GenericArgs, Ty, TypeFoldable, TypeFolder, TypeSuperFoldable, TypeVisitableExt,
 };
 use rustc_middle::ty::{GenericParamDefKind, TyCtxt};
+use rustc_middle::{bug, span_bug};
 use rustc_span::Span;
 use rustc_trait_selection::regions::InferCtxtRegionExt;
 use rustc_trait_selection::traits::error_reporting::TypeErrCtxtExt;
@@ -175,7 +176,7 @@ fn compare_method_predicate_entailment<'tcx>(
     let cause = ObligationCause::new(
         impl_m_span,
         impl_m_def_id,
-        ObligationCauseCode::CompareImplItemObligation {
+        ObligationCauseCode::CompareImplItem {
             impl_item_def_id: impl_m_def_id,
             trait_item_def_id: trait_m.def_id,
             kind: impl_m.kind,
@@ -236,7 +237,7 @@ fn compare_method_predicate_entailment<'tcx>(
         let cause = ObligationCause::new(
             span,
             impl_m_def_id,
-            ObligationCauseCode::CompareImplItemObligation {
+            ObligationCauseCode::CompareImplItem {
                 impl_item_def_id: impl_m_def_id,
                 trait_item_def_id: trait_m.def_id,
                 kind: impl_m.kind,
@@ -464,7 +465,7 @@ pub(super) fn collect_return_position_impl_trait_in_trait_tys<'tcx>(
     let cause = ObligationCause::new(
         return_span,
         impl_m_def_id,
-        ObligationCauseCode::CompareImplItemObligation {
+        ObligationCauseCode::CompareImplItem {
             impl_item_def_id: impl_m_def_id,
             trait_item_def_id: trait_m.def_id,
             kind: impl_m.kind,
@@ -819,7 +820,7 @@ impl<'tcx> TypeFolder<TyCtxt<'tcx>> for ImplTraitInTraitCollector<'_, 'tcx> {
                     ObligationCause::new(
                         self.span,
                         self.body_id,
-                        ObligationCauseCode::BindingObligation(proj.def_id, pred_span),
+                        ObligationCauseCode::WhereClause(proj.def_id, pred_span),
                     ),
                     self.param_env,
                     pred,
@@ -1752,7 +1753,7 @@ fn compare_const_predicate_entailment<'tcx>(
     let impl_ty = tcx.type_of(impl_ct_def_id).instantiate_identity();
 
     let trait_ty = tcx.type_of(trait_ct.def_id).instantiate(tcx, trait_to_impl_args);
-    let code = ObligationCauseCode::CompareImplItemObligation {
+    let code = ObligationCauseCode::CompareImplItem {
         impl_item_def_id: impl_ct_def_id,
         trait_item_def_id: trait_ct.def_id,
         kind: impl_ct.kind,
@@ -1924,7 +1925,7 @@ fn compare_type_predicate_entailment<'tcx>(
         let cause = ObligationCause::new(
             span,
             impl_ty_def_id,
-            ObligationCauseCode::CompareImplItemObligation {
+            ObligationCauseCode::CompareImplItem {
                 impl_item_def_id: impl_ty.def_id.expect_local(),
                 trait_item_def_id: trait_ty.def_id,
                 kind: impl_ty.kind,
@@ -2011,11 +2012,7 @@ pub(super) fn check_type_bounds<'tcx>(
         },
     );
     let mk_cause = |span: Span| {
-        let code = if span.is_dummy() {
-            traits::ItemObligation(trait_ty.def_id)
-        } else {
-            traits::BindingObligation(trait_ty.def_id, span)
-        };
+        let code = ObligationCauseCode::WhereClause(trait_ty.def_id, span);
         ObligationCause::new(impl_ty_span, impl_ty_def_id, code)
     };
 
@@ -2251,7 +2248,7 @@ fn try_report_async_mismatch<'tcx>(
     };
 
     for error in errors {
-        if let traits::BindingObligation(def_id, _) = *error.root_obligation.cause.code()
+        if let ObligationCauseCode::WhereClause(def_id, _) = *error.root_obligation.cause.code()
             && def_id == async_future_def_id
             && let Some(proj) = error.root_obligation.predicate.to_opt_poly_projection_pred()
             && let Some(proj) = proj.no_bound_vars()

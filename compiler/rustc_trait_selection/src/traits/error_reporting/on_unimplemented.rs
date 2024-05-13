@@ -10,6 +10,8 @@ use rustc_errors::{codes::*, struct_span_code_err, ErrorGuaranteed};
 use rustc_hir as hir;
 use rustc_hir::def_id::{DefId, LocalDefId};
 use rustc_macros::{extension, LintDiagnostic};
+use rustc_middle::bug;
+use rustc_middle::ty::print::PrintTraitRefExt as _;
 use rustc_middle::ty::GenericArgsRef;
 use rustc_middle::ty::{self, GenericParamDefKind, TyCtxt};
 use rustc_parse_format::{ParseMode, Parser, Piece, Position};
@@ -127,9 +129,9 @@ impl<'tcx> TypeErrCtxt<'_, 'tcx> {
         flags.push((sym::ItemContext, enclosure));
 
         match obligation.cause.code() {
-            ObligationCauseCode::BuiltinDerivedObligation(..)
-            | ObligationCauseCode::ImplDerivedObligation(..)
-            | ObligationCauseCode::WellFormedDerivedObligation(..) => {}
+            ObligationCauseCode::BuiltinDerived(..)
+            | ObligationCauseCode::ImplDerived(..)
+            | ObligationCauseCode::WellFormedDerived(..) => {}
             _ => {
                 // this is a "direct", user-specified, rather than derived,
                 // obligation.

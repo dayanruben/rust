@@ -13,9 +13,11 @@ use super::Selection;
 use super::SelectionContext;
 use super::SelectionError;
 use super::{Normalized, NormalizedTy, ProjectionCacheEntry, ProjectionCacheKey};
+use rustc_infer::traits::ObligationCauseCode;
 use rustc_middle::traits::BuiltinImplSource;
 use rustc_middle::traits::ImplSource;
 use rustc_middle::traits::ImplSourceUserDefinedData;
+use rustc_middle::{bug, span_bug};
 
 use crate::errors::InherentProjectionNormalizationOverflow;
 use crate::infer::{BoundRegionConversionTime, InferOk};
@@ -572,11 +574,7 @@ pub fn normalize_inherent_projection<'a, 'b, 'tcx>(
             // cause code, inherent projections will be printed with identity instantiation in
             // diagnostics which is not ideal.
             // Consider creating separate cause codes for this specific situation.
-            if span.is_dummy() {
-                super::ItemObligation(alias_ty.def_id)
-            } else {
-                super::BindingObligation(alias_ty.def_id, span)
-            },
+            ObligationCauseCode::WhereClause(alias_ty.def_id, span),
         );
 
         obligations.push(Obligation::with_depth(
@@ -973,9 +971,12 @@ fn assemble_candidates_from_impls<'cx, 'tcx>(
                 //
                 // NOTE: This should be kept in sync with the similar code in
                 // `rustc_ty_utils::instance::resolve_associated_item()`.
-                let node_item =
-                    specialization_graph::assoc_def(selcx.tcx(), impl_data.impl_def_id, obligation.predicate.def_id)
-                        .map_err(|ErrorGuaranteed { .. }| ())?;
+                let node_item = specialization_graph::assoc_def(
+                    selcx.tcx(),
+                    impl_data.impl_def_id,
+                    obligation.predicate.def_id,
+                )
+                .map_err(|ErrorGuaranteed { .. }| ())?;
 
                 if node_item.is_final() {
                     // Non-specializable items are always projectable.
@@ -1018,7 +1019,8 @@ fn assemble_candidates_from_impls<'cx, 'tcx>(
                     lang_items.async_fn_trait(),
                     lang_items.async_fn_mut_trait(),
                     lang_items.async_fn_once_trait(),
-                ].contains(&Some(trait_ref.def_id))
+                ]
+                .contains(&Some(trait_ref.def_id))
                 {
                     true
                 } else if lang_items.async_fn_kind_helper() == Some(trait_ref.def_id) {
@@ -1031,7 +1033,7 @@ fn assemble_candidates_from_impls<'cx, 'tcx>(
                         true
                     } else {
                         obligation.predicate.args.type_at(0).to_opt_closure_kind().is_some()
-                        && obligation.predicate.args.type_at(1).to_opt_closure_kind().is_some()
+                            && obligation.predicate.args.type_at(1).to_opt_closure_kind().is_some()
                     }
                 } else if lang_items.discriminant_kind_trait() == Some(trait_ref.def_id) {
                     match self_ty.kind() {
@@ -1158,12 +1160,20 @@ fn assemble_candidates_from_impls<'cx, 'tcx>(
                         // Otherwise, type parameters, opaques, and unnormalized projections have
                         // unit metadata if they're known (e.g. by the param_env) to be sized.
                         ty::Param(_) | ty::Alias(..)
-                            if self_ty != tail || selcx.infcx.predicate_must_hold_modulo_regions(
-                                &obligation.with(
-                                    selcx.tcx(),
-                                    ty::TraitRef::from_lang_item(selcx.tcx(), LangItem::Sized, obligation.cause.span(),[self_ty]),
-                                ),
-                            ) =>
+                            if self_ty != tail
+                                || selcx.infcx.predicate_must_hold_modulo_regions(
+                                    &obligation.with(
+                                        selcx.tcx(),
+                                        ty::TraitRef::new(
+                                            selcx.tcx(),
+                                            selcx.tcx().require_lang_item(
+                                                LangItem::Sized,
+                                                Some(obligation.cause.span()),
+                                            ),
+                                            [self_ty],
+                                        ),
+                                    ),
+                                ) =>
                         {
                             true
                         }
@@ -1226,7 +1236,7 @@ fn assemble_candidates_from_impls<'cx, 'tcx>(
                     obligation.cause.span,
                     format!("Cannot project an associated type from `{impl_source:?}`"),
                 );
-                return Err(())
+                return Err(());
             }
         };
 
@@ -1555,10 +1565,9 @@ fn confirm_builtin_candidate<'cx, 'tcx>(
                 // and opaque types: If the `self_ty` is `Sized`, then the metadata is `()`.
                 // FIXME(ptr_metadata): This impl overlaps with the other impls and shouldn't
                 // exist. Instead, `Pointee<Metadata = ()>` should be a supertrait of `Sized`.
-                let sized_predicate = ty::TraitRef::from_lang_item(
+                let sized_predicate = ty::TraitRef::new(
                     tcx,
-                    LangItem::Sized,
-                    obligation.cause.span(),
+                    tcx.require_lang_item(LangItem::Sized, Some(obligation.cause.span())),
                     [self_ty],
                 );
                 obligations.push(obligation.with(tcx, sized_predicate));
@@ -2113,22 +2122,16 @@ fn assoc_ty_own_obligations<'cx, 'tcx>(
 
         let nested_cause = if matches!(
             obligation.cause.code(),
-            super::CompareImplItemObligation { .. }
-                | super::CheckAssociatedTypeBounds { .. }
-                | super::AscribeUserTypeProvePredicate(..)
+            ObligationCauseCode::CompareImplItem { .. }
+                | ObligationCauseCode::CheckAssociatedTypeBounds { .. }
+                | ObligationCauseCode::AscribeUserTypeProvePredicate(..)
         ) {
             obligation.cause.clone()
-        } else if span.is_dummy() {
-            ObligationCause::new(
-                obligation.cause.span,
-                obligation.cause.body_id,
-                super::ItemObligation(obligation.predicate.def_id),
-            )
         } else {
             ObligationCause::new(
                 obligation.cause.span,
                 obligation.cause.body_id,
-                super::BindingObligation(obligation.predicate.def_id, span),
+                ObligationCauseCode::WhereClause(obligation.predicate.def_id, span),
             )
         };
         nested.push(Obligation::with_depth(

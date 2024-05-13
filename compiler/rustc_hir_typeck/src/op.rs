@@ -13,13 +13,14 @@ use rustc_middle::ty::adjustment::{
 };
 use rustc_middle::ty::print::with_no_trimmed_paths;
 use rustc_middle::ty::{self, IsSuggestable, Ty, TyCtxt, TypeVisitableExt};
+use rustc_middle::{bug, span_bug};
 use rustc_session::errors::ExprParenthesesNeeded;
 use rustc_span::source_map::Spanned;
 use rustc_span::symbol::{sym, Ident};
 use rustc_span::Span;
 use rustc_trait_selection::infer::InferCtxtExt;
 use rustc_trait_selection::traits::error_reporting::suggestions::TypeErrCtxtExt as _;
-use rustc_trait_selection::traits::{self, FulfillmentError, ObligationCtxt};
+use rustc_trait_selection::traits::{FulfillmentError, ObligationCtxt};
 use rustc_type_ir::TyKind::*;
 
 impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
@@ -884,7 +885,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         let input_types = opt_rhs_ty.as_slice();
         let cause = self.cause(
             span,
-            traits::BinOp {
+            ObligationCauseCode::BinOp {
                 lhs_hir_id: lhs_expr.hir_id,
                 rhs_hir_id: opt_rhs_expr.map(|expr| expr.hir_id),
                 rhs_span: opt_rhs_expr.map(|expr| expr.span),

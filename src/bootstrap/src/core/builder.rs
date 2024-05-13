@@ -88,6 +88,9 @@ pub trait Step: 'static + Clone + Debug + PartialEq + Eq + Hash {
 
     /// Primary function to execute this rule. Can call `builder.ensure()`
     /// with other steps to run those.
+    ///
+    /// This gets called twice during a normal `./x.py` execution: first
+    /// with `dry_run() == true`, and then for real.
     fn run(self, builder: &Builder<'_>) -> Self::Output;
 
     /// When bootstrap is passed a set of paths, this controls whether this rule
@@ -317,11 +320,13 @@ const PATH_REMAP: &[(&str, &[&str])] = &[
     (
         "tests",
         &[
+            // tidy-alphabetical-start
             "tests/assembly",
             "tests/codegen",
             "tests/codegen-units",
             "tests/coverage",
             "tests/coverage-run-rustdoc",
+            "tests/crashes",
             "tests/debuginfo",
             "tests/incremental",
             "tests/mir-opt",
@@ -337,6 +342,7 @@ const PATH_REMAP: &[(&str, &[&str])] = &[
             "tests/rustdoc-ui",
             "tests/ui",
             "tests/ui-fulldeps",
+            // tidy-alphabetical-end
         ],
     ),
 ];

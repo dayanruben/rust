@@ -14,6 +14,9 @@ use rustc_target::abi::{self, Abi, Align, Size};
 
 use std::fmt;
 
+use arrayvec::ArrayVec;
+use either::Either;
+
 /// The representation of a Rust value. The enum variant is in fact
 /// uniquely determined by the value's type, but is kept as a
 /// safety check.
@@ -56,6 +59,70 @@ pub enum OperandValue<V> {
     /// `is_zst` on its `Layout` returns `true`. Note however that
     /// these values can still require alignment.
     ZeroSized,
+}
+
+impl<V: CodegenObject> OperandValue<V> {
+    /// If this is ZeroSized/Immediate/Pair, return an array of the 0/1/2 values.
+    /// If this is Ref, return the place.
+    #[inline]
+    pub fn immediates_or_place(self) -> Either<ArrayVec<V, 2>, PlaceValue<V>> {
+        match self {
+            OperandValue::ZeroSized => Either::Left(ArrayVec::new()),
+            OperandValue::Immediate(a) => Either::Left(ArrayVec::from_iter([a])),
+            OperandValue::Pair(a, b) => Either::Left([a, b].into()),
+            OperandValue::Ref(p) => Either::Right(p),
+        }
+    }
+
+    /// Given an array of 0/1/2 immediate values, return ZeroSized/Immediate/Pair.
+    #[inline]
+    pub fn from_immediates(immediates: ArrayVec<V, 2>) -> Self {
+        let mut it = immediates.into_iter();
+        let Some(a) = it.next() else {
+            return OperandValue::ZeroSized;
+        };
+        let Some(b) = it.next() else {
+            return OperandValue::Immediate(a);
+        };
+        OperandValue::Pair(a, b)
+    }
+
+    /// Treat this value as a pointer and return the data pointer and
+    /// optional metadata as backend values.
+    ///
+    /// If you're making a place, use [`Self::deref`] instead.
+    pub fn pointer_parts(self) -> (V, Option<V>) {
+        match self {
+            OperandValue::Immediate(llptr) => (llptr, None),
+            OperandValue::Pair(llptr, llextra) => (llptr, Some(llextra)),
+            _ => bug!("OperandValue cannot be a pointer: {self:?}"),
+        }
+    }
+
+    /// Treat this value as a pointer and return the place to which it points.
+    ///
+    /// The pointer immediate doesn't inherently know its alignment,
+    /// so you need to pass it in. If you want to get it from a type's ABI
+    /// alignment, then maybe you want [`OperandRef::deref`] instead.
+    ///
+    /// This is the inverse of [`PlaceValue::address`].
+    pub fn deref(self, align: Align) -> PlaceValue<V> {
+        let (llval, llextra) = self.pointer_parts();
+        PlaceValue { llval, llextra, align }
+    }
+
+    pub(crate) fn is_expected_variant_for_type<'tcx, Cx: LayoutTypeMethods<'tcx>>(
+        &self,
+        cx: &Cx,
+        ty: TyAndLayout<'tcx>,
+    ) -> bool {
+        match self {
+            OperandValue::ZeroSized => ty.is_zst(),
+            OperandValue::Immediate(_) => cx.is_backend_immediate(ty),
+            OperandValue::Pair(_, _) => cx.is_backend_scalar_pair(ty),
+            OperandValue::Ref(_) => cx.is_backend_ref(ty),
+        }
+    }
 }
 
 /// An `OperandRef` is an "SSA" reference to a Rust value, along with
@@ -205,6 +272,15 @@ impl<'a, 'tcx, V: CodegenObject> OperandRef<'tcx, V> {
         }
     }
 
+    /// Asserts that this operand is a pointer (or reference) and returns
+    /// the place to which it points.  (This requires no code to be emitted
+    /// as we represent places using the pointer to the place.)
+    ///
+    /// This uses [`Ty::builtin_deref`] to include the type of the place and
+    /// assumes the place is aligned to the pointee's usual ABI alignment.
+    ///
+    /// If you don't need the type, see [`OperandValue::pointer_parts`]
+    /// or [`OperandValue::deref`].
     pub fn deref<Cx: LayoutTypeMethods<'tcx>>(self, cx: &Cx) -> PlaceRef<'tcx, V> {
         if self.layout.ty.is_box() {
             // Derefer should have removed all Box derefs
@@ -217,15 +293,8 @@ impl<'a, 'tcx, V: CodegenObject> OperandRef<'tcx, V> {
             .builtin_deref(true)
             .unwrap_or_else(|| bug!("deref of non-pointer {:?}", self));
 
-        let (llptr, llextra) = match self.val {
-            OperandValue::Immediate(llptr) => (llptr, None),
-            OperandValue::Pair(llptr, llextra) => (llptr, Some(llextra)),
-            OperandValue::Ref(..) => bug!("Deref of by-Ref operand {:?}", self),
-            OperandValue::ZeroSized => bug!("Deref of ZST operand {:?}", self),
-        };
         let layout = cx.layout_of(projected_ty);
-        let val = PlaceValue { llval: llptr, llextra, align: layout.align.abi };
-        PlaceRef { val, layout }
+        self.val.deref(layout.align.abi).with_type(layout)
     }
 
     /// If this operand is a `Pair`, we return an aggregate with the two values.
@@ -418,8 +487,7 @@ impl<'a, 'tcx, V: CodegenObject> OperandValue<V> {
                 if val.llextra.is_some() {
                     bug!("cannot directly store unsized values");
                 }
-                let source_place = PlaceRef { val, layout: dest.layout };
-                bx.typed_place_copy_with_flags(dest, source_place, flags);
+                bx.typed_place_copy_with_flags(dest.val, val, dest.layout, flags);
             }
             OperandValue::Immediate(s) => {
                 let val = bx.from_immediate(s);

@@ -13,9 +13,9 @@ use super::util;
 use super::util::closure_trait_ref_and_return_type;
 use super::wf;
 use super::{
-    ImplDerivedObligation, ImplDerivedObligationCause, Normalized, Obligation, ObligationCause,
-    ObligationCauseCode, Overflow, PolyTraitObligation, PredicateObligation, Selection,
-    SelectionError, SelectionResult, TraitQueryMode,
+    ImplDerivedCause, Normalized, Obligation, ObligationCause, ObligationCauseCode, Overflow,
+    PolyTraitObligation, PredicateObligation, Selection, SelectionError, SelectionResult,
+    TraitQueryMode,
 };
 
 use crate::infer::{InferCtxt, InferOk, TypeFreshener};
@@ -36,11 +36,13 @@ use rustc_infer::infer::BoundRegionConversionTime;
 use rustc_infer::infer::BoundRegionConversionTime::HigherRankedType;
 use rustc_infer::infer::DefineOpaqueTypes;
 use rustc_infer::traits::TraitObligation;
+use rustc_middle::bug;
 use rustc_middle::dep_graph::dep_kinds;
 use rustc_middle::dep_graph::DepNodeIndex;
 use rustc_middle::mir::interpret::ErrorHandled;
 use rustc_middle::ty::_match::MatchAgainstFreshVars;
 use rustc_middle::ty::abstract_const::NotConstEvaluatable;
+use rustc_middle::ty::print::PrintTraitRefExt as _;
 use rustc_middle::ty::relate::TypeRelation;
 use rustc_middle::ty::GenericArgsRef;
 use rustc_middle::ty::{self, PolyProjectionPredicate, ToPredicate};
@@ -2771,7 +2773,7 @@ impl<'tcx> SelectionContext<'_, 'tcx> {
                     cause.clone()
                 } else {
                     cause.clone().derived_cause(parent_trait_pred, |derived| {
-                        ImplDerivedObligation(Box::new(ImplDerivedObligationCause {
+                        ObligationCauseCode::ImplDerived(Box::new(ImplDerivedCause {
                             derived,
                             impl_or_alias_def_id: def_id,
                             impl_def_predicate_index: Some(index),

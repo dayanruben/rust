@@ -15,6 +15,7 @@ use rustc_infer::infer::canonical::{Canonical, QueryResponse};
 use rustc_infer::infer::error_reporting::TypeAnnotationNeeded::E0282;
 use rustc_infer::infer::DefineOpaqueTypes;
 use rustc_infer::infer::{self, InferOk, TyCtxtInferExt};
+use rustc_infer::traits::ObligationCauseCode;
 use rustc_middle::middle::stability;
 use rustc_middle::query::Providers;
 use rustc_middle::ty::fast_reject::{simplify_type, TreatParams};
@@ -23,6 +24,7 @@ use rustc_middle::ty::GenericParamDefKind;
 use rustc_middle::ty::ToPredicate;
 use rustc_middle::ty::{self, ParamEnvAnd, Ty, TyCtxt, TypeVisitableExt};
 use rustc_middle::ty::{GenericArgs, GenericArgsRef};
+use rustc_middle::{bug, span_bug};
 use rustc_session::lint;
 use rustc_span::def_id::DefId;
 use rustc_span::def_id::LocalDefId;
@@ -1400,16 +1402,12 @@ impl<'a, 'tcx> ProbeContext<'a, 'tcx> {
                     // Convert the bounds into obligations.
                     ocx.register_obligations(traits::predicates_for_generics(
                         |idx, span| {
-                            let code = if span.is_dummy() {
-                                traits::ExprItemObligation(impl_def_id, self.scope_expr_id, idx)
-                            } else {
-                                traits::ExprBindingObligation(
-                                    impl_def_id,
-                                    span,
-                                    self.scope_expr_id,
-                                    idx,
-                                )
-                            };
+                            let code = ObligationCauseCode::WhereClauseInExpr(
+                                impl_def_id,
+                                span,
+                                self.scope_expr_id,
+                                idx,
+                            );
                             ObligationCause::new(self.span, self.body_id, code)
                         },
                         self.param_env,
