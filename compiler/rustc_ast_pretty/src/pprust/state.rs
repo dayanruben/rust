@@ -524,7 +524,10 @@ pub trait PrintState<'a>: std::ops::Deref<Target = pp::Printer> + std::ops::Dere
         }
     }
 
-    fn peek_comment<'b>(&'b self) -> Option<&'b Comment> where 'a: 'b {
+    fn peek_comment<'b>(&'b self) -> Option<&'b Comment>
+    where
+        'a: 'b,
+    {
         self.comments().and_then(|c| c.peek())
     }
 
@@ -678,22 +681,40 @@ pub trait PrintState<'a>: std::ops::Deref<Target = pp::Printer> + std::ops::Dere
         }
     }
 
+    // The easiest way to implement token stream pretty printing would be to
+    // print each token followed by a single space. But that would produce ugly
+    // output, so we go to some effort to do better.
+    //
+    // First, we track whether each token that appears in source code is
+    // followed by a space, with `Spacing`, and reproduce that in the output.
+    // This works well in a lot of cases. E.g. `stringify!(x + y)` produces
+    // "x + y" and `stringify!(x+y)` produces "x+y".
+    //
+    // But this doesn't work for code produced by proc macros (which have no
+    // original source text representation) nor for code produced by decl
+    // macros (which are tricky because the whitespace after tokens appearing
+    // in macro rules isn't always what you want in the produced output). For
+    // these we mostly use `Spacing::Alone`, which is the conservative choice.
+    //
+    // So we have a backup mechanism for when `Spacing::Alone` occurs between a
+    // pair of tokens: we check if that pair of tokens can obviously go
+    // together without a space between them. E.g. token `x` followed by token
+    // `,` is better printed as `x,` than `x ,`. (Even if the original source
+    // code was `x ,`.)
+    //
+    // Finally, we must be careful about changing the output. Token pretty
+    // printing is used by `stringify!` and `impl Display for
+    // proc_macro::TokenStream`, and some programs rely on the output having a
+    // particular form, even though they shouldn't. In particular, some proc
+    // macros do `format!({stream})` on a token stream and then "parse" the
+    // output with simple string matching that can't handle whitespace changes.
+    // E.g. we have seen cases where a proc macro can handle `a :: b` but not
+    // `a::b`. See #117433 for some examples.
     fn print_tts(&mut self, tts: &TokenStream, convert_dollar_crate: bool) {
         let mut iter = tts.trees().peekable();
         while let Some(tt) = iter.next() {
             let spacing = self.print_tt(tt, convert_dollar_crate);
             if let Some(next) = iter.peek() {
-                // Should we print a space after `tt`? There are two guiding
-                // factors.
-                // - `spacing` is the more important and accurate one. Most
-                //   tokens have good spacing information, and
-                //   `Joint`/`JointHidden` get used a lot.
-                // - `space_between` is the backup. Code produced by proc
-                //   macros has worse spacing information, with no
-                //   `JointHidden` usage and too much `Alone` usage, which
-                //   would result in over-spaced output such as
-                //   `( x () , y . z )`. `space_between` avoids some of the
-                //   excess whitespace.
                 if spacing == Spacing::Alone && space_between(tt, next) {
                     self.space();
                 }
@@ -1150,7 +1171,7 @@ impl<'a> State<'a> {
                 self.pclose();
             }
             ast::TyKind::BareFn(f) => {
-                self.print_ty_fn(f.ext, f.unsafety, &f.decl, None, &f.generic_params);
+                self.print_ty_fn(f.ext, f.safety, &f.decl, None, &f.generic_params);
             }
             ast::TyKind::Path(None, path) => {
                 self.print_path(path, false, 0);
@@ -1908,7 +1929,7 @@ impl<'a> State<'a> {
     fn print_ty_fn(
         &mut self,
         ext: ast::Extern,
-        unsafety: ast::Unsafe,
+        safety: ast::Safety,
         decl: &ast::FnDecl,
         name: Option<Ident>,
         generic_params: &[ast::GenericParam],
@@ -1924,7 +1945,7 @@ impl<'a> State<'a> {
             },
             span: DUMMY_SP,
         };
-        let header = ast::FnHeader { unsafety, ext, ..ast::FnHeader::default() };
+        let header = ast::FnHeader { safety, ext, ..ast::FnHeader::default() };
         self.print_fn(decl, header, name, &generics);
         self.end();
     }
@@ -1932,7 +1953,7 @@ impl<'a> State<'a> {
     fn print_fn_header_info(&mut self, header: ast::FnHeader) {
         self.print_constness(header.constness);
         header.coroutine_kind.map(|coroutine_kind| self.print_coroutine_kind(coroutine_kind));
-        self.print_unsafety(header.unsafety);
+        self.print_safety(header.safety);
 
         match header.ext {
             ast::Extern::None => {}
@@ -1949,10 +1970,10 @@ impl<'a> State<'a> {
         self.word("fn")
     }
 
-    fn print_unsafety(&mut self, s: ast::Unsafe) {
+    fn print_safety(&mut self, s: ast::Safety) {
         match s {
-            ast::Unsafe::No => {}
-            ast::Unsafe::Yes(_) => self.word_nbsp("unsafe"),
+            ast::Safety::Default => {}
+            ast::Safety::Unsafe(_) => self.word_nbsp("unsafe"),
         }
     }
 

@@ -40,6 +40,7 @@ use rustc_infer::infer::{InferCtxt, TyCtxtInferExt};
 use rustc_infer::traits::ObligationCause;
 use rustc_middle::middle::stability::AllowUnstable;
 use rustc_middle::mir::interpret::{LitToConstError, LitToConstInput};
+use rustc_middle::ty::print::PrintPolyTraitRefExt as _;
 use rustc_middle::ty::{
     self, Const, GenericArgKind, GenericArgsRef, GenericParamDefKind, ParamEnv, Ty, TyCtxt,
     TypeVisitableExt,
@@ -279,7 +280,7 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
                 let item_def_id = tcx.hir().ty_param_owner(def_id.expect_local());
                 let generics = tcx.generics_of(item_def_id);
                 let index = generics.param_def_id_to_index[&def_id];
-                ty::Region::new_early_param(tcx, ty::EarlyParamRegion { def_id, index, name })
+                ty::Region::new_early_param(tcx, ty::EarlyParamRegion { index, name })
             }
 
             Some(rbv::ResolvedArg::Free(scope, id)) => {
@@ -412,7 +413,7 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
         // Traits always have `Self` as a generic parameter, which means they will not return early
         // here and so associated type bindings will be handled regardless of whether there are any
         // non-`Self` generic parameters.
-        if generics.own_params.is_empty() {
+        if generics.is_own_empty() {
             return (tcx.mk_args(parent_args), arg_count);
         }
 
@@ -1164,33 +1165,28 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
         let ty = self.lower_assoc_ty(span, assoc_ty_did, assoc_segment, bound);
 
         if let Some(variant_def_id) = variant_resolution {
-            tcx.node_span_lint(
-                AMBIGUOUS_ASSOCIATED_ITEMS,
-                hir_ref_id,
-                span,
-                "ambiguous associated item",
-                |lint| {
-                    let mut could_refer_to = |kind: DefKind, def_id, also| {
-                        let note_msg = format!(
-                            "`{}` could{} refer to the {} defined here",
-                            assoc_ident,
-                            also,
-                            tcx.def_kind_descr(kind, def_id)
-                        );
-                        lint.span_note(tcx.def_span(def_id), note_msg);
-                    };
-
-                    could_refer_to(DefKind::Variant, variant_def_id, "");
-                    could_refer_to(DefKind::AssocTy, assoc_ty_did, " also");
-
-                    lint.span_suggestion(
-                        span,
-                        "use fully-qualified syntax",
-                        format!("<{} as {}>::{}", qself_ty, tcx.item_name(trait_did), assoc_ident),
-                        Applicability::MachineApplicable,
+            tcx.node_span_lint(AMBIGUOUS_ASSOCIATED_ITEMS, hir_ref_id, span, |lint| {
+                lint.primary_message("ambiguous associated item");
+                let mut could_refer_to = |kind: DefKind, def_id, also| {
+                    let note_msg = format!(
+                        "`{}` could{} refer to the {} defined here",
+                        assoc_ident,
+                        also,
+                        tcx.def_kind_descr(kind, def_id)
                     );
-                },
-            );
+                    lint.span_note(tcx.def_span(def_id), note_msg);
+                };
+
+                could_refer_to(DefKind::Variant, variant_def_id, "");
+                could_refer_to(DefKind::AssocTy, assoc_ty_did, " also");
+
+                lint.span_suggestion(
+                    span,
+                    "use fully-qualified syntax",
+                    format!("<{} as {}>::{}", qself_ty, tcx.item_name(trait_did), assoc_ident),
+                    Applicability::MachineApplicable,
+                );
+            });
         }
         Ok((ty, DefKind::AssocTy, assoc_ty_did))
     }
@@ -1757,7 +1753,7 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
                 assert_eq!(opt_self_ty, None);
                 let _ = self.prohibit_generic_args(
                     path.segments.iter(),
-                    GenericsArgsErrExtend::TyParam(def_id),
+                    GenericsArgsErrExtend::Param(def_id),
                 );
                 self.lower_ty_param(hir_id)
             }
@@ -2080,14 +2076,7 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
 
                 Ty::new_fn_ptr(
                     tcx,
-                    self.lower_fn_ty(
-                        hir_ty.hir_id,
-                        bf.unsafety,
-                        bf.abi,
-                        bf.decl,
-                        None,
-                        Some(hir_ty),
-                    ),
+                    self.lower_fn_ty(hir_ty.hir_id, bf.safety, bf.abi, bf.decl, None, Some(hir_ty)),
                 )
             }
             hir::TyKind::TraitObject(bounds, lifetime, repr) => {
@@ -2197,10 +2186,15 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
 
                                 hir::ExprKind::Path(hir::QPath::Resolved(
                                     _,
-                                    &hir::Path {
-                                        res: Res::Def(DefKind::ConstParam, def_id), ..
+                                    path @ &hir::Path {
+                                        res: Res::Def(DefKind::ConstParam, def_id),
+                                        ..
                                     },
                                 )) => {
+                                    let _ = self.prohibit_generic_args(
+                                        path.segments.iter(),
+                                        GenericsArgsErrExtend::Param(def_id),
+                                    );
                                     let ty = tcx
                                         .type_of(def_id)
                                         .no_bound_vars()
@@ -2309,11 +2303,11 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
     }
 
     /// Lower a function type from the HIR to our internal notion of a function signature.
-    #[instrument(level = "debug", skip(self, hir_id, unsafety, abi, decl, generics, hir_ty), ret)]
+    #[instrument(level = "debug", skip(self, hir_id, safety, abi, decl, generics, hir_ty), ret)]
     pub fn lower_fn_ty(
         &self,
         hir_id: HirId,
-        unsafety: hir::Unsafety,
+        safety: hir::Safety,
         abi: abi::Abi,
         decl: &hir::FnDecl<'tcx>,
         generics: Option<&hir::Generics<'_>>,
@@ -2376,7 +2370,7 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
 
         debug!(?output_ty);
 
-        let fn_ty = tcx.mk_fn_sig(input_tys, output_ty, decl.c_variadic, unsafety, abi);
+        let fn_ty = tcx.mk_fn_sig(input_tys, output_ty, decl.c_variadic, safety, abi);
         let bare_fn_ty = ty::Binder::bind_with_vars(fn_ty, bound_vars);
 
         if !self.allow_infer() && !(visitor.0.is_empty() && infer_replacements.is_empty()) {

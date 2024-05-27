@@ -381,10 +381,13 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 let maybe_missing_semi = self.check_for_missing_semi(expr, &mut err);
 
                 // We defer to the later error produced by `check_lhs_assignable`.
-                // We only downgrade this if it's the LHS, though.
+                // We only downgrade this if it's the LHS, though, and if this is a
+                // valid assignment statement.
                 if maybe_missing_semi
                     && let hir::Node::Expr(parent) = self.tcx.parent_hir_node(expr.hir_id)
                     && let hir::ExprKind::Assign(lhs, _, _) = parent.kind
+                    && let hir::Node::Stmt(stmt) = self.tcx.parent_hir_node(parent.hir_id)
+                    && let hir::StmtKind::Expr(_) | hir::StmtKind::Semi(_) = stmt.kind
                     && lhs.hir_id == expr.hir_id
                 {
                     err.downgrade_to_delayed_bug();
@@ -583,7 +586,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                         if !errors.is_empty() {
                             for error in errors {
                                 if let Some(trait_pred) =
-                                    error.obligation.predicate.to_opt_poly_trait_pred()
+                                    error.obligation.predicate.as_trait_clause()
                                 {
                                     let output_associated_item = match error.obligation.cause.code()
                                     {
@@ -797,9 +800,9 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     );
 
                     if operand_ty.has_non_region_param() {
-                        let predicates = errors.iter().filter_map(|error| {
-                            error.obligation.predicate.to_opt_poly_trait_pred()
-                        });
+                        let predicates = errors
+                            .iter()
+                            .filter_map(|error| error.obligation.predicate.as_trait_clause());
                         for pred in predicates {
                             self.err_ctxt().suggest_restricting_param_bound(
                                 &mut err,

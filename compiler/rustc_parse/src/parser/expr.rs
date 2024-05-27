@@ -36,6 +36,7 @@ use rustc_span::source_map::{self, Spanned};
 use rustc_span::symbol::{kw, sym, Ident, Symbol};
 use rustc_span::{BytePos, ErrorGuaranteed, Pos, Span};
 use thin_vec::{thin_vec, ThinVec};
+use tracing::instrument;
 
 /// Possibly accepts an `token::Interpolated` expression (a pre-parsed expression
 /// dropped into the token stream, which happens while parsing the result of
@@ -1913,11 +1914,10 @@ impl<'a> Parser<'a> {
                             | ExprKind::Block(_, None)
                     )
                 {
-                    self.psess.buffer_lint_with_diagnostic(
+                    self.psess.buffer_lint(
                         BREAK_WITH_LABEL_AND_LOOP,
                         lo.to(expr.span),
                         ast::CRATE_NODE_ID,
-                        "this labeled break expression is easy to confuse with an unlabeled break with a labeled value expression",
                         BuiltinLintDiag::BreakWithLabelAndLoop(expr.span),
                     );
                 }
@@ -3734,7 +3734,7 @@ impl<'a> Parser<'a> {
     /// Parses `ident (COLON expr)?`.
     fn parse_expr_field(&mut self) -> PResult<'a, ExprField> {
         let attrs = self.parse_outer_attributes()?;
-        self.recover_diff_marker();
+        self.recover_vcs_conflict_marker();
         self.collect_tokens_trailing_token(attrs, ForceCollect::No, |this, attrs| {
             let lo = this.token.span;
 

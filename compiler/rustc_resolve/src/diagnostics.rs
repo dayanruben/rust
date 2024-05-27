@@ -28,6 +28,7 @@ use rustc_span::source_map::SourceMap;
 use rustc_span::symbol::{kw, sym, Ident, Symbol};
 use rustc_span::{BytePos, Span, SyntaxContext};
 use thin_vec::{thin_vec, ThinVec};
+use tracing::debug;
 
 use crate::errors::{
     self, AddedMacroUse, ChangeImportBinding, ChangeImportBindingSuggestion, ConsiderAddingADerive,
@@ -42,9 +43,6 @@ use crate::{HasGenericParams, MacroRulesScope, Module, ModuleKind, ModuleOrUnifo
 use crate::{LexicalScopeBinding, NameBinding, NameBindingKind, PrivacyError, VisResolutionError};
 use crate::{ParentScope, PathResult, ResolutionError, Resolver, Scope, ScopeSet};
 use crate::{Segment, UseError};
-
-#[cfg(test)]
-mod tests;
 
 type Res = def::Res<ast::NodeId>;
 
@@ -130,13 +128,10 @@ impl<'a, 'tcx> Resolver<'a, 'tcx> {
         self.report_with_use_injections(krate);
 
         for &(span_use, span_def) in &self.macro_expanded_macro_export_errors {
-            let msg = "macro-expanded `macro_export` macros from the current crate \
-                       cannot be referred to by absolute paths";
-            self.lint_buffer.buffer_lint_with_diagnostic(
+            self.lint_buffer.buffer_lint(
                 MACRO_EXPANDED_MACRO_EXPORTS_ACCESSED_BY_ABSOLUTE_PATHS,
                 CRATE_NODE_ID,
                 span_use,
-                msg,
                 BuiltinLintDiag::MacroExpandedMacroExportsAccessedByAbsolutePaths(span_def),
             );
         }
@@ -147,11 +142,10 @@ impl<'a, 'tcx> Resolver<'a, 'tcx> {
                 let NameBindingKind::Import { import, .. } = ambiguity_error.b1.0.kind else {
                     unreachable!()
                 };
-                self.lint_buffer.buffer_lint_with_diagnostic(
+                self.lint_buffer.buffer_lint(
                     AMBIGUOUS_GLOB_IMPORTS,
                     import.root_id,
                     ambiguity_error.ident.span,
-                    diag.msg.to_string(),
                     BuiltinLintDiag::AmbiguousGlobImports { diag },
                 );
             } else {
@@ -528,12 +522,10 @@ impl<'a, 'tcx> Resolver<'a, 'tcx> {
         }
 
         let diag = BuiltinLintDiag::AbsPathWithModule(root_span);
-        self.lint_buffer.buffer_lint_with_diagnostic(
+        self.lint_buffer.buffer_lint(
             ABSOLUTE_PATHS_NOT_STARTING_WITH_CRATE,
             node_id,
             root_span,
-            "absolute paths must start with `self`, `super`, \
-             `crate`, or an external crate name in the 2018 edition",
             diag,
         );
     }
@@ -3025,15 +3017,4 @@ fn is_span_suitable_for_use_injection(s: Span) -> bool {
     // don't suggest placing a use before the prelude
     // import or other generated ones
     !s.from_expansion()
-}
-
-/// Convert the given number into the corresponding ordinal
-pub(crate) fn ordinalize(v: usize) -> String {
-    let suffix = match ((11..=13).contains(&(v % 100)), v % 10) {
-        (false, 1) => "st",
-        (false, 2) => "nd",
-        (false, 3) => "rd",
-        _ => "th",
-    };
-    format!("{v}{suffix}")
 }

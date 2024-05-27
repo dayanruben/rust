@@ -13,7 +13,7 @@ use super::elaborate;
 use crate::infer::TyCtxtInferExt;
 use crate::traits::query::evaluate_obligation::InferCtxtExt;
 use crate::traits::{self, Obligation, ObligationCause};
-use rustc_errors::{DelayDm, FatalError, MultiSpan};
+use rustc_errors::{FatalError, MultiSpan};
 use rustc_hir as hir;
 use rustc_hir::def_id::DefId;
 use rustc_middle::query::Providers;
@@ -22,7 +22,7 @@ use rustc_middle::ty::{
     TypeVisitable, TypeVisitor,
 };
 use rustc_middle::ty::{GenericArg, GenericArgs};
-use rustc_middle::ty::{ToPredicate, TypeVisitableExt};
+use rustc_middle::ty::{TypeVisitableExt, Upcast};
 use rustc_session::lint::builtin::WHERE_CLAUSES_OBJECT_SAFETY;
 use rustc_span::symbol::Symbol;
 use rustc_span::Span;
@@ -162,41 +162,36 @@ fn lint_object_unsafe_trait(
 ) {
     // Using `CRATE_NODE_ID` is wrong, but it's hard to get a more precise id.
     // It's also hard to get a use site span, so we use the method definition span.
-    tcx.node_span_lint(
-        WHERE_CLAUSES_OBJECT_SAFETY,
-        hir::CRATE_HIR_ID,
-        span,
-        DelayDm(|| format!("the trait `{}` cannot be made into an object", tcx.def_path_str(trait_def_id))),
-        |err| {
-            let node = tcx.hir().get_if_local(trait_def_id);
-            let mut spans = MultiSpan::from_span(span);
-            if let Some(hir::Node::Item(item)) = node {
-                spans.push_span_label(
-                    item.ident.span,
-                    "this trait cannot be made into an object...",
-                );
-                spans.push_span_label(span, format!("...because {}", violation.error_msg()));
-            } else {
-                spans.push_span_label(
-                    span,
-                    format!(
-                        "the trait cannot be made into an object because {}",
-                        violation.error_msg()
-                    ),
-                );
-            };
-            err.span_note(
-                spans,
-                "for a trait to be \"object safe\" it needs to allow building a vtable to allow the \
+    tcx.node_span_lint(WHERE_CLAUSES_OBJECT_SAFETY, hir::CRATE_HIR_ID, span, |err| {
+        err.primary_message(format!(
+            "the trait `{}` cannot be made into an object",
+            tcx.def_path_str(trait_def_id)
+        ));
+        let node = tcx.hir().get_if_local(trait_def_id);
+        let mut spans = MultiSpan::from_span(span);
+        if let Some(hir::Node::Item(item)) = node {
+            spans.push_span_label(item.ident.span, "this trait cannot be made into an object...");
+            spans.push_span_label(span, format!("...because {}", violation.error_msg()));
+        } else {
+            spans.push_span_label(
+                span,
+                format!(
+                    "the trait cannot be made into an object because {}",
+                    violation.error_msg()
+                ),
+            );
+        };
+        err.span_note(
+            spans,
+            "for a trait to be \"object safe\" it needs to allow building a vtable to allow the \
                 call to be resolvable dynamically; for more information visit \
                 <https://doc.rust-lang.org/reference/items/traits.html#object-safety>",
-            );
-            if node.is_some() {
-                // Only provide the help if its a local trait, otherwise it's not
-                violation.solution().add_to(err);
-            }
-        },
-    );
+        );
+        if node.is_some() {
+            // Only provide the help if its a local trait, otherwise it's not
+            violation.solution().add_to(err);
+        }
+    });
 }
 
 fn sized_trait_bound_spans<'tcx>(
@@ -398,7 +393,7 @@ pub fn object_safety_violations_for_assoc_item(
         // Associated types can only be object safe if they have `Self: Sized` bounds.
         ty::AssocKind::Type => {
             if !tcx.features().generic_associated_types_extended
-                && !tcx.generics_of(item.def_id).own_params.is_empty()
+                && !tcx.generics_of(item.def_id).is_own_empty()
                 && !item.is_impl_trait_in_trait()
             {
                 vec![ObjectSafetyViolation::GAT(item.name, item.ident(tcx).span)]
@@ -649,11 +644,11 @@ fn object_ty_for_trait<'tcx>(
     ));
     debug!(?trait_predicate);
 
-    let pred: ty::Predicate<'tcx> = trait_ref.to_predicate(tcx);
+    let pred: ty::Predicate<'tcx> = trait_ref.upcast(tcx);
     let mut elaborated_predicates: Vec<_> = elaborate(tcx, [pred])
         .filter_map(|pred| {
             debug!(?pred);
-            let pred = pred.to_opt_poly_projection_pred()?;
+            let pred = pred.as_projection_clause()?;
             Some(pred.map_bound(|p| {
                 ty::ExistentialPredicate::Projection(ty::ExistentialProjection::erase_self_ty(
                     tcx, p,
@@ -752,8 +747,7 @@ fn receiver_is_dispatchable<'tcx>(
 
         // Self: Unsize<U>
         let unsize_predicate =
-            ty::TraitRef::new(tcx, unsize_did, [tcx.types.self_param, unsized_self_ty])
-                .to_predicate(tcx);
+            ty::TraitRef::new(tcx, unsize_did, [tcx.types.self_param, unsized_self_ty]).upcast(tcx);
 
         // U: Trait<Arg1, ..., ArgN>
         let trait_predicate = {
@@ -762,7 +756,7 @@ fn receiver_is_dispatchable<'tcx>(
                 if param.index == 0 { unsized_self_ty.into() } else { tcx.mk_param_from_def(param) }
             });
 
-            ty::TraitRef::new(tcx, trait_def_id, args).to_predicate(tcx)
+            ty::TraitRef::new(tcx, trait_def_id, args).upcast(tcx)
         };
 
         let caller_bounds =

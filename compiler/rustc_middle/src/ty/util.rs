@@ -4,8 +4,8 @@ use crate::middle::codegen_fn_attrs::CodegenFnAttrFlags;
 use crate::query::{IntoQueryParam, Providers};
 use crate::ty::layout::{FloatExt, IntegerExt};
 use crate::ty::{
-    self, FallibleTypeFolder, ToPredicate, Ty, TyCtxt, TypeFoldable, TypeFolder, TypeSuperFoldable,
-    TypeVisitableExt,
+    self, FallibleTypeFolder, Ty, TyCtxt, TypeFoldable, TypeFolder, TypeSuperFoldable,
+    TypeVisitableExt, Upcast,
 };
 use crate::ty::{GenericArgKind, GenericArgsRef};
 use rustc_apfloat::Float as _;
@@ -24,6 +24,7 @@ use rustc_target::abi::{Float, Integer, IntegerType, Size};
 use rustc_target::spec::abi::Abi;
 use smallvec::{smallvec, SmallVec};
 use std::{fmt, iter};
+use tracing::{debug, instrument, trace};
 
 #[derive(Copy, Clone, Debug)]
 pub struct Discr<'tcx> {
@@ -693,7 +694,7 @@ impl<'tcx> TyCtxt<'tcx> {
     pub fn coroutine_hidden_types(
         self,
         def_id: DefId,
-    ) -> impl Iterator<Item = ty::EarlyBinder<Ty<'tcx>>> {
+    ) -> impl Iterator<Item = ty::EarlyBinder<'tcx, Ty<'tcx>>> {
         let coroutine_layout = self.mir_coroutine_witnesses(def_id);
         coroutine_layout
             .as_ref()
@@ -708,7 +709,7 @@ impl<'tcx> TyCtxt<'tcx> {
     pub fn bound_coroutine_hidden_types(
         self,
         def_id: DefId,
-    ) -> impl Iterator<Item = ty::EarlyBinder<ty::Binder<'tcx, Ty<'tcx>>>> {
+    ) -> impl Iterator<Item = ty::EarlyBinder<'tcx, ty::Binder<'tcx, Ty<'tcx>>>> {
         let coroutine_layout = self.mir_coroutine_witnesses(def_id);
         coroutine_layout
             .as_ref()
@@ -1094,7 +1095,7 @@ impl<'tcx> TypeFolder<TyCtxt<'tcx>> for OpaqueTypeExpander<'tcx> {
                     // anything that requires `ParamEnv::with_reveal_all_normalized`.
                     term: projection_pred.term,
                 })
-                .to_predicate(self.tcx)
+                .upcast(self.tcx)
         } else {
             p.super_fold_with(self)
         }

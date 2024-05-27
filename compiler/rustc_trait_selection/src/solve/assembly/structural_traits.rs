@@ -3,13 +3,12 @@
 use rustc_data_structures::fx::FxHashMap;
 use rustc_hir::LangItem;
 use rustc_hir::{def_id::DefId, Movability, Mutability};
+use rustc_infer::infer::InferCtxt;
 use rustc_infer::traits::query::NoSolution;
 use rustc_macros::{TypeFoldable, TypeVisitable};
 use rustc_middle::bug;
 use rustc_middle::traits::solve::Goal;
-use rustc_middle::ty::{
-    self, ToPredicate, Ty, TyCtxt, TypeFoldable, TypeFolder, TypeSuperFoldable,
-};
+use rustc_middle::ty::{self, Ty, TyCtxt, TypeFoldable, TypeFolder, TypeSuperFoldable, Upcast};
 use rustc_span::sym;
 
 use crate::solve::EvalCtxt;
@@ -20,7 +19,7 @@ use crate::solve::EvalCtxt;
 // instantiate the binder with placeholders eagerly.
 #[instrument(level = "trace", skip(ecx), ret)]
 pub(in crate::solve) fn instantiate_constituent_tys_for_auto_trait<'tcx>(
-    ecx: &EvalCtxt<'_, 'tcx>,
+    ecx: &EvalCtxt<'_, InferCtxt<'tcx>>,
     ty: Ty<'tcx>,
 ) -> Result<Vec<ty::Binder<'tcx, Ty<'tcx>>>, NoSolution> {
     let tcx = ecx.tcx();
@@ -99,7 +98,7 @@ pub(in crate::solve) fn instantiate_constituent_tys_for_auto_trait<'tcx>(
 
 #[instrument(level = "trace", skip(ecx), ret)]
 pub(in crate::solve) fn instantiate_constituent_tys_for_sized_trait<'tcx>(
-    ecx: &EvalCtxt<'_, 'tcx>,
+    ecx: &EvalCtxt<'_, InferCtxt<'tcx>>,
     ty: Ty<'tcx>,
 ) -> Result<Vec<ty::Binder<'tcx, Ty<'tcx>>>, NoSolution> {
     match *ty.kind() {
@@ -163,7 +162,7 @@ pub(in crate::solve) fn instantiate_constituent_tys_for_sized_trait<'tcx>(
 
 #[instrument(level = "trace", skip(ecx), ret)]
 pub(in crate::solve) fn instantiate_constituent_tys_for_copy_clone_trait<'tcx>(
-    ecx: &EvalCtxt<'_, 'tcx>,
+    ecx: &EvalCtxt<'_, InferCtxt<'tcx>>,
     ty: Ty<'tcx>,
 ) -> Result<Vec<ty::Binder<'tcx, Ty<'tcx>>>, NoSolution> {
     match *ty.kind() {
@@ -301,14 +300,11 @@ pub(in crate::solve) fn extract_tupled_inputs_and_output_from_callable<'tcx>(
                     return Err(NoSolution);
                 }
 
-                // If `Fn`/`FnMut`, we only implement this goal if we
-                // have no captures.
-                let no_borrows = match args.tupled_upvars_ty().kind() {
-                    ty::Tuple(tys) => tys.is_empty(),
-                    ty::Error(_) => false,
-                    _ => bug!("tuple_fields called on non-tuple"),
-                };
-                if closure_kind != ty::ClosureKind::FnOnce && !no_borrows {
+                // A coroutine-closure implements `FnOnce` *always*, since it may
+                // always be called once. It additionally implements `Fn`/`FnMut`
+                // only if it has no upvars referencing the closure-env lifetime,
+                // and if the closure kind permits it.
+                if closure_kind != ty::ClosureKind::FnOnce && args.has_self_borrows() {
                     return Err(NoSolution);
                 }
 
@@ -429,7 +425,7 @@ pub(in crate::solve) fn extract_tupled_inputs_and_output_from_async_callable<'tc
                         tcx.require_lang_item(LangItem::AsyncFnKindHelper, None),
                         [kind_ty, Ty::from_closure_kind(tcx, goal_kind)],
                     )
-                    .to_predicate(tcx),
+                    .upcast(tcx),
                 );
 
                 coroutine_closure_to_ambiguous_coroutine(
@@ -456,7 +452,7 @@ pub(in crate::solve) fn extract_tupled_inputs_and_output_from_async_callable<'tc
             let nested = vec![
                 bound_sig
                     .rebind(ty::TraitRef::new(tcx, future_trait_def_id, [sig.output()]))
-                    .to_predicate(tcx),
+                    .upcast(tcx),
             ];
             let future_output_def_id = tcx
                 .associated_items(future_trait_def_id)
@@ -484,7 +480,7 @@ pub(in crate::solve) fn extract_tupled_inputs_and_output_from_async_callable<'tc
             let mut nested = vec![
                 bound_sig
                     .rebind(ty::TraitRef::new(tcx, future_trait_def_id, [sig.output()]))
-                    .to_predicate(tcx),
+                    .upcast(tcx),
             ];
 
             // Additionally, we need to check that the closure kind
@@ -510,7 +506,7 @@ pub(in crate::solve) fn extract_tupled_inputs_and_output_from_async_callable<'tc
                         async_fn_kind_trait_def_id,
                         [kind_ty, Ty::from_closure_kind(tcx, goal_kind)],
                     )
-                    .to_predicate(tcx),
+                    .upcast(tcx),
                 );
             }
 
@@ -665,7 +661,7 @@ fn coroutine_closure_to_ambiguous_coroutine<'tcx>(
 // normalize eagerly here. See https://github.com/lcnr/solver-woes/issues/9
 // for more details.
 pub(in crate::solve) fn predicates_for_object_candidate<'tcx>(
-    ecx: &EvalCtxt<'_, 'tcx>,
+    ecx: &EvalCtxt<'_, InferCtxt<'tcx>>,
     param_env: ty::ParamEnv<'tcx>,
     trait_ref: ty::TraitRef<'tcx>,
     object_bound: &'tcx ty::List<ty::PolyExistentialPredicate<'tcx>>,
@@ -718,7 +714,7 @@ pub(in crate::solve) fn predicates_for_object_candidate<'tcx>(
 }
 
 struct ReplaceProjectionWith<'a, 'tcx> {
-    ecx: &'a EvalCtxt<'a, 'tcx>,
+    ecx: &'a EvalCtxt<'a, InferCtxt<'tcx>>,
     param_env: ty::ParamEnv<'tcx>,
     mapping: FxHashMap<DefId, ty::PolyProjectionPredicate<'tcx>>,
     nested: Vec<Goal<'tcx, ty::Predicate<'tcx>>>,

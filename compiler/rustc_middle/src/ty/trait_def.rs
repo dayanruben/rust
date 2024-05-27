@@ -5,6 +5,7 @@ use hir::def_id::LOCAL_CRATE;
 use rustc_hir as hir;
 use rustc_hir::def_id::DefId;
 use std::iter;
+use tracing::debug;
 
 use rustc_data_structures::fx::FxIndexMap;
 use rustc_errors::ErrorGuaranteed;
@@ -15,7 +16,7 @@ use rustc_macros::{Decodable, Encodable, HashStable};
 pub struct TraitDef {
     pub def_id: DefId,
 
-    pub unsafety: hir::Unsafety,
+    pub safety: hir::Safety,
 
     /// If `true`, then this trait had the `#[rustc_paren_sugar]`
     /// attribute, indicating that it should be used with `Foo()`
@@ -39,10 +40,15 @@ pub struct TraitDef {
     /// also have already switched to the new trait solver.
     pub is_coinductive: bool,
 
-    /// If `true`, then this trait has the `#[rustc_skip_array_during_method_dispatch]`
+    /// If `true`, then this trait has the `#[rustc_skip_during_method_dispatch(array)]`
     /// attribute, indicating that editions before 2021 should not consider this trait
     /// during method dispatch if the receiver is an array.
     pub skip_array_during_method_dispatch: bool,
+
+    /// If `true`, then this trait has the `#[rustc_skip_during_method_dispatch(boxed_slice)]`
+    /// attribute, indicating that editions before 2024 should not consider this trait
+    /// during method dispatch if the receiver is a boxed slice.
+    pub skip_boxed_slice_during_method_dispatch: bool,
 
     /// Used to determine whether the standard library is allowed to specialize
     /// on this trait.
@@ -200,7 +206,7 @@ pub(super) fn trait_impls_of_provider(tcx: TyCtxt<'_>, trait_id: DefId) -> Trait
     // Traits defined in the current crate can't have impls in upstream
     // crates, so we don't bother querying the cstore.
     if !trait_id.is_local() {
-        for &cnum in tcx.crates(()).iter() {
+        for &cnum in tcx.used_crates(()).iter() {
             for &(impl_def_id, simplified_self_ty) in
                 tcx.implementations_of_trait((cnum, trait_id)).iter()
             {
@@ -242,7 +248,7 @@ pub(super) fn incoherent_impls_provider(
     let mut impls = Vec::new();
 
     let mut res = Ok(());
-    for cnum in iter::once(LOCAL_CRATE).chain(tcx.crates(()).iter().copied()) {
+    for cnum in iter::once(LOCAL_CRATE).chain(tcx.used_crates(()).iter().copied()) {
         let incoherent_impls = match tcx.crate_incoherent_impls((cnum, simp)) {
             Ok(impls) => impls,
             Err(e) => {

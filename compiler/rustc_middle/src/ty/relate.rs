@@ -14,6 +14,7 @@ use rustc_hir::def_id::DefId;
 use rustc_macros::TypeVisitable;
 use rustc_target::spec::abi;
 use std::iter;
+use tracing::{debug, instrument};
 
 use super::Pattern;
 
@@ -146,7 +147,7 @@ impl<'tcx> Relate<'tcx> for ty::FnSig<'tcx> {
         if a.c_variadic != b.c_variadic {
             return Err(TypeError::VariadicMismatch(expected_found(a.c_variadic, b.c_variadic)));
         }
-        let unsafety = relation.relate(a.unsafety, b.unsafety)?;
+        let safety = relation.relate(a.safety, b.safety)?;
         let abi = relation.relate(a.abi, b.abi)?;
 
         if a.inputs().len() != b.inputs().len() {
@@ -181,7 +182,7 @@ impl<'tcx> Relate<'tcx> for ty::FnSig<'tcx> {
         Ok(ty::FnSig {
             inputs_and_output: tcx.mk_type_list_from_iter(inputs_and_output)?,
             c_variadic: a.c_variadic,
-            unsafety,
+            safety,
             abi,
         })
     }
@@ -197,13 +198,13 @@ impl<'tcx> Relate<'tcx> for ty::BoundConstness {
     }
 }
 
-impl<'tcx> Relate<'tcx> for hir::Unsafety {
+impl<'tcx> Relate<'tcx> for hir::Safety {
     fn relate<R: TypeRelation<'tcx>>(
         _relation: &mut R,
-        a: hir::Unsafety,
-        b: hir::Unsafety,
-    ) -> RelateResult<'tcx, hir::Unsafety> {
-        if a != b { Err(TypeError::UnsafetyMismatch(expected_found(a, b))) } else { Ok(a) }
+        a: hir::Safety,
+        b: hir::Safety,
+    ) -> RelateResult<'tcx, hir::Safety> {
+        if a != b { Err(TypeError::SafetyMismatch(expected_found(a, b))) } else { Ok(a) }
     }
 }
 

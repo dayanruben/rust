@@ -93,13 +93,6 @@ pub struct FnParamTooMany {
 }
 
 #[derive(Diagnostic)]
-#[diag(ast_passes_fn_param_c_var_args_only)]
-pub struct FnParamCVarArgsOnly {
-    #[primary_span]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
 #[diag(ast_passes_fn_param_c_var_args_not_last)]
 pub struct FnParamCVarArgsNotLast {
     #[primary_span]
@@ -669,6 +662,7 @@ pub struct ConstAndCVariadic {
 
 #[derive(Diagnostic)]
 #[diag(ast_passes_pattern_in_foreign, code = E0130)]
+// FIXME: deduplicate with rustc_lint (`BuiltinLintDiag::PatternsInFnsWithoutBody`)
 pub struct PatternInForeign {
     #[primary_span]
     #[label]
@@ -677,6 +671,7 @@ pub struct PatternInForeign {
 
 #[derive(Diagnostic)]
 #[diag(ast_passes_pattern_in_bodiless, code = E0642)]
+// FIXME: deduplicate with rustc_lint (`BuiltinLintDiag::PatternsInFnsWithoutBody`)
 pub struct PatternInBodiless {
     #[primary_span]
     #[label]

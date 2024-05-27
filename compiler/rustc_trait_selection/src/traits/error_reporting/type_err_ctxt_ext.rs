@@ -42,11 +42,10 @@ use rustc_middle::ty::print::{
     PrintTraitRefExt as _,
 };
 use rustc_middle::ty::{
-    self, SubtypePredicate, ToPolyTraitRef, ToPredicate, TraitRef, Ty, TyCtxt, TypeFoldable,
-    TypeVisitable, TypeVisitableExt,
+    self, SubtypePredicate, ToPolyTraitRef, TraitRef, Ty, TyCtxt, TypeFoldable, TypeVisitable,
+    TypeVisitableExt, Upcast,
 };
 use rustc_middle::{bug, span_bug};
-use rustc_session::config::DumpSolverProofTree;
 use rustc_session::Limit;
 use rustc_span::def_id::LOCAL_CRATE;
 use rustc_span::symbol::sym;
@@ -56,8 +55,8 @@ use std::fmt;
 use std::iter;
 
 use super::{
-    dump_proof_tree, ArgKind, CandidateSimilarity, FindExprBySpan, FindTypeParam,
-    GetSafeTransmuteErrorAndReason, HasNumericInferVisitor, ImplCandidate, UnsatisfiedConst,
+    ArgKind, CandidateSimilarity, FindExprBySpan, FindTypeParam, GetSafeTransmuteErrorAndReason,
+    HasNumericInferVisitor, ImplCandidate, UnsatisfiedConst,
 };
 
 pub use rustc_infer::traits::error_reporting::*;
@@ -302,9 +301,9 @@ impl<'tcx> TypeErrCtxt<'_, 'tcx> {
         suggest_increasing_limit: bool,
     ) -> !
     where
-        T: ToPredicate<'tcx> + Clone,
+        T: Upcast<TyCtxt<'tcx>, ty::Predicate<'tcx>> + Clone,
     {
-        let predicate = obligation.predicate.clone().to_predicate(self.tcx);
+        let predicate = obligation.predicate.clone().upcast(self.tcx);
         let predicate = self.resolve_vars_if_possible(predicate);
         self.report_overflow_error(
             OverflowCause::TraitSolver(predicate),
@@ -369,13 +368,6 @@ impl<'tcx> TypeErrCtxt<'_, 'tcx> {
         error: &SelectionError<'tcx>,
     ) -> ErrorGuaranteed {
         let tcx = self.tcx;
-
-        if tcx.sess.opts.unstable_opts.next_solver.map(|c| c.dump_tree).unwrap_or_default()
-            == DumpSolverProofTree::OnError
-        {
-            dump_proof_tree(root_obligation, self.infcx);
-        }
-
         let mut span = obligation.cause.span;
 
         let mut err = match *error {
@@ -422,6 +414,7 @@ impl<'tcx> TypeErrCtxt<'_, 'tcx> {
                     ty::PredicateKind::Clause(ty::ClauseKind::Trait(trait_predicate)) => {
                         let trait_predicate = bound_predicate.rebind(trait_predicate);
                         let trait_predicate = self.resolve_vars_if_possible(trait_predicate);
+                        let trait_predicate = self.apply_do_not_recommend(trait_predicate, &mut obligation);
 
                         // Let's use the root obligation as the main message, when we care about the
                         // most general case ("X doesn't implement Pattern<'_>") over the case that
@@ -1003,6 +996,34 @@ impl<'tcx> TypeErrCtxt<'_, 'tcx> {
         err.emit()
     }
 
+    fn apply_do_not_recommend(
+        &self,
+        mut trait_predicate: ty::Binder<'tcx, ty::TraitPredicate<'tcx>>,
+        obligation: &'_ mut PredicateObligation<'tcx>,
+    ) -> ty::Binder<'tcx, ty::TraitPredicate<'tcx>> {
+        let mut base_cause = obligation.cause.code().clone();
+        loop {
+            if let ObligationCauseCode::ImplDerived(ref c) = base_cause {
+                if self.tcx.has_attrs_with_path(
+                    c.impl_or_alias_def_id,
+                    &[sym::diagnostic, sym::do_not_recommend],
+                ) {
+                    let code = (*c.derived.parent_code).clone();
+                    obligation.cause.map_code(|_| code);
+                    obligation.predicate = c.derived.parent_trait_pred.upcast(self.tcx);
+                    trait_predicate = c.derived.parent_trait_pred.clone();
+                }
+            }
+            if let Some((parent_cause, _parent_pred)) = base_cause.parent() {
+                base_cause = parent_cause.clone();
+            } else {
+                break;
+            }
+        }
+
+        trait_predicate
+    }
+
     fn emit_specialized_closure_kind_error(
         &self,
         obligation: &PredicateObligation<'tcx>,
@@ -1417,7 +1438,7 @@ impl<'tcx> TypeErrCtxt<'_, 'tcx> {
         };
 
         let mut code = obligation.cause.code();
-        let mut pred = obligation.predicate.to_opt_poly_trait_pred();
+        let mut pred = obligation.predicate.as_trait_clause();
         while let Some((next_code, next_pred)) = code.parent() {
             if let Some(pred) = pred {
                 self.enter_forall(pred, |pred| {
@@ -1481,16 +1502,16 @@ impl<'tcx> TypeErrCtxt<'_, 'tcx> {
             return true;
         }
 
-        if let Some(error) = error.to_opt_poly_trait_pred() {
+        if let Some(error) = error.as_trait_clause() {
             self.enter_forall(error, |error| {
                 elaborate(self.tcx, std::iter::once(cond))
-                    .filter_map(|implied| implied.to_opt_poly_trait_pred())
+                    .filter_map(|implied| implied.as_trait_clause())
                     .any(|implied| self.can_match_trait(error, implied))
             })
-        } else if let Some(error) = error.to_opt_poly_projection_pred() {
+        } else if let Some(error) = error.as_projection_clause() {
             self.enter_forall(error, |error| {
                 elaborate(self.tcx, std::iter::once(cond))
-                    .filter_map(|implied| implied.to_opt_poly_projection_pred())
+                    .filter_map(|implied| implied.as_projection_clause())
                     .any(|implied| self.can_match_projection(error, implied))
             })
         } else {
@@ -1500,12 +1521,6 @@ impl<'tcx> TypeErrCtxt<'_, 'tcx> {
 
     #[instrument(skip(self), level = "debug")]
     fn report_fulfillment_error(&self, error: &FulfillmentError<'tcx>) -> ErrorGuaranteed {
-        if self.tcx.sess.opts.unstable_opts.next_solver.map(|c| c.dump_tree).unwrap_or_default()
-            == DumpSolverProofTree::OnError
-        {
-            dump_proof_tree(&error.root_obligation, self.infcx);
-        }
-
         match error.code {
             FulfillmentErrorCode::Select(ref selection_error) => self.report_selection_error(
                 error.obligation.clone(),
@@ -2415,8 +2430,8 @@ impl<'tcx> TypeErrCtxt<'_, 'tcx> {
                         return e;
                     }
                     err.note(format!("cannot satisfy `{predicate}`"));
-                    let impl_candidates = self
-                        .find_similar_impl_candidates(predicate.to_opt_poly_trait_pred().unwrap());
+                    let impl_candidates =
+                        self.find_similar_impl_candidates(predicate.as_trait_clause().unwrap());
                     if impl_candidates.len() < 40 {
                         self.report_similar_impl_candidates(
                             impl_candidates.as_slice(),

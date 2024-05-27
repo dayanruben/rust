@@ -7,7 +7,6 @@ use crate::common::IntPredicate;
 use crate::traits::*;
 use crate::MemFlags;
 
-use rustc_hir as hir;
 use rustc_middle::mir;
 use rustc_middle::ty::cast::{CastTy, IntTy};
 use rustc_middle::ty::layout::{HasTyCtxt, LayoutOf, TyAndLayout};
@@ -18,6 +17,7 @@ use rustc_span::{Span, DUMMY_SP};
 use rustc_target::abi::{self, FieldIdx, FIRST_VARIANT};
 
 use arrayvec::ArrayVec;
+use tracing::{debug, instrument};
 
 impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
     #[instrument(level = "trace", skip(self, bx))]
@@ -121,7 +121,11 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 bx.write_operand_repeatedly(cg_elem, count, dest);
             }
 
-            mir::Rvalue::Aggregate(ref kind, ref operands) => {
+            // This implementation does field projection, so never use it for `RawPtr`,
+            // which will always be fine with the `codegen_rvalue_operand` path below.
+            mir::Rvalue::Aggregate(ref kind, ref operands)
+                if !matches!(**kind, mir::AggregateKind::RawPtr(..)) =>
+            {
                 let (variant_index, variant_dest, active_field_index) = match **kind {
                     mir::AggregateKind::Adt(_, variant_index, _, _, active_field_index) => {
                         let variant_dest = dest.project_downcast(bx, variant_index);
@@ -572,6 +576,22 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 }
             }
 
+            mir::Rvalue::BinaryOp(op_with_overflow, box (ref lhs, ref rhs))
+                if let Some(op) = op_with_overflow.overflowing_to_wrapping() =>
+            {
+                let lhs = self.codegen_operand(bx, lhs);
+                let rhs = self.codegen_operand(bx, rhs);
+                let result = self.codegen_scalar_checked_binop(
+                    bx,
+                    op,
+                    lhs.immediate(),
+                    rhs.immediate(),
+                    lhs.layout.ty,
+                );
+                let val_ty = op.ty(bx.tcx(), lhs.layout.ty, rhs.layout.ty);
+                let operand_ty = Ty::new_tup(bx.tcx(), &[val_ty, bx.tcx().types.bool]);
+                OperandRef { val: result, layout: bx.cx().layout_of(operand_ty) }
+            }
             mir::Rvalue::BinaryOp(op, box (ref lhs, ref rhs)) => {
                 let lhs = self.codegen_operand(bx, lhs);
                 let rhs = self.codegen_operand(bx, rhs);
@@ -599,20 +619,6 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                     val: OperandValue::Immediate(llresult),
                     layout: bx.cx().layout_of(op.ty(bx.tcx(), lhs.layout.ty, rhs.layout.ty)),
                 }
-            }
-            mir::Rvalue::CheckedBinaryOp(op, box (ref lhs, ref rhs)) => {
-                let lhs = self.codegen_operand(bx, lhs);
-                let rhs = self.codegen_operand(bx, rhs);
-                let result = self.codegen_scalar_checked_binop(
-                    bx,
-                    op,
-                    lhs.immediate(),
-                    rhs.immediate(),
-                    lhs.layout.ty,
-                );
-                let val_ty = op.ty(bx.tcx(), lhs.layout.ty, rhs.layout.ty);
-                let operand_ty = Ty::new_tup(bx.tcx(), &[val_ty, bx.tcx().types.bool]);
-                OperandRef { val: result, layout: bx.cx().layout_of(operand_ty) }
             }
 
             mir::Rvalue::UnaryOp(op, ref operand) => {
@@ -890,9 +896,9 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
             | mir::BinOp::Le
             | mir::BinOp::Ge => {
                 if is_float {
-                    bx.fcmp(base::bin_op_to_fcmp_predicate(op.to_hir_binop()), lhs, rhs)
+                    bx.fcmp(base::bin_op_to_fcmp_predicate(op), lhs, rhs)
                 } else {
-                    bx.icmp(base::bin_op_to_icmp_predicate(op.to_hir_binop(), is_signed), lhs, rhs)
+                    bx.icmp(base::bin_op_to_icmp_predicate(op, is_signed), lhs, rhs)
                 }
             }
             mir::BinOp::Cmp => {
@@ -906,16 +912,16 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                     // `PartialOrd`, so only use it in debug for now. Once LLVM can handle it
                     // better (see <https://github.com/llvm/llvm-project/issues/73417>), it'll
                     // be worth trying it in optimized builds as well.
-                    let is_gt = bx.icmp(pred(hir::BinOpKind::Gt), lhs, rhs);
+                    let is_gt = bx.icmp(pred(mir::BinOp::Gt), lhs, rhs);
                     let gtext = bx.zext(is_gt, bx.type_i8());
-                    let is_lt = bx.icmp(pred(hir::BinOpKind::Lt), lhs, rhs);
+                    let is_lt = bx.icmp(pred(mir::BinOp::Lt), lhs, rhs);
                     let ltext = bx.zext(is_lt, bx.type_i8());
                     bx.unchecked_ssub(gtext, ltext)
                 } else {
                     // These operations are those expected by `tests/codegen/integer-cmp.rs`,
                     // from <https://github.com/rust-lang/rust/pull/63767>.
-                    let is_lt = bx.icmp(pred(hir::BinOpKind::Lt), lhs, rhs);
-                    let is_ne = bx.icmp(pred(hir::BinOpKind::Ne), lhs, rhs);
+                    let is_lt = bx.icmp(pred(mir::BinOp::Lt), lhs, rhs);
+                    let is_ne = bx.icmp(pred(mir::BinOp::Ne), lhs, rhs);
                     let ge = bx.select(
                         is_ne,
                         bx.cx().const_i8(Ordering::Greater as i8),
@@ -923,6 +929,11 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                     );
                     bx.select(is_lt, bx.cx().const_i8(Ordering::Less as i8), ge)
                 }
+            }
+            mir::BinOp::AddWithOverflow
+            | mir::BinOp::SubWithOverflow
+            | mir::BinOp::MulWithOverflow => {
+                bug!("{op:?} needs to return a pair, so call codegen_scalar_checked_binop instead")
             }
         }
     }
@@ -1036,7 +1047,6 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
             mir::Rvalue::Cast(..) | // (*)
             mir::Rvalue::ShallowInitBox(..) | // (*)
             mir::Rvalue::BinaryOp(..) |
-            mir::Rvalue::CheckedBinaryOp(..) |
             mir::Rvalue::UnaryOp(..) |
             mir::Rvalue::Discriminant(..) |
             mir::Rvalue::NullaryOp(..) |

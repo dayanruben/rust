@@ -55,9 +55,6 @@ ast_passes_const_without_body =
 ast_passes_constraint_on_negative_bound =
     associated type constraints not allowed on negative bounds
 
-ast_passes_deprecated_where_clause_location =
-    where clause not allowed here
-
 ast_passes_equality_in_where = equality constraints are not yet supported in `where` clauses
     .label = not supported
     .suggestion = if `{$ident}` is an associated type you're trying to set, use the associated type binding syntax
@@ -80,8 +77,6 @@ ast_passes_extern_types_cannot = `type`s inside `extern` blocks cannot have {$de
     .suggestion = remove the {$remove_descr}
     .label = `extern` block begins here
 
-ast_passes_extern_without_abi = extern declarations without an explicit ABI are deprecated
-
 ast_passes_feature_on_non_nightly = `#![feature]` may not be used on the {$channel} release channel
     .suggestion = remove the attribute
     .stable_since = the feature `{$name}` has been stable since `{$since}` and no longer requires an attribute to enable
@@ -96,9 +91,6 @@ ast_passes_fn_body_extern = incorrect function inside `extern` block
 
 ast_passes_fn_param_c_var_args_not_last =
     `...` must be the last argument of a C-variadic function
-
-ast_passes_fn_param_c_var_args_only =
-    C-variadic function must be declared with at least one named argument
 
 ast_passes_fn_param_doc_comment =
     documentation comments cannot be applied to function parameters

@@ -11,7 +11,6 @@ use rustc_data_structures::sync::Lrc;
 use rustc_errors::registry::Registry;
 use rustc_errors::{DiagCtxt, ErrorGuaranteed};
 use rustc_lint::LintStore;
-
 use rustc_middle::ty;
 use rustc_middle::ty::CurrentGcx;
 use rustc_middle::util::Providers;
@@ -28,6 +27,7 @@ use rustc_span::FileName;
 use std::path::PathBuf;
 use std::result;
 use std::sync::Arc;
+use tracing::trace;
 
 pub type Result<T> = result::Result<T, ErrorGuaranteed>;
 
@@ -389,6 +389,7 @@ pub fn run_compiler<R: Send>(config: Config, f: impl FnOnce(&Compiler) -> R + Se
     let hash_kind = config.opts.unstable_opts.src_hash_algorithm(&target);
 
     util::run_in_thread_pool_with_globals(
+        &early_dcx,
         config.opts.edition,
         config.opts.unstable_opts.threads,
         SourceMapInputs { file_loader, path_mapping, hash_kind },

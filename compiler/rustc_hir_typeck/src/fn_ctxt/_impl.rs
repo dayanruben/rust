@@ -1,5 +1,5 @@
 use crate::callee::{self, DeferredCallResolution};
-use crate::errors::CtorIsPrivate;
+use crate::errors::{self, CtorIsPrivate};
 use crate::method::{self, MethodCallee, SelfSource};
 use crate::rvalue_scopes;
 use crate::{BreakableCtxt, Diverges, Expectation, FnCtxt, LoweredTy};
@@ -21,6 +21,7 @@ use rustc_hir_analysis::hir_ty_lowering::{
 use rustc_infer::infer::canonical::{Canonical, OriginalQueryValues, QueryResponse};
 use rustc_infer::infer::error_reporting::TypeAnnotationNeeded::E0282;
 use rustc_infer::infer::{DefineOpaqueTypes, InferResult};
+use rustc_lint::builtin::SELF_CONSTRUCTOR_FROM_OUTER_ITEM;
 use rustc_middle::ty::adjustment::{Adjust, Adjustment, AutoBorrow, AutoBorrowMutability};
 use rustc_middle::ty::error::TypeError;
 use rustc_middle::ty::fold::TypeFoldable;
@@ -33,7 +34,7 @@ use rustc_middle::{bug, span_bug};
 use rustc_session::lint;
 use rustc_span::def_id::LocalDefId;
 use rustc_span::hygiene::DesugaringKind;
-use rustc_span::symbol::{kw, sym, Ident};
+use rustc_span::symbol::{kw, sym};
 use rustc_span::Span;
 use rustc_target::abi::FieldIdx;
 use rustc_trait_selection::traits::error_reporting::TypeErrCtxtExt as _;
@@ -63,19 +64,13 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 debug!("warn_if_unreachable: id={:?} span={:?} kind={}", id, span, kind);
 
                 let msg = format!("unreachable {kind}");
-                self.tcx().node_span_lint(
-                    lint::builtin::UNREACHABLE_CODE,
-                    id,
-                    span,
-                    msg.clone(),
-                    |lint| {
-                        lint.span_label(span, msg).span_label(
-                            orig_span,
-                            custom_note
-                                .unwrap_or("any code following this expression is unreachable"),
-                        );
-                    },
-                )
+                self.tcx().node_span_lint(lint::builtin::UNREACHABLE_CODE, id, span, |lint| {
+                    lint.primary_message(msg.clone());
+                    lint.span_label(span, msg).span_label(
+                        orig_span,
+                        custom_note.unwrap_or("any code following this expression is unreachable"),
+                    );
+                })
             }
         }
     }
@@ -834,6 +829,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 if item_name.name != kw::Empty {
                     if let Some(e) = self.report_method_error(
                         span,
+                        None,
                         ty.normalized,
                         item_name,
                         SelfSource::QPath(qself),
@@ -866,76 +862,6 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         )
     }
 
-    /// Given a function `Node`, return its  `HirId` and `FnDecl` if it exists. Given a closure
-    /// that is the child of a function, return that function's `HirId` and `FnDecl` instead.
-    /// This may seem confusing at first, but this is used in diagnostics for `async fn`,
-    /// for example, where most of the type checking actually happens within a nested closure,
-    /// but we often want access to the parent function's signature.
-    ///
-    /// Otherwise, return false.
-    pub(crate) fn get_node_fn_decl(
-        &self,
-        node: Node<'tcx>,
-    ) -> Option<(LocalDefId, &'tcx hir::FnDecl<'tcx>, Ident, bool)> {
-        match node {
-            Node::Item(&hir::Item {
-                ident,
-                kind: hir::ItemKind::Fn(ref sig, ..),
-                owner_id,
-                ..
-            }) => {
-                // This is less than ideal, it will not suggest a return type span on any
-                // method called `main`, regardless of whether it is actually the entry point,
-                // but it will still present it as the reason for the expected type.
-                Some((owner_id.def_id, &sig.decl, ident, ident.name != sym::main))
-            }
-            Node::TraitItem(&hir::TraitItem {
-                ident,
-                kind: hir::TraitItemKind::Fn(ref sig, ..),
-                owner_id,
-                ..
-            }) => Some((owner_id.def_id, &sig.decl, ident, true)),
-            Node::ImplItem(&hir::ImplItem {
-                ident,
-                kind: hir::ImplItemKind::Fn(ref sig, ..),
-                owner_id,
-                ..
-            }) => Some((owner_id.def_id, &sig.decl, ident, false)),
-            Node::Expr(&hir::Expr {
-                hir_id,
-                kind:
-                    hir::ExprKind::Closure(hir::Closure {
-                        kind: hir::ClosureKind::Coroutine(..), ..
-                    }),
-                ..
-            }) => {
-                let (ident, sig, owner_id) = match self.tcx.parent_hir_node(hir_id) {
-                    Node::Item(&hir::Item {
-                        ident,
-                        kind: hir::ItemKind::Fn(ref sig, ..),
-                        owner_id,
-                        ..
-                    }) => (ident, sig, owner_id),
-                    Node::TraitItem(&hir::TraitItem {
-                        ident,
-                        kind: hir::TraitItemKind::Fn(ref sig, ..),
-                        owner_id,
-                        ..
-                    }) => (ident, sig, owner_id),
-                    Node::ImplItem(&hir::ImplItem {
-                        ident,
-                        kind: hir::ImplItemKind::Fn(ref sig, ..),
-                        owner_id,
-                        ..
-                    }) => (ident, sig, owner_id),
-                    _ => return None,
-                };
-                Some((owner_id.def_id, &sig.decl, ident, ident.name != sym::main))
-            }
-            _ => None,
-        }
-    }
-
     /// Given a `HirId`, return the `HirId` of the enclosing function, its `FnDecl`, and whether a
     /// suggestion can be made, `None` otherwise.
     pub fn get_fn_decl(
@@ -944,10 +870,73 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
     ) -> Option<(LocalDefId, &'tcx hir::FnDecl<'tcx>, bool)> {
         // Get enclosing Fn, if it is a function or a trait method, unless there's a `loop` or
         // `while` before reaching it, as block tail returns are not available in them.
-        self.tcx.hir().get_return_block(blk_id).and_then(|blk_id| {
-            let parent = self.tcx.hir_node(blk_id);
-            self.get_node_fn_decl(parent)
-                .map(|(fn_id, fn_decl, _, is_main)| (fn_id, fn_decl, is_main))
+        self.tcx.hir().get_fn_id_for_return_block(blk_id).and_then(|item_id| {
+            match self.tcx.hir_node(item_id) {
+                Node::Item(&hir::Item {
+                    ident,
+                    kind: hir::ItemKind::Fn(ref sig, ..),
+                    owner_id,
+                    ..
+                }) => {
+                    // This is less than ideal, it will not suggest a return type span on any
+                    // method called `main`, regardless of whether it is actually the entry point,
+                    // but it will still present it as the reason for the expected type.
+                    Some((owner_id.def_id, sig.decl, ident.name != sym::main))
+                }
+                Node::TraitItem(&hir::TraitItem {
+                    kind: hir::TraitItemKind::Fn(ref sig, ..),
+                    owner_id,
+                    ..
+                }) => Some((owner_id.def_id, sig.decl, true)),
+                // FIXME: Suggestable if this is not a trait implementation
+                Node::ImplItem(&hir::ImplItem {
+                    kind: hir::ImplItemKind::Fn(ref sig, ..),
+                    owner_id,
+                    ..
+                }) => Some((owner_id.def_id, sig.decl, false)),
+                Node::Expr(&hir::Expr {
+                    hir_id,
+                    kind: hir::ExprKind::Closure(&hir::Closure { def_id, kind, fn_decl, .. }),
+                    ..
+                }) => {
+                    match kind {
+                        hir::ClosureKind::CoroutineClosure(_) => {
+                            // FIXME(async_closures): Implement this.
+                            return None;
+                        }
+                        hir::ClosureKind::Closure => Some((def_id, fn_decl, true)),
+                        hir::ClosureKind::Coroutine(hir::CoroutineKind::Desugared(
+                            _,
+                            hir::CoroutineSource::Fn,
+                        )) => {
+                            let (ident, sig, owner_id) = match self.tcx.parent_hir_node(hir_id) {
+                                Node::Item(&hir::Item {
+                                    ident,
+                                    kind: hir::ItemKind::Fn(ref sig, ..),
+                                    owner_id,
+                                    ..
+                                }) => (ident, sig, owner_id),
+                                Node::TraitItem(&hir::TraitItem {
+                                    ident,
+                                    kind: hir::TraitItemKind::Fn(ref sig, ..),
+                                    owner_id,
+                                    ..
+                                }) => (ident, sig, owner_id),
+                                Node::ImplItem(&hir::ImplItem {
+                                    ident,
+                                    kind: hir::ImplItemKind::Fn(ref sig, ..),
+                                    owner_id,
+                                    ..
+                                }) => (ident, sig, owner_id),
+                                _ => return None,
+                            };
+                            Some((owner_id.def_id, sig.decl, ident.name != sym::main))
+                        }
+                        _ => None,
+                    }
+                }
+                _ => None,
+            }
         })
     }
 
@@ -1162,6 +1151,43 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 span,
                 tcx.at(span).type_of(impl_def_id).instantiate_identity(),
             );
+
+            // Firstly, check that this SelfCtor even comes from the item we're currently
+            // typechecking. This can happen because we never validated the resolution of
+            // SelfCtors, and when we started doing so, we noticed regressions. After
+            // sufficiently long time, we can remove this check and turn it into a hard
+            // error in `validate_res_from_ribs` -- it's just difficult to tell whether the
+            // self type has any generic types during rustc_resolve, which is what we use
+            // to determine if this is a hard error or warning.
+            if std::iter::successors(Some(self.body_id.to_def_id()), |def_id| {
+                self.tcx.generics_of(def_id).parent
+            })
+            .all(|def_id| def_id != impl_def_id)
+            {
+                let sugg = ty.normalized.ty_adt_def().map(|def| errors::ReplaceWithName {
+                    span: path_span,
+                    name: self.tcx.item_name(def.did()).to_ident_string(),
+                });
+                if ty.raw.has_param() {
+                    let guar = self.tcx.dcx().emit_err(errors::SelfCtorFromOuterItem {
+                        span: path_span,
+                        impl_span: tcx.def_span(impl_def_id),
+                        sugg,
+                    });
+                    return (Ty::new_error(self.tcx, guar), res);
+                } else {
+                    self.tcx.emit_node_span_lint(
+                        SELF_CONSTRUCTOR_FROM_OUTER_ITEM,
+                        hir_id,
+                        path_span,
+                        errors::SelfCtorFromOuterItemLint {
+                            impl_span: tcx.def_span(impl_def_id),
+                            sugg,
+                        },
+                    );
+                }
+            }
+
             match ty.normalized.ty_adt_def() {
                 Some(adt_def) if adt_def.has_ctor() => {
                     let (ctor_kind, ctor_def_id) = adt_def.non_enum_variant().ctor.unwrap();

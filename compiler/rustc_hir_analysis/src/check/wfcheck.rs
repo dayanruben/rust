@@ -20,8 +20,8 @@ use rustc_middle::query::Providers;
 use rustc_middle::ty::print::with_no_trimmed_paths;
 use rustc_middle::ty::trait_def::TraitSpecializationKind;
 use rustc_middle::ty::{
-    self, AdtKind, GenericParamDefKind, ToPredicate, Ty, TyCtxt, TypeFoldable, TypeSuperVisitable,
-    TypeVisitable, TypeVisitableExt, TypeVisitor,
+    self, AdtKind, GenericParamDefKind, Ty, TyCtxt, TypeFoldable, TypeSuperVisitable,
+    TypeVisitable, TypeVisitableExt, TypeVisitor, Upcast,
 };
 use rustc_middle::ty::{GenericArgKind, GenericArgs};
 use rustc_middle::{bug, span_bug};
@@ -432,7 +432,7 @@ fn check_gat_where_clauses(tcx: TyCtxt<'_>, trait_def_id: LocalDefId) {
             }
             let gat_generics = tcx.generics_of(gat_def_id);
             // FIXME(jackh726): we can also warn in the more general case
-            if gat_generics.own_params.is_empty() {
+            if gat_generics.is_own_empty() {
                 continue;
             }
 
@@ -675,17 +675,13 @@ fn gather_gat_bounds<'tcx, T: TypeFoldable<TyCtxt<'tcx>>>(
                 let region_param = gat_generics.param_at(*region_a_idx, tcx);
                 let region_param = ty::Region::new_early_param(
                     tcx,
-                    ty::EarlyParamRegion {
-                        def_id: region_param.def_id,
-                        index: region_param.index,
-                        name: region_param.name,
-                    },
+                    ty::EarlyParamRegion { index: region_param.index, name: region_param.name },
                 );
                 // The predicate we expect to see. (In our example,
                 // `Self: 'me`.)
                 bounds.insert(
                     ty::ClauseKind::TypeOutlives(ty::OutlivesPredicate(ty_param, region_param))
-                        .to_predicate(tcx),
+                        .upcast(tcx),
                 );
             }
         }
@@ -708,21 +704,13 @@ fn gather_gat_bounds<'tcx, T: TypeFoldable<TyCtxt<'tcx>>>(
                 let region_a_param = gat_generics.param_at(*region_a_idx, tcx);
                 let region_a_param = ty::Region::new_early_param(
                     tcx,
-                    ty::EarlyParamRegion {
-                        def_id: region_a_param.def_id,
-                        index: region_a_param.index,
-                        name: region_a_param.name,
-                    },
+                    ty::EarlyParamRegion { index: region_a_param.index, name: region_a_param.name },
                 );
                 // Same for the region.
                 let region_b_param = gat_generics.param_at(*region_b_idx, tcx);
                 let region_b_param = ty::Region::new_early_param(
                     tcx,
-                    ty::EarlyParamRegion {
-                        def_id: region_b_param.def_id,
-                        index: region_b_param.index,
-                        name: region_b_param.name,
-                    },
+                    ty::EarlyParamRegion { index: region_b_param.index, name: region_b_param.name },
                 );
                 // The predicate we expect to see.
                 bounds.insert(
@@ -730,7 +718,7 @@ fn gather_gat_bounds<'tcx, T: TypeFoldable<TyCtxt<'tcx>>>(
                         region_a_param,
                         region_b_param,
                     ))
-                    .to_predicate(tcx),
+                    .upcast(tcx),
                 );
             }
         }
@@ -1350,12 +1338,12 @@ fn check_impl<'tcx>(
                         // We already have a better span.
                         continue;
                     }
-                    if let Some(pred) = obligation.predicate.to_opt_poly_trait_pred()
+                    if let Some(pred) = obligation.predicate.as_trait_clause()
                         && pred.skip_binder().self_ty() == trait_ref.self_ty()
                     {
                         obligation.cause.span = hir_self_ty.span;
                     }
-                    if let Some(pred) = obligation.predicate.to_opt_poly_projection_pred()
+                    if let Some(pred) = obligation.predicate.as_projection_clause()
                         && pred.skip_binder().self_ty() == trait_ref.self_ty()
                     {
                         obligation.cause.span = hir_self_ty.span;
@@ -2101,16 +2089,14 @@ fn lint_redundant_lifetimes<'tcx>(
         }
 
         for &victim in &lifetimes[(idx + 1)..] {
-            // We should only have late-bound lifetimes of the `BrNamed` variety,
-            // since we get these signatures straight from `hir_lowering`. And any
-            // other regions (ReError/ReStatic/etc.) shouldn't matter, since we
+            // All region parameters should have a `DefId` available as:
+            // - Late-bound parameters should be of the`BrNamed` variety,
+            // since we get these signatures straight from `hir_lowering`.
+            // - Early-bound parameters unconditionally have a `DefId` available.
+            //
+            // Any other regions (ReError/ReStatic/etc.) shouldn't matter, since we
             // can't really suggest to remove them.
-            let (ty::ReEarlyParam(ty::EarlyParamRegion { def_id, .. })
-            | ty::ReLateParam(ty::LateParamRegion {
-                bound_region: ty::BoundRegionKind::BrNamed(def_id, _),
-                ..
-            })) = victim.kind()
-            else {
+            let Some(def_id) = victim.opt_param_def_id(tcx, owner_id.to_def_id()) else {
                 continue;
             };
 

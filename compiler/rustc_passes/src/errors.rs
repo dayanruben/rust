@@ -17,12 +17,9 @@ use rustc_span::{Span, Symbol, DUMMY_SP};
 use crate::check_attr::ProcMacroKind;
 use crate::lang_items::Duplicate;
 
-#[derive(Diagnostic)]
+#[derive(LintDiagnostic)]
 #[diag(passes_incorrect_do_not_recommend_location)]
-pub struct IncorrectDoNotRecommendLocation {
-    #[primary_span]
-    pub span: Span,
-}
+pub struct IncorrectDoNotRecommendLocation;
 
 #[derive(LintDiagnostic)]
 #[diag(passes_outer_crate_level_attr)]
@@ -1103,7 +1100,7 @@ pub struct BreakInsideCoroutine<'a> {
 pub struct OutsideLoop<'a> {
     #[primary_span]
     #[label]
-    pub span: Span,
+    pub spans: Vec<Span>,
     pub name: &'a str,
     pub is_break: bool,
     #[subdiagnostic]
@@ -1115,7 +1112,7 @@ pub struct OutsideLoopSuggestion {
     #[suggestion_part(code = "'block: ")]
     pub block_span: Span,
     #[suggestion_part(code = " 'block")]
-    pub break_span: Span,
+    pub break_spans: Vec<Span>,
 }
 
 #[derive(Diagnostic)]

@@ -18,6 +18,7 @@ use rustc_codegen_ssa::back::archive::{
     get_native_object_symbols, try_extract_macho_fat_archive, ArArchiveBuilder,
     ArchiveBuildFailure, ArchiveBuilder, ArchiveBuilderBuilder, UnknownArchiveKind,
 };
+use tracing::trace;
 
 use rustc_session::cstore::DllImport;
 use rustc_session::Session;
@@ -200,21 +201,20 @@ impl ArchiveBuilderBuilder for LlvmArchiveBuilderBuilder {
                 _ => panic!("unsupported arch {}", sess.target.arch),
             };
             let mut dlltool_cmd = std::process::Command::new(&dlltool);
-            dlltool_cmd.args([
-                "-d",
-                def_file_path.to_str().unwrap(),
-                "-D",
-                lib_name,
-                "-l",
-                output_path.to_str().unwrap(),
-                "-m",
-                dlltool_target_arch,
-                "-f",
-                dlltool_target_bitness,
-                "--no-leading-underscore",
-                "--temp-prefix",
-                temp_prefix.to_str().unwrap(),
-            ]);
+            dlltool_cmd
+                .arg("-d")
+                .arg(def_file_path)
+                .arg("-D")
+                .arg(lib_name)
+                .arg("-l")
+                .arg(&output_path)
+                .arg("-m")
+                .arg(dlltool_target_arch)
+                .arg("-f")
+                .arg(dlltool_target_bitness)
+                .arg("--no-leading-underscore")
+                .arg("--temp-prefix")
+                .arg(temp_prefix);
 
             match dlltool_cmd.output() {
                 Err(e) => {

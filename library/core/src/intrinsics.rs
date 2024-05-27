@@ -987,7 +987,7 @@ pub const unsafe fn assume(b: bool) {
 #[unstable(feature = "core_intrinsics", issue = "none")]
 #[rustc_intrinsic]
 #[rustc_nounwind]
-#[cfg_attr(not(bootstrap), miri::intrinsic_fallback_checks_ub)]
+#[cfg_attr(not(bootstrap), miri::intrinsic_fallback_is_spec)]
 pub const fn likely(b: bool) -> bool {
     b
 }
@@ -1007,7 +1007,7 @@ pub const fn likely(b: bool) -> bool {
 #[unstable(feature = "core_intrinsics", issue = "none")]
 #[rustc_intrinsic]
 #[rustc_nounwind]
-#[cfg_attr(not(bootstrap), miri::intrinsic_fallback_checks_ub)]
+#[cfg_attr(not(bootstrap), miri::intrinsic_fallback_is_spec)]
 pub const fn unlikely(b: bool) -> bool {
     b
 }
@@ -1483,10 +1483,10 @@ extern "rust-intrinsic" {
     ///
     /// # Safety
     ///
-    /// Both the starting and resulting pointer must be either in bounds or one
-    /// byte past the end of an allocated object. If either pointer is out of
-    /// bounds or arithmetic overflow occurs then any further use of the
-    /// returned value will result in undefined behavior.
+    /// If the computed offset is non-zero, then both the starting and resulting pointer must be
+    /// either in bounds or at the end of an allocated object. If either pointer is out
+    /// of bounds or arithmetic overflow occurs then any further use of the returned value will
+    /// result in undefined behavior.
     ///
     /// The stabilized version of this intrinsic is [`pointer::offset`].
     #[must_use = "returns a new pointer rather than modifying its argument"]
@@ -1502,7 +1502,7 @@ extern "rust-intrinsic" {
     /// # Safety
     ///
     /// Unlike the `offset` intrinsic, this intrinsic does not restrict the
-    /// resulting pointer to point into or one byte past the end of an allocated
+    /// resulting pointer to point into or at the end of an allocated
     /// object, and it wraps with two's complement arithmetic. The resulting
     /// value is not necessarily valid to be used to actually access memory.
     ///
@@ -1594,6 +1594,12 @@ extern "rust-intrinsic" {
     #[rustc_nounwind]
     pub fn sqrtf64(x: f64) -> f64;
 
+    /// Raises an `f16` to an integer power.
+    ///
+    /// The stabilized version of this intrinsic is
+    /// [`f16::powi`](../../std/primitive.f16.html#method.powi)
+    #[rustc_nounwind]
+    pub fn powif16(a: f16, x: i32) -> f16;
     /// Raises an `f32` to an integer power.
     ///
     /// The stabilized version of this intrinsic is
@@ -1606,6 +1612,12 @@ extern "rust-intrinsic" {
     /// [`f64::powi`](../../std/primitive.f64.html#method.powi)
     #[rustc_nounwind]
     pub fn powif64(a: f64, x: i32) -> f64;
+    /// Raises an `f128` to an integer power.
+    ///
+    /// The stabilized version of this intrinsic is
+    /// [`f128::powi`](../../std/primitive.f128.html#method.powi)
+    #[rustc_nounwind]
+    pub fn powif128(a: f128, x: i32) -> f128;
 
     /// Returns the sine of an `f32`.
     ///
@@ -2471,7 +2483,7 @@ extern "rust-intrinsic" {
 #[rustc_nounwind]
 #[rustc_do_not_const_check]
 #[inline]
-#[cfg_attr(not(bootstrap), miri::intrinsic_fallback_checks_ub)]
+#[cfg_attr(not(bootstrap), miri::intrinsic_fallback_is_spec)]
 pub const fn ptr_guaranteed_cmp<T>(ptr: *const T, other: *const T) -> u8 {
     (ptr == other) as u8
 }
@@ -2736,7 +2748,7 @@ pub const fn ub_checks() -> bool {
 #[unstable(feature = "core_intrinsics", issue = "none")]
 #[rustc_nounwind]
 #[rustc_intrinsic]
-#[cfg_attr(not(bootstrap), miri::intrinsic_fallback_checks_ub)]
+#[cfg_attr(not(bootstrap), miri::intrinsic_fallback_is_spec)]
 pub const unsafe fn const_allocate(_size: usize, _align: usize) -> *mut u8 {
     // const eval overrides this function, but runtime code for now just returns null pointers.
     // See <https://github.com/rust-lang/rust/issues/93935>.
@@ -2757,7 +2769,7 @@ pub const unsafe fn const_allocate(_size: usize, _align: usize) -> *mut u8 {
 #[unstable(feature = "core_intrinsics", issue = "none")]
 #[rustc_nounwind]
 #[rustc_intrinsic]
-#[cfg_attr(not(bootstrap), miri::intrinsic_fallback_checks_ub)]
+#[cfg_attr(not(bootstrap), miri::intrinsic_fallback_is_spec)]
 pub const unsafe fn const_deallocate(_ptr: *mut u8, _size: usize, _align: usize) {
     // Runtime NOP
 }

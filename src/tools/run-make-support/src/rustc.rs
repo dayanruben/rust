@@ -64,6 +64,12 @@ impl Rustc {
         self
     }
 
+    /// Specify a specific optimization level.
+    pub fn opt_level(&mut self, option: &str) -> &mut Self {
+        self.cmd.arg(format!("-Copt-level={option}"));
+        self
+    }
+
     /// Specify type(s) of output files to generate.
     pub fn emit(&mut self, kinds: &str) -> &mut Self {
         self.cmd.arg(format!("--emit={kinds}"));
@@ -150,9 +156,16 @@ impl Rustc {
         self
     }
 
-    /// Add a directory to the library search path. Equivalent to `-L`` in rustc.
+    /// Add a directory to the library search path. Equivalent to `-L` in rustc.
     pub fn library_search_path<P: AsRef<Path>>(&mut self, path: P) -> &mut Self {
         self.cmd.arg("-L");
+        self.cmd.arg(path.as_ref());
+        self
+    }
+
+    /// Override the system root. Equivalent to `--sysroot` in rustc.
+    pub fn sysroot<P: AsRef<Path>>(&mut self, path: P) -> &mut Self {
+        self.cmd.arg("--sysroot");
         self.cmd.arg(path.as_ref());
         self
     }

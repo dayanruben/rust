@@ -35,7 +35,7 @@ use rustc_infer::infer::DefineOpaqueTypes;
 use rustc_middle::traits::select::OverflowError;
 use rustc_middle::ty::fold::TypeFoldable;
 use rustc_middle::ty::visit::{MaxUniverse, TypeVisitable, TypeVisitableExt};
-use rustc_middle::ty::{self, Term, ToPredicate, Ty, TyCtxt};
+use rustc_middle::ty::{self, Term, Ty, TyCtxt, Upcast};
 use rustc_span::symbol::sym;
 
 pub use rustc_middle::traits::Reveal;
@@ -538,7 +538,7 @@ fn normalize_to_error<'a, 'tcx>(
         cause,
         recursion_depth: depth,
         param_env,
-        predicate: trait_ref.to_predicate(selcx.tcx()),
+        predicate: trait_ref.upcast(selcx.tcx()),
     };
     Normalized { value: new_value, obligations: vec![trait_obligation] }
 }
@@ -877,7 +877,7 @@ fn assemble_candidates_from_object_ty<'cx, 'tcx>(
     let env_predicates = data
         .projection_bounds()
         .filter(|bound| bound.item_def_id() == obligation.predicate.def_id)
-        .map(|p| p.with_self_ty(tcx, object_ty).to_predicate(tcx));
+        .map(|p| p.with_self_ty(tcx, object_ty).upcast(tcx));
 
     assemble_candidates_from_predicates(
         selcx,
@@ -1712,7 +1712,7 @@ fn confirm_closure_candidate<'cx, 'tcx>(
                     [sig.tupled_inputs_ty],
                     output_ty,
                     sig.c_variadic,
-                    sig.unsafety,
+                    sig.safety,
                     sig.abi,
                 )
             })
@@ -2097,7 +2097,7 @@ fn confirm_impl_candidate<'cx, 'tcx>(
     let args = translate_args(selcx.infcx, param_env, impl_def_id, args, assoc_ty.defining_node);
     let ty = tcx.type_of(assoc_ty.item.def_id);
     let is_const = matches!(tcx.def_kind(assoc_ty.item.def_id), DefKind::AssocConst);
-    let term: ty::EarlyBinder<ty::Term<'tcx>> = if is_const {
+    let term: ty::EarlyBinder<'tcx, ty::Term<'tcx>> = if is_const {
         let did = assoc_ty.item.def_id;
         let identity_args = crate::traits::GenericArgs::identity_for_item(tcx, did);
         let uv = ty::UnevaluatedConst::new(did, identity_args);

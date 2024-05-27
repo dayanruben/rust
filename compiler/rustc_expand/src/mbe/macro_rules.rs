@@ -79,11 +79,10 @@ impl<'a> ParserAnyMacro<'a> {
         // but `m!()` is allowed in expression positions (cf. issue #34706).
         if kind == AstFragmentKind::Expr && parser.token == token::Semi {
             if is_local {
-                parser.psess.buffer_lint_with_diagnostic(
+                parser.psess.buffer_lint(
                     SEMICOLON_IN_EXPRESSIONS_FROM_MACROS,
                     parser.token.span,
                     lint_node_id,
-                    "trailing semicolon in macro used in expression position",
                     BuiltinLintDiag::TrailingMacro(is_trailing_mac, macro_ident),
                 );
             }
@@ -167,6 +166,11 @@ pub(super) trait Tracker<'matcher> {
     fn recovery() -> Recovery {
         Recovery::Forbidden
     }
+
+    fn set_expected_token(&mut self, _tok: &'matcher Token) {}
+    fn get_expected_token(&self) -> Option<&'matcher Token> {
+        None
+    }
 }
 
 /// A noop tracker that is used in the hot path of the expansion, has zero overhead thanks to
@@ -219,7 +223,8 @@ fn expand_macro<'cx>(
             let arm_span = rhses[i].span();
 
             // rhs has holes ( `$id` and `$(...)` that need filled)
-            let tts = match transcribe(cx, &named_matches, rhs, rhs_span, transparency) {
+            let id = cx.current_expansion.id;
+            let tts = match transcribe(psess, &named_matches, rhs, rhs_span, transparency, id) {
                 Ok(tts) => tts,
                 Err(err) => {
                     let guar = err.emit();
@@ -447,16 +452,14 @@ pub fn compile_declarative_macro(
                 // For this we need to reclone the macro body as the previous parser consumed it.
                 let retry_parser = create_parser();
 
-                let parse_result = tt_parser.parse_tt(
-                    &mut Cow::Owned(retry_parser),
-                    &argument_gram,
-                    &mut diagnostics::FailureForwarder,
-                );
+                let mut track = diagnostics::FailureForwarder::new();
+                let parse_result =
+                    tt_parser.parse_tt(&mut Cow::Owned(retry_parser), &argument_gram, &mut track);
                 let Failure((token, _, msg)) = parse_result else {
                     unreachable!("matcher returned something other than Failure after retry");
                 };
 
-                let s = parse_failure_msg(&token);
+                let s = parse_failure_msg(&token, track.get_expected_token());
                 let sp = token.span.substitute_dummy(def.span);
                 let mut err = sess.dcx().struct_span_err(sp, s);
                 err.span_label(sp, msg);
@@ -1151,11 +1154,10 @@ fn check_matcher_core<'tt>(
                             name,
                             Some(NonterminalKind::PatParam { inferred: false }),
                         ));
-                        sess.psess.buffer_lint_with_diagnostic(
+                        sess.psess.buffer_lint(
                             RUST_2021_INCOMPATIBLE_OR_PATTERNS,
                             span,
                             ast::CRATE_NODE_ID,
-                            "the meaning of the `pat` fragment specifier is changing in Rust 2021, which may affect this macro",
                             BuiltinLintDiag::OrPatternsBackCompat(span, suggestion),
                         );
                     }
@@ -1290,7 +1292,7 @@ fn is_in_follow(tok: &mbe::TokenTree, kind: NonterminalKind) -> IsInFollow {
                 // maintain
                 IsInFollow::Yes
             }
-            NonterminalKind::Stmt | NonterminalKind::Expr => {
+            NonterminalKind::Stmt | NonterminalKind::Expr | NonterminalKind::Expr2021 => {
                 const TOKENS: &[&str] = &["`=>`", "`,`", "`;`"];
                 match tok {
                     TokenTree::Token(token) => match token.kind {

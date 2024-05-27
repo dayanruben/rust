@@ -14,6 +14,7 @@ use rustc_target::abi::call::{
 };
 use rustc_target::abi::*;
 use rustc_target::spec::abi::Abi as SpecAbi;
+use tracing::debug;
 
 use std::iter;
 
@@ -37,7 +38,7 @@ fn fn_sig_for_fn_abi<'tcx>(
             [],
             tcx.thread_local_ptr_ty(instance.def_id()),
             false,
-            hir::Unsafety::Normal,
+            hir::Safety::Safe,
             rustc_target::spec::abi::Abi::Unadjusted,
         ));
     }
@@ -96,7 +97,7 @@ fn fn_sig_for_fn_abi<'tcx>(
                     iter::once(env_ty).chain(sig.inputs().iter().cloned()),
                     sig.output(),
                     sig.c_variadic,
-                    sig.unsafety,
+                    sig.safety,
                     sig.abi,
                 ),
                 bound_vars,
@@ -150,7 +151,7 @@ fn fn_sig_for_fn_abi<'tcx>(
                         args.as_coroutine_closure().coroutine_captures_by_ref_ty(),
                     ),
                     sig.c_variadic,
-                    sig.unsafety,
+                    sig.safety,
                     sig.abi,
                 ),
                 bound_vars,
@@ -301,7 +302,7 @@ fn fn_sig_for_fn_abi<'tcx>(
                     [env_ty, resume_ty],
                     ret_ty,
                     false,
-                    hir::Unsafety::Normal,
+                    hir::Safety::Safe,
                     rustc_target::spec::abi::Abi::Rust,
                 )
             } else {
@@ -310,7 +311,7 @@ fn fn_sig_for_fn_abi<'tcx>(
                     [env_ty],
                     ret_ty,
                     false,
-                    hir::Unsafety::Normal,
+                    hir::Safety::Safe,
                     rustc_target::spec::abi::Abi::Rust,
                 )
             };

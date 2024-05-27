@@ -18,6 +18,7 @@ use rustc_middle::ty::{
     GenericArgsRef, Ty, TyCtxt, UnusedGenericParams,
 };
 use rustc_span::symbol::sym;
+use tracing::{debug, instrument};
 
 use crate::errors::UnusedGenericParamsHint;
 
@@ -51,7 +52,7 @@ fn unused_generic_params<'tcx>(
     debug!(?generics);
 
     // Exit early when there are no parameters to be unused.
-    if generics.count() == 0 {
+    if generics.is_empty() {
         return UnusedGenericParams::new_all_used();
     }
 

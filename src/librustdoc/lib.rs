@@ -8,7 +8,6 @@
 #![feature(if_let_guard)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(iter_intersperse)]
-#![feature(lazy_cell)]
 #![feature(let_chains)]
 #![feature(never_type)]
 #![feature(round_char_boundary)]
@@ -730,10 +729,10 @@ fn main_args(
         core::new_dcx(options.error_format, None, options.diagnostic_width, &options.unstable_opts);
 
     match (options.should_test, options.markdown_input()) {
-        (true, true) => return wrap_return(&diag, markdown::test(options)),
-        (true, false) => return doctest::run(&diag, options),
-        (false, true) => {
-            let input = options.input.clone();
+        (true, Some(_)) => return wrap_return(&diag, markdown::test(options)),
+        (true, None) => return doctest::run(&diag, options),
+        (false, Some(input)) => {
+            let input = input.to_owned();
             let edition = options.edition;
             let config = core::create_config(options, &render_options, using_internal_features);
 
@@ -747,7 +746,7 @@ fn main_args(
                 }),
             );
         }
-        (false, false) => {}
+        (false, None) => {}
     }
 
     // need to move these items separately because we lose them by the time the closure is called,

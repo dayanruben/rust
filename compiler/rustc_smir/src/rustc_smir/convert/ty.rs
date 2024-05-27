@@ -112,8 +112,8 @@ impl<'tcx> Stable<'tcx> for ty::adjustment::PointerCoercion {
         match self {
             PointerCoercion::ReifyFnPointer => stable_mir::mir::PointerCoercion::ReifyFnPointer,
             PointerCoercion::UnsafeFnPointer => stable_mir::mir::PointerCoercion::UnsafeFnPointer,
-            PointerCoercion::ClosureFnPointer(unsafety) => {
-                stable_mir::mir::PointerCoercion::ClosureFnPointer(unsafety.stable(tables))
+            PointerCoercion::ClosureFnPointer(safety) => {
+                stable_mir::mir::PointerCoercion::ClosureFnPointer(safety.stable(tables))
             }
             PointerCoercion::MutToConstPointer => {
                 stable_mir::mir::PointerCoercion::MutToConstPointer
@@ -194,7 +194,7 @@ where
     }
 }
 
-impl<'tcx, S, V> Stable<'tcx> for ty::EarlyBinder<S>
+impl<'tcx, S, V> Stable<'tcx> for ty::EarlyBinder<'tcx, S>
 where
     S: Stable<'tcx, T = V>,
 {
@@ -215,7 +215,7 @@ impl<'tcx> Stable<'tcx> for ty::FnSig<'tcx> {
         FnSig {
             inputs_and_output: self.inputs_and_output.iter().map(|ty| ty.stable(tables)).collect(),
             c_variadic: self.c_variadic,
-            unsafety: self.unsafety.stable(tables),
+            safety: self.safety.stable(tables),
             abi: self.abi.stable(tables),
         }
     }
@@ -499,12 +499,13 @@ impl<'tcx> Stable<'tcx> for ty::TraitDef {
 
         TraitDecl {
             def_id: tables.trait_def(self.def_id),
-            unsafety: self.unsafety.stable(tables),
+            safety: self.safety.stable(tables),
             paren_sugar: self.paren_sugar,
             has_auto_impl: self.has_auto_impl,
             is_marker: self.is_marker,
             is_coinductive: self.is_coinductive,
             skip_array_during_method_dispatch: self.skip_array_during_method_dispatch,
+            skip_boxed_slice_during_method_dispatch: self.skip_boxed_slice_during_method_dispatch,
             specialization_kind: self.specialization_kind.stable(tables),
             must_implement_one_of: self
                 .must_implement_one_of
@@ -706,12 +707,11 @@ impl<'tcx> Stable<'tcx> for ty::TraitPredicate<'tcx> {
     }
 }
 
-impl<'tcx, A, B, U, V> Stable<'tcx> for ty::OutlivesPredicate<A, B>
+impl<'tcx, T> Stable<'tcx> for ty::OutlivesPredicate<'tcx, T>
 where
-    A: Stable<'tcx, T = U>,
-    B: Stable<'tcx, T = V>,
+    T: Stable<'tcx>,
 {
-    type T = stable_mir::ty::OutlivesPredicate<U, V>;
+    type T = stable_mir::ty::OutlivesPredicate<T::T, Region>;
 
     fn stable(&self, tables: &mut Tables<'_>) -> Self::T {
         let ty::OutlivesPredicate(a, b) = self;
@@ -771,7 +771,6 @@ impl<'tcx> Stable<'tcx> for ty::RegionKind<'tcx> {
         use stable_mir::ty::{BoundRegion, EarlyParamRegion, RegionKind};
         match self {
             ty::ReEarlyParam(early_reg) => RegionKind::ReEarlyParam(EarlyParamRegion {
-                def_id: tables.region_def(early_reg.def_id),
                 index: early_reg.index,
                 name: early_reg.name.to_string(),
             }),

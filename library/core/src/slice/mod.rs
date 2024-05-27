@@ -4531,23 +4531,22 @@ impl<T, const N: usize> [[T; N]] {
     /// # Examples
     ///
     /// ```
-    /// #![feature(slice_flatten)]
-    ///
-    /// assert_eq!([[1, 2, 3], [4, 5, 6]].flatten(), &[1, 2, 3, 4, 5, 6]);
+    /// assert_eq!([[1, 2, 3], [4, 5, 6]].as_flattened(), &[1, 2, 3, 4, 5, 6]);
     ///
     /// assert_eq!(
-    ///     [[1, 2, 3], [4, 5, 6]].flatten(),
-    ///     [[1, 2], [3, 4], [5, 6]].flatten(),
+    ///     [[1, 2, 3], [4, 5, 6]].as_flattened(),
+    ///     [[1, 2], [3, 4], [5, 6]].as_flattened(),
     /// );
     ///
     /// let slice_of_empty_arrays: &[[i32; 0]] = &[[], [], [], [], []];
-    /// assert!(slice_of_empty_arrays.flatten().is_empty());
+    /// assert!(slice_of_empty_arrays.as_flattened().is_empty());
     ///
     /// let empty_slice_of_arrays: &[[u32; 10]] = &[];
-    /// assert!(empty_slice_of_arrays.flatten().is_empty());
+    /// assert!(empty_slice_of_arrays.as_flattened().is_empty());
     /// ```
-    #[unstable(feature = "slice_flatten", issue = "95629")]
-    pub const fn flatten(&self) -> &[T] {
+    #[stable(feature = "slice_flatten", since = "CURRENT_RUSTC_VERSION")]
+    #[rustc_const_unstable(feature = "const_slice_flatten", issue = "95629")]
+    pub const fn as_flattened(&self) -> &[T] {
         let len = if T::IS_ZST {
             self.len().checked_mul(N).expect("slice len overflow")
         } else {
@@ -4572,8 +4571,6 @@ impl<T, const N: usize> [[T; N]] {
     /// # Examples
     ///
     /// ```
-    /// #![feature(slice_flatten)]
-    ///
     /// fn add_5_to_all(slice: &mut [i32]) {
     ///     for i in slice {
     ///         *i += 5;
@@ -4581,11 +4578,11 @@ impl<T, const N: usize> [[T; N]] {
     /// }
     ///
     /// let mut array = [[1, 2, 3], [4, 5, 6], [7, 8, 9]];
-    /// add_5_to_all(array.flatten_mut());
+    /// add_5_to_all(array.as_flattened_mut());
     /// assert_eq!(array, [[6, 7, 8], [9, 10, 11], [12, 13, 14]]);
     /// ```
-    #[unstable(feature = "slice_flatten", issue = "95629")]
-    pub fn flatten_mut(&mut self) -> &mut [T] {
+    #[stable(feature = "slice_flatten", since = "CURRENT_RUSTC_VERSION")]
+    pub fn as_flattened_mut(&mut self) -> &mut [T] {
         let len = if T::IS_ZST {
             self.len().checked_mul(N).expect("slice len overflow")
         } else {

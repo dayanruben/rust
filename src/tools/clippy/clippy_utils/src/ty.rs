@@ -9,7 +9,7 @@ use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 use rustc_hir as hir;
 use rustc_hir::def::{CtorKind, CtorOf, DefKind, Res};
 use rustc_hir::def_id::DefId;
-use rustc_hir::{Expr, FnDecl, LangItem, TyKind, Unsafety};
+use rustc_hir::{Expr, FnDecl, Safety, LangItem, TyKind};
 use rustc_infer::infer::TyCtxtInferExt;
 use rustc_lint::LateContext;
 use rustc_middle::mir::interpret::Scalar;
@@ -18,7 +18,7 @@ use rustc_middle::traits::EvaluationResult;
 use rustc_middle::ty::layout::ValidityRequirement;
 use rustc_middle::ty::{
     self, AdtDef, AliasTy, AssocKind, Binder, BoundRegion, FnSig, GenericArg, GenericArgKind, GenericArgsRef,
-    GenericParamDefKind, IntTy, ParamEnv, Region, RegionKind, ToPredicate, TraitRef, Ty, TyCtxt,
+    GenericParamDefKind, IntTy, ParamEnv, Region, RegionKind, Upcast, TraitRef, Ty, TyCtxt,
     TypeSuperVisitable, TypeVisitable, TypeVisitableExt, TypeVisitor, UintTy, VariantDef, VariantDiscr,
 };
 use rustc_span::symbol::Ident;
@@ -273,11 +273,7 @@ pub fn implements_trait_with_env_from_iter<'tcx>(
     let infcx = tcx.infer_ctxt().build();
     let args = args
         .into_iter()
-        .map(|arg| {
-            arg.into().unwrap_or_else(|| {
-                infcx.next_ty_var(DUMMY_SP).into()
-            })
-        })
+        .map(|arg| arg.into().unwrap_or_else(|| infcx.next_ty_var(DUMMY_SP).into()))
         .collect::<Vec<_>>();
 
     // If an effect arg was not specified, we need to specify it.
@@ -311,7 +307,7 @@ pub fn implements_trait_with_env_from_iter<'tcx>(
         cause: ObligationCause::dummy(),
         param_env,
         recursion_depth: 0,
-        predicate: Binder::dummy(trait_ref).to_predicate(tcx),
+        predicate: trait_ref.upcast(tcx),
     };
     infcx
         .evaluate_obligation(&obligation)
@@ -562,7 +558,7 @@ pub fn peel_mid_ty_refs_is_mutable(ty: Ty<'_>) -> (Ty<'_>, usize, Mutability) {
 /// Returns `true` if the given type is an `unsafe` function.
 pub fn type_is_unsafe_function<'tcx>(cx: &LateContext<'tcx>, ty: Ty<'tcx>) -> bool {
     match ty.kind() {
-        ty::FnDef(..) | ty::FnPtr(_) => ty.fn_sig(cx.tcx).unsafety() == Unsafety::Unsafe,
+        ty::FnDef(..) | ty::FnPtr(_) => ty.fn_sig(cx.tcx).safety() == Safety::Unsafe,
         _ => false,
     }
 }
@@ -795,7 +791,8 @@ fn sig_from_bounds<'tcx>(
                 inputs = Some(i);
             },
             ty::ClauseKind::Projection(p)
-                if Some(p.projection_term.def_id) == lang_items.fn_once_output() && p.projection_term.self_ty() == ty =>
+                if Some(p.projection_term.def_id) == lang_items.fn_once_output()
+                    && p.projection_term.self_ty() == ty =>
             {
                 if output.is_some() {
                     // Multiple different fn trait impls. Is this even allowed?
@@ -956,11 +953,7 @@ pub struct AdtVariantInfo {
 
 impl AdtVariantInfo {
     /// Returns ADT variants ordered by size
-    pub fn new<'tcx>(
-        cx: &LateContext<'tcx>,
-        adt: AdtDef<'tcx>,
-        subst: GenericArgsRef<'tcx>
-    ) -> Vec<Self> {
+    pub fn new<'tcx>(cx: &LateContext<'tcx>, adt: AdtDef<'tcx>, subst: GenericArgsRef<'tcx>) -> Vec<Self> {
         let mut variants_size = adt
             .variants()
             .iter()

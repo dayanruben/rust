@@ -27,7 +27,6 @@ use std::ops::{Deref, DerefMut};
 use thin_vec::thin_vec;
 
 use crate::errors;
-use crate::fluent_generated as fluent;
 
 /// Is `self` allowed semantically as the first parameter in an `FnDecl`?
 enum SelfSemantic {
@@ -365,7 +364,7 @@ impl<'a> AstValidator<'a> {
 
     fn check_fn_decl(&self, fn_decl: &FnDecl, self_semantic: SelfSemantic) {
         self.check_decl_num_args(fn_decl);
-        self.check_decl_cvaradic_pos(fn_decl);
+        self.check_decl_cvariadic_pos(fn_decl);
         self.check_decl_attrs(fn_decl);
         self.check_decl_self_param(fn_decl, self_semantic);
     }
@@ -380,13 +379,11 @@ impl<'a> AstValidator<'a> {
         }
     }
 
-    fn check_decl_cvaradic_pos(&self, fn_decl: &FnDecl) {
+    /// Emits an error if a function declaration has a variadic parameter in the
+    /// beginning or middle of parameter list.
+    /// Example: `fn foo(..., x: i32)` will emit an error.
+    fn check_decl_cvariadic_pos(&self, fn_decl: &FnDecl) {
         match &*fn_decl.inputs {
-            [Param { ty, span, .. }] => {
-                if let TyKind::CVarArgs = ty.kind {
-                    self.dcx().emit_err(errors::FnParamCVarArgsOnly { span: *span });
-                }
-            }
             [ps @ .., _] => {
                 for Param { ty, span, .. } in ps {
                     if let TyKind::CVarArgs = ty.kind {
@@ -521,7 +518,7 @@ impl<'a> AstValidator<'a> {
     fn check_foreign_fn_headerless(
         &self,
         // Deconstruct to ensure exhaustiveness
-        FnHeader { unsafety, coroutine_kind, constness, ext }: FnHeader,
+        FnHeader { safety, coroutine_kind, constness, ext }: FnHeader,
     ) {
         let report_err = |span| {
             self.dcx().emit_err(errors::FnQualifierInExtern {
@@ -529,9 +526,9 @@ impl<'a> AstValidator<'a> {
                 block: self.current_extern_span(),
             });
         };
-        match unsafety {
-            Unsafe::Yes(span) => report_err(span),
-            Unsafe::No => (),
+        match safety {
+            Safety::Unsafe(span) => report_err(span),
+            Safety::Default => (),
         }
         match coroutine_kind {
             Some(knd) => report_err(knd.span()),
@@ -592,7 +589,7 @@ impl<'a> AstValidator<'a> {
             (Some(FnCtxt::Free), Some(header)) => match header.ext {
                 Extern::Explicit(StrLit { symbol_unescaped: sym::C, .. }, _)
                 | Extern::Implicit(_)
-                    if matches!(header.unsafety, Unsafe::Yes(_)) =>
+                    if matches!(header.safety, Safety::Unsafe(_)) =>
                 {
                     return;
                 }
@@ -766,11 +763,10 @@ impl<'a> AstValidator<'a> {
             .span_to_snippet(span)
             .is_ok_and(|snippet| !snippet.starts_with("#["))
         {
-            self.lint_buffer.buffer_lint_with_diagnostic(
+            self.lint_buffer.buffer_lint(
                 MISSING_ABI,
                 id,
                 span,
-                fluent::ast_passes_extern_without_abi,
                 BuiltinLintDiag::MissingAbi(span, abi::Abi::FALLBACK),
             )
         }
@@ -891,7 +887,7 @@ impl<'a> Visitor<'a> for AstValidator<'a> {
 
         match &item.kind {
             ItemKind::Impl(box Impl {
-                unsafety,
+                safety,
                 polarity,
                 defaultness: _,
                 constness,
@@ -910,7 +906,7 @@ impl<'a> Visitor<'a> for AstValidator<'a> {
                         // which isn't allowed. Not a problem for this obscure, obsolete syntax.
                         this.dcx().emit_fatal(errors::ObsoleteAuto { span: item.span });
                     }
-                    if let (&Unsafe::Yes(span), &ImplPolarity::Negative(sp)) = (unsafety, polarity)
+                    if let (&Safety::Unsafe(span), &ImplPolarity::Negative(sp)) = (safety, polarity)
                     {
                         this.dcx().emit_err(errors::UnsafeNegativeImpl {
                             span: sp.to(t.path.span),
@@ -933,7 +929,7 @@ impl<'a> Visitor<'a> for AstValidator<'a> {
                 return; // Avoid visiting again.
             }
             ItemKind::Impl(box Impl {
-                unsafety,
+                safety,
                 polarity,
                 defaultness,
                 constness,
@@ -956,7 +952,7 @@ impl<'a> Visitor<'a> for AstValidator<'a> {
                         &item.vis,
                         errors::VisibilityNotPermittedNote::IndividualImplItems,
                     );
-                    if let &Unsafe::Yes(span) = unsafety {
+                    if let &Safety::Unsafe(span) = safety {
                         this.dcx().emit_err(errors::InherentImplCannotUnsafe {
                             span: self_ty.span,
                             annotation_span: span,
@@ -1020,13 +1016,13 @@ impl<'a> Visitor<'a> for AstValidator<'a> {
                 walk_list!(self, visit_attribute, &item.attrs);
                 return; // Avoid visiting again.
             }
-            ItemKind::ForeignMod(ForeignMod { abi, unsafety, .. }) => {
+            ItemKind::ForeignMod(ForeignMod { abi, safety, .. }) => {
                 let old_item = mem::replace(&mut self.extern_mod, Some(item));
                 self.visibility_not_permitted(
                     &item.vis,
                     errors::VisibilityNotPermittedNote::IndividualForeignItems,
                 );
-                if let &Unsafe::Yes(span) = unsafety {
+                if let &Safety::Unsafe(span) = safety {
                     self.dcx().emit_err(errors::UnsafeItem { span, kind: "extern block" });
                 }
                 if abi.is_none() {
@@ -1078,8 +1074,8 @@ impl<'a> Visitor<'a> for AstValidator<'a> {
                 walk_list!(self, visit_attribute, &item.attrs);
                 return; // Avoid visiting again
             }
-            ItemKind::Mod(unsafety, mod_kind) => {
-                if let &Unsafe::Yes(span) = unsafety {
+            ItemKind::Mod(safety, mod_kind) => {
+                if let &Safety::Unsafe(span) = safety {
                     self.dcx().emit_err(errors::UnsafeItem { span, kind: "module" });
                 }
                 // Ensure that `path` attributes on modules are recorded as used (cf. issue #35584).
@@ -1428,17 +1424,15 @@ impl<'a> Visitor<'a> for AstValidator<'a> {
             Self::check_decl_no_pat(&sig.decl, |span, ident, mut_ident| {
                 if mut_ident && matches!(ctxt, FnCtxt::Assoc(_)) {
                     if let Some(ident) = ident {
-                        let msg = match ctxt {
-                            FnCtxt::Foreign => fluent::ast_passes_pattern_in_foreign,
-                            _ => fluent::ast_passes_pattern_in_bodiless,
-                        };
-                        let diag = BuiltinLintDiag::PatternsInFnsWithoutBody(span, ident);
-                        self.lint_buffer.buffer_lint_with_diagnostic(
+                        self.lint_buffer.buffer_lint(
                             PATTERNS_IN_FNS_WITHOUT_BODY,
                             id,
                             span,
-                            msg,
-                            diag,
+                            BuiltinLintDiag::PatternsInFnsWithoutBody {
+                                span,
+                                ident,
+                                is_foreign: matches!(ctxt, FnCtxt::Foreign),
+                            },
                         )
                     }
                 } else {
@@ -1510,12 +1504,11 @@ impl<'a> Visitor<'a> for AstValidator<'a> {
                     Some((right, snippet))
                 }
             };
-            self.lint_buffer.buffer_lint_with_diagnostic(
+            self.lint_buffer.buffer_lint(
                 DEPRECATED_WHERE_CLAUSE_LOCATION,
                 item.id,
                 err.span,
-                fluent::ast_passes_deprecated_where_clause_location,
-                BuiltinLintDiag::DeprecatedWhereclauseLocation(sugg),
+                BuiltinLintDiag::DeprecatedWhereclauseLocation(err.span, sugg),
             );
         }
 

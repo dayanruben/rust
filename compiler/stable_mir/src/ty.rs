@@ -1,6 +1,5 @@
 use super::{
-    mir::Safety,
-    mir::{Body, Mutability},
+    mir::{Body, Mutability, Safety},
     with, DefId, Error, Symbol,
 };
 use crate::abi::Layout;
@@ -191,7 +190,6 @@ pub(crate) type DebruijnIndex = u32;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EarlyParamRegion {
-    pub def_id: RegionDef,
     pub index: u32,
     pub name: Symbol,
 }
@@ -622,6 +620,41 @@ impl FnDef {
     pub fn body(&self) -> Option<Body> {
         with(|ctx| ctx.has_body(self.0).then(|| ctx.mir_body(self.0)))
     }
+
+    /// Get the information of the intrinsic if this function is a definition of one.
+    pub fn as_intrinsic(&self) -> Option<IntrinsicDef> {
+        with(|cx| cx.intrinsic(self.def_id()))
+    }
+
+    /// Check if the function is an intrinsic.
+    #[inline]
+    pub fn is_intrinsic(&self) -> bool {
+        self.as_intrinsic().is_some()
+    }
+}
+
+crate_def! {
+    pub IntrinsicDef;
+}
+
+impl IntrinsicDef {
+    /// Returns the plain name of the intrinsic.
+    /// e.g., `transmute` for `core::intrinsics::transmute`.
+    pub fn fn_name(&self) -> Symbol {
+        with(|cx| cx.intrinsic_name(*self))
+    }
+
+    /// Returns whether the intrinsic has no meaningful body and all backends
+    /// need to shim all calls to it.
+    pub fn must_be_overridden(&self) -> bool {
+        with(|cx| cx.intrinsic_must_be_overridden(*self))
+    }
+}
+
+impl From<IntrinsicDef> for FnDef {
+    fn from(def: IntrinsicDef) -> Self {
+        FnDef(def.0)
+    }
 }
 
 crate_def! {
@@ -909,7 +942,7 @@ pub type PolyFnSig = Binder<FnSig>;
 pub struct FnSig {
     pub inputs_and_output: Vec<Ty>,
     pub c_variadic: bool,
-    pub unsafety: Safety,
+    pub safety: Safety,
     pub abi: Abi,
 }
 
@@ -1200,12 +1233,13 @@ pub enum TraitSpecializationKind {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TraitDecl {
     pub def_id: TraitDef,
-    pub unsafety: Safety,
+    pub safety: Safety,
     pub paren_sugar: bool,
     pub has_auto_impl: bool,
     pub is_marker: bool,
     pub is_coinductive: bool,
     pub skip_array_during_method_dispatch: bool,
+    pub skip_boxed_slice_during_method_dispatch: bool,
     pub specialization_kind: TraitSpecializationKind,
     pub must_implement_one_of: Option<Vec<Ident>>,
     pub implement_via_object: bool,
