@@ -450,7 +450,7 @@ impl<'tcx> TypeErrCtxt<'_, 'tcx> {
     }
 
     /// When after several dereferencing, the reference satisfies the trait
-    /// binding. This function provides dereference suggestion for this
+    /// bound. This function provides dereference suggestion for this
     /// specific situation.
     fn suggest_dereferences(
         &self,
@@ -777,7 +777,7 @@ impl<'tcx> TypeErrCtxt<'_, 'tcx> {
     }
 
     /// We tried to apply the bound to an `fn` or closure. Check whether calling it would
-    /// evaluate to a type that *would* satisfy the trait binding. If it would, suggest calling
+    /// evaluate to a type that *would* satisfy the trait bound. If it would, suggest calling
     /// it: `bar(foo)` → `bar(foo())`. This case is *very* likely to be hit if `foo` is `async`.
     fn suggest_fn_call(
         &self,
@@ -907,10 +907,9 @@ impl<'tcx> TypeErrCtxt<'_, 'tcx> {
             span.remove_mark();
         }
         let mut expr_finder = FindExprBySpan::new(span, self.tcx);
-        let Some(body_id) = self.tcx.hir().maybe_body_owned_by(obligation.cause.body_id) else {
+        let Some(body) = self.tcx.hir().maybe_body_owned_by(obligation.cause.body_id) else {
             return;
         };
-        let body = self.tcx.hir().body(body_id);
         expr_finder.visit_expr(body.value);
         let Some(expr) = expr_finder.result else {
             return;
@@ -1241,7 +1240,7 @@ impl<'tcx> TypeErrCtxt<'_, 'tcx> {
 
         let param_env = obligation.param_env;
 
-        // Try to apply the original trait binding obligation by borrowing.
+        // Try to apply the original trait bound by borrowing.
         let mut try_borrowing = |old_pred: ty::PolyTraitPredicate<'tcx>,
                                  blacklist: &[DefId]|
          -> bool {
@@ -1369,12 +1368,11 @@ impl<'tcx> TypeErrCtxt<'_, 'tcx> {
                         // Issue #104961, we need to add parentheses properly for compound expressions
                         // for example, `x.starts_with("hi".to_string() + "you")`
                         // should be `x.starts_with(&("hi".to_string() + "you"))`
-                        let Some(body_id) =
+                        let Some(body) =
                             self.tcx.hir().maybe_body_owned_by(obligation.cause.body_id)
                         else {
                             return false;
                         };
-                        let body = self.tcx.hir().body(body_id);
                         let mut expr_finder = FindExprBySpan::new(span, self.tcx);
                         expr_finder.visit_expr(body.value);
                         let Some(expr) = expr_finder.result else {
@@ -1476,10 +1474,9 @@ impl<'tcx> TypeErrCtxt<'_, 'tcx> {
             span.remove_mark();
         }
         let mut expr_finder = super::FindExprBySpan::new(span, self.tcx);
-        let Some(body_id) = self.tcx.hir().maybe_body_owned_by(obligation.cause.body_id) else {
+        let Some(body) = self.tcx.hir().maybe_body_owned_by(obligation.cause.body_id) else {
             return false;
         };
-        let body = self.tcx.hir().body(body_id);
         expr_finder.visit_expr(body.value);
         let mut maybe_suggest = |suggested_ty, count, suggestions| {
             // Remapping bound vars here
@@ -1805,10 +1802,10 @@ impl<'tcx> TypeErrCtxt<'_, 'tcx> {
             );
         }
 
-        let body = self.tcx.hir().body(self.tcx.hir().body_owned_by(obligation.cause.body_id));
+        let body = self.tcx.hir().body_owned_by(obligation.cause.body_id);
 
         let mut visitor = ReturnsVisitor::default();
-        visitor.visit_body(body);
+        visitor.visit_body(&body);
 
         let mut sugg =
             vec![(span.shrink_to_lo(), "Box<".to_string()), (span.shrink_to_hi(), ">".to_string())];
@@ -2348,13 +2345,11 @@ impl<'tcx> TypeErrCtxt<'_, 'tcx> {
             ?span,
         );
 
-        let coroutine_body = coroutine_did
-            .as_local()
-            .and_then(|def_id| hir.maybe_body_owned_by(def_id))
-            .map(|body_id| hir.body(body_id));
+        let coroutine_body =
+            coroutine_did.as_local().and_then(|def_id| hir.maybe_body_owned_by(def_id));
         let mut visitor = AwaitsVisitor::default();
         if let Some(body) = coroutine_body {
-            visitor.visit_body(body);
+            visitor.visit_body(&body);
         }
         debug!(awaits = ?visitor.awaits);
 
@@ -4748,7 +4743,7 @@ impl<'v> Visitor<'v> for ReturnsVisitor<'v> {
         }
     }
 
-    fn visit_body(&mut self, body: &'v hir::Body<'v>) {
+    fn visit_body(&mut self, body: &hir::Body<'v>) {
         assert!(!self.in_block_tail);
         self.in_block_tail = true;
         hir::intravisit::walk_body(self, body);
@@ -4908,14 +4903,12 @@ pub fn suggest_desugaring_async_fn_to_impl_future_in_trait<'tcx>(
         // `async fn` should always lower to a single bound... but don't ICE.
         return None;
     };
-    let Some(hir::PathSegment { args: Some(generics), .. }) =
-        trait_ref.trait_ref.path.segments.last()
+    let Some(hir::PathSegment { args: Some(args), .. }) = trait_ref.trait_ref.path.segments.last()
     else {
         // desugaring to a single path segment for `Future<...>`.
         return None;
     };
-    let Some(hir::TypeBindingKind::Equality { term: hir::Term::Ty(future_output_ty) }) =
-        generics.bindings.get(0).map(|binding| binding.kind)
+    let Some(future_output_ty) = args.constraints.first().and_then(|constraint| constraint.ty())
     else {
         // Also should never happen.
         return None;
