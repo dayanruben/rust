@@ -12,9 +12,7 @@ use crate::traits::select::IntercrateAmbiguityCause;
 use crate::traits::NormalizeExt;
 use crate::traits::SkipLeakCheck;
 use crate::traits::{util, FulfillmentErrorCode};
-use crate::traits::{
-    Obligation, ObligationCause, PredicateObligation, PredicateObligations, SelectionContext,
-};
+use crate::traits::{Obligation, ObligationCause, PredicateObligation, SelectionContext};
 use rustc_data_structures::fx::FxIndexSet;
 use rustc_errors::{Diag, EmissionGuarantee};
 use rustc_hir::def::DefKind;
@@ -305,7 +303,7 @@ fn equate_impl_headers<'tcx>(
     param_env: ty::ParamEnv<'tcx>,
     impl1: &ty::ImplHeader<'tcx>,
     impl2: &ty::ImplHeader<'tcx>,
-) -> Option<PredicateObligations<'tcx>> {
+) -> Option<Vec<PredicateObligation<'tcx>>> {
     let result =
         match (impl1.trait_ref, impl2.trait_ref) {
             (Some(impl1_ref), Some(impl2_ref)) => infcx
@@ -771,8 +769,8 @@ pub struct UncoveredTyParams<'tcx, T> {
 ///    add "non-blanket" impls without breaking negative reasoning in dependent
 ///    crates. This is the "rebalancing coherence" (RFC 1023) restriction.
 ///
-///    For that, we only a allow crate to perform negative reasoning on
-///    non-local-non-`#[fundamental]` only if there's a local key parameter as per (2).
+///    For that, we only allow a crate to perform negative reasoning on
+///    non-local-non-`#[fundamental]` if there's a local key parameter as per (2).
 ///
 ///    Because we never perform negative reasoning generically (coherence does
 ///    not involve type parameters), this can be interpreted as doing the full

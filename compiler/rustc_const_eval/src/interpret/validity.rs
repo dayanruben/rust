@@ -29,7 +29,7 @@ use rustc_target::abi::{
 use std::hash::Hash;
 
 use super::{
-    err_ub, format_interp_error, machine::AllocMap, throw_ub, AllocId, CheckInAllocMsg,
+    err_ub, format_interp_error, machine::AllocMap, throw_ub, AllocId, AllocKind, CheckInAllocMsg,
     GlobalAlloc, ImmTy, Immediate, InterpCx, InterpResult, MPlaceTy, Machine, MemPlaceMeta, OpTy,
     Pointer, Projectable, Scalar, ValueVisitor,
 };
@@ -343,20 +343,16 @@ impl<'rt, 'tcx, M: Machine<'tcx>> ValidityVisitor<'rt, 'tcx, M> {
         match tail.kind() {
             ty::Dynamic(data, _, ty::Dyn) => {
                 let vtable = meta.unwrap_meta().to_pointer(self.ecx)?;
-                // Make sure it is a genuine vtable pointer.
-                let (_dyn_ty, dyn_trait) = try_validation!(
-                    self.ecx.get_ptr_vtable(vtable),
+                // Make sure it is a genuine vtable pointer for the right trait.
+                try_validation!(
+                    self.ecx.get_ptr_vtable_ty(vtable, Some(data)),
                     self.path,
                     Ub(DanglingIntPointer(..) | InvalidVTablePointer(..)) =>
-                        InvalidVTablePtr { value: format!("{vtable}") }
+                        InvalidVTablePtr { value: format!("{vtable}") },
+                    Ub(InvalidVTableTrait { expected_trait, vtable_trait }) => {
+                        InvalidMetaWrongTrait { expected_trait, vtable_trait: *vtable_trait }
+                    },
                 );
-                // Make sure it is for the right trait.
-                if dyn_trait != data.principal() {
-                    throw_validation_failure!(
-                        self.path,
-                        InvalidMetaWrongTrait { expected_trait: data, vtable_trait: dyn_trait }
-                    );
-                }
             }
             ty::Slice(..) | ty::Str => {
                 let _len = meta.unwrap_meta().to_target_usize(self.ecx)?;
@@ -417,8 +413,6 @@ impl<'rt, 'tcx, M: Machine<'tcx>> ValidityVisitor<'rt, 'tcx, M> {
             Ub(PointerOutOfBounds { .. }) => DanglingPtrOutOfBounds {
                 ptr_kind
             },
-            // This cannot happen during const-eval (because interning already detects
-            // dangling pointers), but it can happen in Miri.
             Ub(PointerUseAfterFree(..)) => DanglingPtrUseAfterFree {
                 ptr_kind,
             },
@@ -497,9 +491,17 @@ impl<'rt, 'tcx, M: Machine<'tcx>> ValidityVisitor<'rt, 'tcx, M> {
                     }
                 }
 
-                // Mutability check.
+                // Dangling and Mutability check.
+                let (size, _align, alloc_kind) = self.ecx.get_alloc_info(alloc_id);
+                if alloc_kind == AllocKind::Dead {
+                    // This can happen for zero-sized references. We can't have *any* references to non-existing
+                    // allocations though, interning rejects them all as the rest of rustc isn't happy with them...
+                    // so we throw an error, even though this isn't really UB.
+                    // A potential future alternative would be to resurrect this as a zero-sized allocation
+                    // (which codegen will then compile to an aligned dummy pointer anyway).
+                    throw_validation_failure!(self.path, DanglingPtrUseAfterFree { ptr_kind });
+                }
                 // If this allocation has size zero, there is no actual mutability here.
-                let (size, _align, _alloc_kind) = self.ecx.get_alloc_info(alloc_id);
                 if size != Size::ZERO {
                     let alloc_actual_mutbl = mutability(self.ecx, alloc_id);
                     // Mutable pointer to immutable memory is no good.
@@ -653,8 +655,8 @@ impl<'rt, 'tcx, M: Machine<'tcx>> ValidityVisitor<'rt, 'tcx, M> {
         let WrappingRange { start, end } = valid_range;
         let max_value = size.unsigned_int_max();
         assert!(end <= max_value);
-        let bits = match scalar.try_to_int() {
-            Ok(int) => int.assert_bits(size),
+        let bits = match scalar.try_to_scalar_int() {
+            Ok(int) => int.to_bits(size),
             Err(_) => {
                 // So this is a pointer then, and casting to an int failed.
                 // Can only happen during CTFE.

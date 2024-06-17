@@ -1,3 +1,4 @@
+use rustc_ast_ir::Movability;
 use smallvec::SmallVec;
 use std::fmt::Debug;
 use std::hash::Hash;
@@ -6,10 +7,11 @@ use std::ops::Deref;
 use crate::fold::TypeFoldable;
 use crate::inherent::*;
 use crate::ir_print::IrPrint;
+use crate::lang_items::TraitSolverLangItem;
 use crate::relate::Relate;
 use crate::solve::inspect::CanonicalGoalEvaluationStep;
 use crate::visit::{Flags, TypeSuperVisitable, TypeVisitable};
-use crate::{self as ty, DebugWithInfcx};
+use crate::{self as ty};
 
 pub trait Interner:
     Sized
@@ -27,24 +29,13 @@ pub trait Interner:
     + IrPrint<ty::FnSig<Self>>
 {
     type DefId: Copy + Debug + Hash + Eq + TypeFoldable<Self>;
+    type LocalDefId: Copy + Debug + Hash + Eq + Into<Self::DefId> + TypeFoldable<Self>;
     type AdtDef: AdtDef<Self>;
 
     type GenericArgs: GenericArgs<Self>;
     type GenericArgsSlice: Copy + Debug + Hash + Eq + Deref<Target = [Self::GenericArg]>;
-    type GenericArg: Copy
-        + DebugWithInfcx<Self>
-        + Hash
-        + Eq
-        + IntoKind<Kind = ty::GenericArgKind<Self>>
-        + TypeVisitable<Self>
-        + Relate<Self>;
-    type Term: Copy
-        + Debug
-        + Hash
-        + Eq
-        + IntoKind<Kind = ty::TermKind<Self>>
-        + TypeFoldable<Self>
-        + Relate<Self>;
+    type GenericArg: GenericArg<Self>;
+    type Term: Term<Self>;
 
     type BoundVarKinds: Copy
         + Debug
@@ -74,11 +65,16 @@ pub trait Interner:
 
     // Things stored inside of tys
     type ErrorGuaranteed: Copy + Debug + Hash + Eq;
-    type BoundExistentialPredicates: Copy + DebugWithInfcx<Self> + Hash + Eq + Relate<Self>;
+    type BoundExistentialPredicates: Copy
+        + Debug
+        + Hash
+        + Eq
+        + Relate<Self>
+        + IntoIterator<Item = ty::Binder<Self, ty::ExistentialPredicate<Self>>>;
     type AllocId: Copy + Debug + Hash + Eq;
-    type Pat: Copy + Debug + Hash + Eq + DebugWithInfcx<Self> + Relate<Self>;
-    type Safety: Safety<Self> + TypeFoldable<Self> + Relate<Self>;
-    type Abi: Abi<Self> + TypeFoldable<Self> + Relate<Self>;
+    type Pat: Copy + Debug + Hash + Eq + Debug + Relate<Self>;
+    type Safety: Safety<Self>;
+    type Abi: Abi<Self>;
 
     // Kinds of consts
     type Const: Const<Self>;
@@ -86,7 +82,7 @@ pub trait Interner:
     type ParamConst: Copy + Debug + Hash + Eq + ParamLike;
     type BoundConst: Copy + Debug + Hash + Eq + BoundVarLike<Self>;
     type ValueConst: Copy + Debug + Hash + Eq;
-    type ExprConst: Copy + DebugWithInfcx<Self> + Hash + Eq + Relate<Self>;
+    type ExprConst: Copy + Debug + Hash + Eq + Relate<Self>;
 
     // Kinds of regions
     type Region: Region<Self>;
@@ -108,7 +104,11 @@ pub trait Interner:
     type GenericsOf: GenericsOf<Self>;
     fn generics_of(self, def_id: Self::DefId) -> Self::GenericsOf;
 
-    type VariancesOf: Copy + Debug + Deref<Target = [ty::Variance]>;
+    type VariancesOf: Copy
+        + Debug
+        + Deref<Target = [ty::Variance]>
+        // FIXME: This is terrible!
+        + IntoIterator<Item: Deref<Target = ty::Variance>>;
     fn variances_of(self, def_id: Self::DefId) -> Self::VariancesOf;
 
     // FIXME: Remove after uplifting `EarlyBinder`
@@ -153,6 +153,38 @@ pub trait Interner:
 
     type Features: Features<Self>;
     fn features(self) -> Self::Features;
+
+    fn bound_coroutine_hidden_types(
+        self,
+        def_id: Self::DefId,
+    ) -> impl IntoIterator<Item = ty::EarlyBinder<Self, ty::Binder<Self, Self::Ty>>>;
+
+    fn fn_sig(
+        self,
+        def_id: Self::DefId,
+    ) -> ty::EarlyBinder<Self, ty::Binder<Self, ty::FnSig<Self>>>;
+
+    fn coroutine_movability(self, def_id: Self::DefId) -> Movability;
+
+    fn coroutine_for_closure(self, def_id: Self::DefId) -> Self::DefId;
+
+    fn generics_require_sized_self(self, def_id: Self::DefId) -> bool;
+
+    fn item_bounds(
+        self,
+        def_id: Self::DefId,
+    ) -> ty::EarlyBinder<Self, impl IntoIterator<Item = Self::Clause>>;
+
+    fn super_predicates_of(
+        self,
+        def_id: Self::DefId,
+    ) -> ty::EarlyBinder<Self, impl IntoIterator<Item = Self::Clause>>;
+
+    fn has_target_features(self, def_id: Self::DefId) -> bool;
+
+    fn require_lang_item(self, lang_item: TraitSolverLangItem) -> Self::DefId;
+
+    fn associated_type_def_ids(self, def_id: Self::DefId) -> impl IntoIterator<Item = Self::DefId>;
 }
 
 /// Imagine you have a function `F: FnOnce(&[T]) -> R`, plus an iterator `iter`

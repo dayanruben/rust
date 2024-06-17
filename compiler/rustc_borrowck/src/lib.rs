@@ -1,7 +1,7 @@
 //! This query borrow-checks the MIR to (further) ensure it is not broken.
 
+// tidy-alphabetical-start
 #![allow(internal_features)]
-#![feature(rustdoc_internals)]
 #![doc(rust_logo)]
 #![feature(assert_matches)]
 #![feature(box_patterns)]
@@ -10,8 +10,10 @@
 #![feature(min_specialization)]
 #![feature(never_type)]
 #![feature(rustc_attrs)]
+#![feature(rustdoc_internals)]
 #![feature(stmt_expr_attributes)]
 #![feature(try_blocks)]
+// tidy-alphabetical-end
 
 #[macro_use]
 extern crate tracing;
@@ -564,7 +566,7 @@ struct MirBorrowckCtxt<'cx, 'tcx> {
     fn_self_span_reported: FxIndexSet<Span>,
     /// This field keeps track of errors reported in the checking of uninitialized variables,
     /// so that we don't report seemingly duplicate errors.
-    uninitialized_error_reported: FxIndexSet<PlaceRef<'tcx>>,
+    uninitialized_error_reported: FxIndexSet<Local>,
     /// This field keeps track of all the local variables that are declared mut and are mutated.
     /// Used for the warning issued by an unused mutable local variable.
     used_mut: FxIndexSet<Local>,

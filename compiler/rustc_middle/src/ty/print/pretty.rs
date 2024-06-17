@@ -999,7 +999,7 @@ pub trait PrettyPrinter<'tcx>: Printer<'tcx> + fmt::Write {
                     let trait_ref = bound_predicate.rebind(pred.trait_ref);
 
                     // Don't print `+ Sized`, but rather `+ ?Sized` if absent.
-                    if Some(trait_ref.def_id()) == tcx.lang_items().sized_trait() {
+                    if tcx.is_lang_item(trait_ref.def_id(), LangItem::Sized) {
                         match pred.polarity {
                             ty::PredicatePolarity::Positive => {
                                 has_sized_bound = true;
@@ -1254,14 +1254,14 @@ pub trait PrettyPrinter<'tcx>: Printer<'tcx> + fmt::Write {
                 }
                 entry.has_fn_once = true;
                 return;
-            } else if Some(trait_def_id) == self.tcx().lang_items().fn_mut_trait() {
+            } else if self.tcx().is_lang_item(trait_def_id, LangItem::FnMut) {
                 let super_trait_ref = supertraits_for_pretty_printing(self.tcx(), trait_ref)
                     .find(|super_trait_ref| super_trait_ref.def_id() == fn_once_trait)
                     .unwrap();
 
                 fn_traits.entry(super_trait_ref).or_default().fn_mut_trait_ref = Some(trait_ref);
                 return;
-            } else if Some(trait_def_id) == self.tcx().lang_items().fn_trait() {
+            } else if self.tcx().is_lang_item(trait_def_id, LangItem::Fn) {
                 let super_trait_ref = supertraits_for_pretty_printing(self.tcx(), trait_ref)
                     .find(|super_trait_ref| super_trait_ref.def_id() == fn_once_trait)
                     .unwrap();
@@ -1652,7 +1652,7 @@ pub trait PrettyPrinter<'tcx>: Printer<'tcx> + fmt::Write {
                         if let ty::ConstKind::Value(_, ty::ValTree::Leaf(int)) = len.kind() {
                             match self.tcx().try_get_global_alloc(prov.alloc_id()) {
                                 Some(GlobalAlloc::Memory(alloc)) => {
-                                    let len = int.assert_bits(self.tcx().data_layout.pointer_size);
+                                    let len = int.to_bits(self.tcx().data_layout.pointer_size);
                                     let range =
                                         AllocRange { start: offset, size: Size::from_bytes(len) };
                                     if let Ok(byte_str) =
@@ -1730,7 +1730,7 @@ pub trait PrettyPrinter<'tcx>: Printer<'tcx> + fmt::Write {
             }
             // Pointer types
             ty::Ref(..) | ty::RawPtr(_, _) | ty::FnPtr(_) => {
-                let data = int.assert_bits(self.tcx().data_layout.pointer_size);
+                let data = int.to_bits(self.tcx().data_layout.pointer_size);
                 self.typed_value(
                     |this| {
                         write!(this, "0x{data:x}")?;

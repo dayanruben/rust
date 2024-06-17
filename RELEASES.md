@@ -97,7 +97,6 @@ Cargo
 - [Prevent dashes in `lib.name`, always normalizing to `_`.](https://github.com/rust-lang/cargo/pull/12783/)
 - [Stabilize MSRV-aware version requirement selection in `cargo add`.](https://github.com/rust-lang/cargo/pull/13608/)
 - [Switch to using `gitoxide` by default for listing files.](https://github.com/rust-lang/cargo/pull/13696/)
-- [Error on `[project]` in Edition 2024; `cargo fix --edition` will change it to `[package]`.](https://github.com/rust-lang/cargo/pull/13747/)
 
 <a id="1.79.0-Rustdoc"></a>
 
@@ -147,7 +146,7 @@ Language
 - [Split `refining_impl_trait` lint into `_reachable`, `_internal` variants](https://github.com/rust-lang/rust/pull/121720/)
 - [Remove unnecessary type inference when using associated types inside of higher ranked `where`-bounds](https://github.com/rust-lang/rust/pull/119849)
 - [Weaken eager detection of cyclic types during type inference](https://github.com/rust-lang/rust/pull/119989)
-- [`trait Trait: Auto {}`: allow upcasting from `dyn Trait` to `dyn Auto`](https://github.com/rust-lang/rust/pull/119338)
+- [`trait Trait: Auto {}`: allow upcasting from `dyn Trait` to `dyn Trait + Auto`](https://github.com/rust-lang/rust/pull/119338)
 
 <a id="1.78.0-Compiler"></a>
 

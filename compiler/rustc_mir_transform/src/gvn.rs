@@ -330,8 +330,7 @@ impl<'body, 'tcx> VnState<'body, 'tcx> {
         let is_sized = !self.feature_unsized_locals
             || self.local_decls[local].ty.is_sized(self.tcx, self.param_env);
         if is_sized {
-            self.rev_locals.ensure_contains_elem(value, SmallVec::new);
-            self.rev_locals[value].push(local);
+            self.rev_locals.ensure_contains_elem(value, SmallVec::new).push(local);
         }
     }
 
@@ -488,7 +487,7 @@ impl<'body, 'tcx> VnState<'body, 'tcx> {
                 let slice = self.evaluated[slice].as_ref()?;
                 let usize_layout = self.ecx.layout_of(self.tcx.types.usize).unwrap();
                 let len = slice.len(&self.ecx).ok()?;
-                let imm = ImmTy::try_from_uint(len, usize_layout)?;
+                let imm = ImmTy::from_uint(len, usize_layout);
                 imm.into()
             }
             NullaryOp(null_op, ty) => {
@@ -509,7 +508,7 @@ impl<'body, 'tcx> VnState<'body, 'tcx> {
                     NullOp::UbChecks => return None,
                 };
                 let usize_layout = self.ecx.layout_of(self.tcx.types.usize).unwrap();
-                let imm = ImmTy::try_from_uint(val, usize_layout)?;
+                let imm = ImmTy::from_uint(val, usize_layout);
                 imm.into()
             }
             UnaryOp(un_op, operand) => {
@@ -1255,7 +1254,7 @@ fn op_to_prop_const<'tcx>(
     // If this constant has scalar ABI, return it as a `ConstValue::Scalar`.
     if let Abi::Scalar(abi::Scalar::Initialized { .. }) = op.layout.abi
         && let Ok(scalar) = ecx.read_scalar(op)
-        && scalar.try_to_int().is_ok()
+        && scalar.try_to_scalar_int().is_ok()
     {
         return Some(ConstValue::Scalar(scalar));
     }

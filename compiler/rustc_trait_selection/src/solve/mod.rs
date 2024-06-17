@@ -37,12 +37,14 @@ mod normalize;
 mod normalizes_to;
 mod project_goals;
 mod search_graph;
+mod select;
 mod trait_goals;
 
-pub use eval_ctxt::{EvalCtxt, GenerateProofTree, InferCtxtEvalExt, InferCtxtSelectExt};
+pub use eval_ctxt::{EvalCtxt, GenerateProofTree, InferCtxtEvalExt};
 pub use fulfill::{FulfillmentCtxt, NextSolverError};
 pub(crate) use normalize::deeply_normalize_for_diagnostics;
 pub use normalize::{deeply_normalize, deeply_normalize_with_skipped_universes};
+pub use select::InferCtxtSelectExt;
 
 /// How many fixpoint iterations we should attempt inside of the solver before bailing
 /// with overflow.
@@ -235,17 +237,6 @@ impl<'a, 'tcx> EvalCtxt<'a, InferCtxt<'tcx>> {
 }
 
 impl<'tcx> EvalCtxt<'_, InferCtxt<'tcx>> {
-    #[instrument(level = "trace", skip(self, goals))]
-    fn add_goals(
-        &mut self,
-        source: GoalSource,
-        goals: impl IntoIterator<Item = Goal<'tcx, ty::Predicate<'tcx>>>,
-    ) {
-        for goal in goals {
-            self.add_goal(source, goal);
-        }
-    }
-
     /// Try to merge multiple possible ways to prove a goal, if that is not possible returns `None`.
     ///
     /// In this case we tend to flounder and return ambiguity by calling `[EvalCtxt::flounder]`.

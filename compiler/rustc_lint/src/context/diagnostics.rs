@@ -319,11 +319,20 @@ pub(super) fn decorate_lint(sess: &Session, diagnostic: BuiltinLintDiag, diag: &
         BuiltinLintDiag::UnusedQualifications { removal_span } => {
             lints::UnusedQualifications { removal_span }.decorate_lint(diag);
         }
-        BuiltinLintDiag::AssociatedConstElidedLifetime { elided, span: lt_span } => {
+        BuiltinLintDiag::AssociatedConstElidedLifetime {
+            elided,
+            span: lt_span,
+            lifetimes_in_scope,
+        } => {
             let lt_span = if elided { lt_span.shrink_to_hi() } else { lt_span };
             let code = if elided { "'static " } else { "'static" };
-            lints::AssociatedConstElidedLifetime { span: lt_span, code, elided }
-                .decorate_lint(diag);
+            lints::AssociatedConstElidedLifetime {
+                span: lt_span,
+                code,
+                elided,
+                lifetimes_in_scope,
+            }
+            .decorate_lint(diag);
         }
         BuiltinLintDiag::RedundantImportVisibility { max_vis, span: vis_span, import_vis } => {
             lints::RedundantImportVisibility { span: vis_span, help: (), max_vis, import_vis }
@@ -340,8 +349,9 @@ pub(super) fn decorate_lint(sess: &Session, diagnostic: BuiltinLintDiag, diag: &
             lints::MacroUseDeprecated.decorate_lint(diag);
         }
         BuiltinLintDiag::UnusedMacroUse => lints::UnusedMacroUse.decorate_lint(diag),
-        BuiltinLintDiag::PrivateExternCrateReexport(ident) => {
-            lints::PrivateExternCrateReexport { ident }.decorate_lint(diag);
+        BuiltinLintDiag::PrivateExternCrateReexport { source: ident, extern_crate_span } => {
+            lints::PrivateExternCrateReexport { ident, sugg: extern_crate_span.shrink_to_lo() }
+                .decorate_lint(diag);
         }
         BuiltinLintDiag::UnusedLabel => lints::UnusedLabel.decorate_lint(diag),
         BuiltinLintDiag::MacroIsPrivate(ident) => {

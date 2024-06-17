@@ -1647,6 +1647,7 @@ supported_targets! {
     ("x86_64-unknown-l4re-uclibc", x86_64_unknown_l4re_uclibc),
 
     ("aarch64-unknown-redox", aarch64_unknown_redox),
+    ("i686-unknown-redox", i686_unknown_redox),
     ("x86_64-unknown-redox", x86_64_unknown_redox),
 
     ("i386-apple-ios", i386_apple_ios),
@@ -1765,6 +1766,10 @@ supported_targets! {
     ("aarch64-unknown-uefi", aarch64_unknown_uefi),
 
     ("nvptx64-nvidia-cuda", nvptx64_nvidia_cuda),
+
+    ("xtensa-esp32-none-elf", xtensa_esp32_none_elf),
+    ("xtensa-esp32s2-none-elf", xtensa_esp32s2_none_elf),
+    ("xtensa-esp32s3-none-elf", xtensa_esp32s3_none_elf),
 
     ("i686-wrs-vxworks", i686_wrs_vxworks),
     ("x86_64-wrs-vxworks", x86_64_wrs_vxworks),

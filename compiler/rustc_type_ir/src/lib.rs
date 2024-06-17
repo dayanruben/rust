@@ -1,9 +1,11 @@
+// tidy-alphabetical-start
+#![allow(rustc::usage_of_ty_tykind)]
 #![cfg_attr(
     feature = "nightly",
     feature(associated_type_defaults, min_specialization, never_type, rustc_attrs, negative_impls)
 )]
-#![allow(rustc::usage_of_ty_tykind)]
 #![cfg_attr(feature = "nightly", allow(internal_features))]
+// tidy-alphabetical-end
 
 #[cfg(feature = "nightly")]
 extern crate self as rustc_type_ir;
@@ -30,6 +32,7 @@ pub mod error;
 pub mod fold;
 pub mod inherent;
 pub mod ir_print;
+pub mod lang_items;
 pub mod lift;
 pub mod relate;
 pub mod solve;
@@ -40,11 +43,11 @@ mod macros;
 mod binder;
 mod canonical;
 mod const_kind;
-mod debug;
 mod flags;
 mod generic_arg;
 mod infcx;
 mod interner;
+mod opaque_ty;
 mod predicate;
 mod predicate_kind;
 mod region_kind;
@@ -57,11 +60,11 @@ pub use canonical::*;
 #[cfg(feature = "nightly")]
 pub use codec::*;
 pub use const_kind::*;
-pub use debug::{DebugWithInfcx, WithInfcx};
 pub use flags::*;
 pub use generic_arg::*;
 pub use infcx::InferCtxtLike;
 pub use interner::*;
+pub use opaque_ty::*;
 pub use predicate::*;
 pub use predicate_kind::*;
 pub use region_kind::*;
@@ -73,6 +76,7 @@ pub use DynKind::*;
 pub use InferTy::*;
 pub use RegionKind::*;
 pub use TyKind::*;
+pub use Variance::*;
 
 rustc_index::newtype_index! {
     /// A [De Bruijn index][dbi] is a standard means of representing
