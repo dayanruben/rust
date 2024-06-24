@@ -93,6 +93,7 @@ target | notes
 `arm-unknown-linux-gnueabihf` | Armv6 Linux, hardfloat (kernel 3.2, glibc 2.17)
 `armv7-unknown-linux-gnueabihf` | Armv7-A Linux, hardfloat (kernel 3.2, glibc 2.17)
 [`loongarch64-unknown-linux-gnu`](platform-support/loongarch-linux.md) | LoongArch64 Linux, LP64D ABI (kernel 5.19, glibc 2.36)
+[`loongarch64-unknown-linux-musl`](platform-support/loongarch-linux.md) | LoongArch64 Linux, LP64D ABI (kernel 5.19, musl 1.2.5)
 `powerpc-unknown-linux-gnu` | PowerPC Linux (kernel 3.2, glibc 2.17)
 `powerpc64-unknown-linux-gnu` | PPC64 Linux (kernel 3.2, glibc 2.17)
 `powerpc64le-unknown-linux-gnu` | PPC64LE Linux (kernel 3.10, glibc 2.17)
@@ -118,7 +119,7 @@ The `std` column in the table below has the following meanings:
 
 * ✓ indicates the full standard library is available.
 * \* indicates the target only supports [`no_std`] development.
-* ? indicates the standard library support is unknown or a work-in-progress.
+* ? indicates the standard library support is a work-in-progress.
 
 [`no_std`]: https://rust-embedded.github.io/book/intro/no-std.html
 
@@ -305,7 +306,6 @@ target | std | host | notes
 `i686-uwp-windows-msvc` | ✓ |  | [^x86_32-floats-return-ABI]
 [`i686-win7-windows-msvc`](platform-support/win7-windows-msvc.md) | ✓ |   | 32-bit Windows 7 support [^x86_32-floats-return-ABI]
 `i686-wrs-vxworks` | ? |  | [^x86_32-floats-return-ABI]
-[`loongarch64-unknown-linux-musl`](platform-support/loongarch-linux.md) | ? |  | LoongArch64 Linux (LP64D ABI) with musl 1.2.3
 [`m68k-unknown-linux-gnu`](platform-support/m68k-unknown-linux-gnu.md) | ? |  | Motorola 680x0 Linux
 `mips-unknown-linux-gnu` | ✓ | ✓ | MIPS Linux (kernel 4.4, glibc 2.23)
 `mips-unknown-linux-musl` | ✓ |  | MIPS Linux with musl 1.2.3

@@ -449,7 +449,7 @@ declare_features! (
     /// Allows `dyn* Trait` objects.
     (incomplete, dyn_star, "1.65.0", Some(102425)),
     /// Uses generic effect parameters for ~const bounds
-    (unstable, effects, "1.72.0", Some(102090)),
+    (incomplete, effects, "1.72.0", Some(102090)),
     /// Allows exhaustive pattern matching on types that contain uninhabited types.
     (unstable, exhaustive_patterns, "1.13.0", Some(51085)),
     /// Allows explicit tail calls via `become` expression.
@@ -629,7 +629,7 @@ declare_features! (
     /// Allows unsafe on extern declarations and safety qualifiers over internal items.
     (unstable, unsafe_extern_blocks, "1.80.0", Some(123743)),
     /// Allows unsized fn parameters.
-    (unstable, unsized_fn_params, "1.49.0", Some(48055)),
+    (internal, unsized_fn_params, "1.49.0", Some(48055)),
     /// Allows unsized rvalues at arguments and parameters.
     (incomplete, unsized_locals, "1.30.0", Some(48055)),
     /// Allows unsized tuple coercion.
