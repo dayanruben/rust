@@ -40,6 +40,7 @@ use rustc_middle::{bug, span_bug};
 use rustc_session::Session;
 use rustc_span::symbol::{kw, Ident};
 use rustc_span::{sym, BytePos, Span, DUMMY_SP};
+use rustc_trait_selection::infer::InferCtxtExt;
 use rustc_trait_selection::traits::{self, ObligationCauseCode, SelectionContext};
 
 use std::iter;
@@ -1384,7 +1385,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 Some(format!("provide the argument{}", if plural { "s" } else { "" }))
             }
             SuggestionText::Remove(plural) => {
-                err.multipart_suggestion(
+                err.multipart_suggestion_verbose(
                     format!("remove the extra argument{}", if plural { "s" } else { "" }),
                     suggestions,
                     Applicability::HasPlaceholders,

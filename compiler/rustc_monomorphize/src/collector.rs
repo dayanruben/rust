@@ -755,7 +755,8 @@ impl<'a, 'tcx> MirVisitor<'tcx> for MirUsedCollector<'a, 'tcx> {
         };
 
         match terminator.kind {
-            mir::TerminatorKind::Call { ref func, ref args, ref fn_span, .. } => {
+            mir::TerminatorKind::Call { ref func, ref args, ref fn_span, .. }
+            | mir::TerminatorKind::TailCall { ref func, ref args, ref fn_span } => {
                 let callee_ty = func.ty(self.body, tcx);
                 // *Before* monomorphizing, record that we already handled this mention.
                 self.used_mentioned_items.insert(MentionedItem::Fn(callee_ty));
@@ -1160,10 +1161,10 @@ fn collect_alloc<'tcx>(tcx: TyCtxt<'tcx>, alloc_id: AllocId, output: &mut MonoIt
                 });
             }
         }
-        GlobalAlloc::Function(fn_instance) => {
-            if should_codegen_locally(tcx, fn_instance) {
-                trace!("collecting {:?} with {:#?}", alloc_id, fn_instance);
-                output.push(create_fn_mono_item(tcx, fn_instance, DUMMY_SP));
+        GlobalAlloc::Function { instance, .. } => {
+            if should_codegen_locally(tcx, instance) {
+                trace!("collecting {:?} with {:#?}", alloc_id, instance);
+                output.push(create_fn_mono_item(tcx, instance, DUMMY_SP));
             }
         }
         GlobalAlloc::VTable(ty, trait_ref) => {
