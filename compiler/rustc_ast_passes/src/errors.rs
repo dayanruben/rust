@@ -1,11 +1,11 @@
 //! Errors emitted by ast_passes.
 
 use rustc_ast::ParamKindOrd;
-use rustc_errors::{
-    codes::*, Applicability, Diag, EmissionGuarantee, SubdiagMessageOp, Subdiagnostic,
-};
+use rustc_errors::codes::*;
+use rustc_errors::{Applicability, Diag, EmissionGuarantee, SubdiagMessageOp, Subdiagnostic};
 use rustc_macros::{Diagnostic, Subdiagnostic};
-use rustc_span::{symbol::Ident, Span, Symbol};
+use rustc_span::symbol::Ident;
+use rustc_span::{Span, Symbol};
 
 use crate::fluent_generated as fluent;
 
@@ -654,15 +654,6 @@ pub enum TildeConstReason {
     TraitObject,
     #[note(ast_passes_item)]
     Item,
-}
-
-#[derive(Diagnostic)]
-#[diag(ast_passes_incompatible_trait_bound_modifiers)]
-pub struct IncompatibleTraitBoundModifiers {
-    #[primary_span]
-    pub span: Span,
-    pub left: &'static str,
-    pub right: &'static str,
 }
 
 #[derive(Diagnostic)]

@@ -1,18 +1,16 @@
 #![allow(non_camel_case_types)]
 #![allow(non_upper_case_globals)]
 
+use std::marker::PhantomData;
+
+use libc::{c_char, c_int, c_uint, c_ulonglong, c_void, size_t};
+
 use super::debuginfo::{
     DIArray, DIBasicType, DIBuilder, DICompositeType, DIDerivedType, DIDescriptor, DIEnumerator,
     DIFile, DIFlags, DIGlobalVariableExpression, DILexicalBlock, DILocation, DINameSpace,
     DISPFlags, DIScope, DISubprogram, DISubrange, DITemplateTypeParameter, DIType, DIVariable,
     DebugEmissionKind, DebugNameTableKind,
 };
-
-use libc::{c_char, c_int, c_uint, size_t};
-use libc::{c_ulonglong, c_void};
-
-use std::marker::PhantomData;
-
 use super::RustString;
 
 pub type Bool = c_uint;
@@ -305,7 +303,6 @@ pub enum TypeKind {
     Pointer = 12,
     Vector = 13,
     Metadata = 14,
-    X86_MMX = 15,
     Token = 16,
     ScalableVector = 17,
     BFloat = 18,
@@ -330,7 +327,6 @@ impl TypeKind {
             TypeKind::Pointer => rustc_codegen_ssa::common::TypeKind::Pointer,
             TypeKind::Vector => rustc_codegen_ssa::common::TypeKind::Vector,
             TypeKind::Metadata => rustc_codegen_ssa::common::TypeKind::Metadata,
-            TypeKind::X86_MMX => rustc_codegen_ssa::common::TypeKind::X86_MMX,
             TypeKind::Token => rustc_codegen_ssa::common::TypeKind::Token,
             TypeKind::ScalableVector => rustc_codegen_ssa::common::TypeKind::ScalableVector,
             TypeKind::BFloat => rustc_codegen_ssa::common::TypeKind::BFloat,
@@ -430,6 +426,7 @@ pub enum MetadataType {
     MD_nontemporal = 9,
     MD_mem_parallel_loop_access = 10,
     MD_nonnull = 11,
+    MD_unpredictable = 15,
     MD_align = 17,
     MD_type = 19,
     MD_vcall_visibility = 28,
@@ -699,8 +696,9 @@ pub type DiagnosticHandlerTy = unsafe extern "C" fn(&DiagnosticInfo, *mut c_void
 pub type InlineAsmDiagHandlerTy = unsafe extern "C" fn(&SMDiagnostic, *const c_void, c_uint);
 
 pub mod debuginfo {
-    use super::{InvariantOpaque, Metadata};
     use bitflags::bitflags;
+
+    use super::{InvariantOpaque, Metadata};
 
     #[repr(C)]
     pub struct DIBuilder<'a>(InvariantOpaque<'a>);

@@ -20,17 +20,13 @@ pub mod generics;
 mod lint;
 mod object_safety;
 
-use crate::bounds::Bounds;
-use crate::errors::{AmbiguousLifetimeBound, WildPatTy};
-use crate::hir_ty_lowering::errors::{prohibit_assoc_item_constraint, GenericsArgsErrExtend};
-use crate::hir_ty_lowering::generics::{check_generic_arg_count, lower_generic_args};
-use crate::middle::resolve_bound_vars as rbv;
-use crate::require_c_abi_if_c_variadic;
+use std::slice;
+
 use rustc_ast::TraitObjectSyntax;
 use rustc_data_structures::fx::{FxHashSet, FxIndexMap};
+use rustc_errors::codes::*;
 use rustc_errors::{
-    codes::*, struct_span_code_err, Applicability, Diag, DiagCtxtHandle, ErrorGuaranteed,
-    FatalError,
+    struct_span_code_err, Applicability, Diag, DiagCtxtHandle, ErrorGuaranteed, FatalError,
 };
 use rustc_hir as hir;
 use rustc_hir::def::{CtorOf, DefKind, Namespace, Res};
@@ -55,8 +51,12 @@ use rustc_trait_selection::infer::InferCtxtExt;
 use rustc_trait_selection::traits::wf::object_region_bounds;
 use rustc_trait_selection::traits::{self, ObligationCtxt};
 
-use std::fmt::Display;
-use std::slice;
+use crate::bounds::Bounds;
+use crate::errors::{AmbiguousLifetimeBound, WildPatTy};
+use crate::hir_ty_lowering::errors::{prohibit_assoc_item_constraint, GenericsArgsErrExtend};
+use crate::hir_ty_lowering::generics::{check_generic_arg_count, lower_generic_args};
+use crate::middle::resolve_bound_vars as rbv;
+use crate::require_c_abi_if_c_variadic;
 
 /// A path segment that is semantically allowed to have generic arguments.
 #[derive(Debug)]
@@ -190,6 +190,25 @@ pub trait HirTyLowerer<'tcx> {
         Self: Sized,
     {
         self
+    }
+}
+
+/// The "qualified self" of an associated item path.
+///
+/// For diagnostic purposes only.
+enum AssocItemQSelf {
+    Trait(DefId),
+    TyParam(LocalDefId, Span),
+    SelfTyAlias,
+}
+
+impl AssocItemQSelf {
+    fn to_string(&self, tcx: TyCtxt<'_>) -> String {
+        match *self {
+            Self::Trait(def_id) => tcx.def_path_str(def_id),
+            Self::TyParam(def_id, _) => tcx.hir().ty_param_name(def_id).to_string(),
+            Self::SelfTyAlias => kw::SelfUpper.to_string(),
+        }
     }
 }
 
@@ -802,6 +821,7 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
     fn probe_single_ty_param_bound_for_assoc_ty(
         &self,
         ty_param_def_id: LocalDefId,
+        ty_param_span: Span,
         assoc_name: Ident,
         span: Span,
     ) -> Result<ty::PolyTraitRef<'tcx>, ErrorGuaranteed> {
@@ -811,19 +831,14 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
         let predicates = &self.probe_ty_param_bounds(span, ty_param_def_id, assoc_name).predicates;
         debug!("predicates={:#?}", predicates);
 
-        let param_name = tcx.hir().ty_param_name(ty_param_def_id);
         self.probe_single_bound_for_assoc_item(
             || {
-                traits::transitive_bounds_that_define_assoc_item(
-                    tcx,
-                    predicates
-                        .iter()
-                        .filter_map(|(p, _)| Some(p.as_trait_clause()?.map_bound(|t| t.trait_ref))),
-                    assoc_name,
-                )
+                let trait_refs = predicates
+                    .iter()
+                    .filter_map(|(p, _)| Some(p.as_trait_clause()?.map_bound(|t| t.trait_ref)));
+                traits::transitive_bounds_that_define_assoc_item(tcx, trait_refs, assoc_name)
             },
-            param_name,
-            Some(ty_param_def_id),
+            AssocItemQSelf::TyParam(ty_param_def_id, ty_param_span),
             ty::AssocKind::Type,
             assoc_name,
             span,
@@ -835,12 +850,11 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
     ///
     /// This fails if there is no such bound in the list of candidates or if there are multiple
     /// candidates in which case it reports ambiguity.
-    #[instrument(level = "debug", skip(self, all_candidates, ty_param_name, constraint), ret)]
+    #[instrument(level = "debug", skip(self, all_candidates, qself, constraint), ret)]
     fn probe_single_bound_for_assoc_item<I>(
         &self,
         all_candidates: impl Fn() -> I,
-        ty_param_name: impl Display,
-        ty_param_def_id: Option<LocalDefId>,
+        qself: AssocItemQSelf,
         assoc_kind: ty::AssocKind,
         assoc_name: Ident,
         span: Span,
@@ -858,8 +872,7 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
         let Some(bound) = matching_candidates.next() else {
             let reported = self.complain_about_assoc_item_not_found(
                 all_candidates,
-                &ty_param_name.to_string(),
-                ty_param_def_id,
+                qself,
                 assoc_kind,
                 assoc_name,
                 span,
@@ -872,13 +885,13 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
         if let Some(bound2) = matching_candidates.next() {
             debug!(?bound2);
 
-            let assoc_kind_str = assoc_kind_str(assoc_kind);
-            let ty_param_name = &ty_param_name.to_string();
+            let assoc_kind_str = errors::assoc_kind_str(assoc_kind);
+            let qself_str = qself.to_string(tcx);
             let mut err = self.dcx().create_err(crate::errors::AmbiguousAssocItem {
                 span,
                 assoc_kind: assoc_kind_str,
                 assoc_name,
-                ty_param_name,
+                qself: &qself_str,
             });
             // Provide a more specific error code index entry for equality bindings.
             err.code(
@@ -929,7 +942,7 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
                         err.span_suggestion_verbose(
                             span.with_hi(assoc_name.span.lo()),
                             "use fully-qualified syntax to disambiguate",
-                            format!("<{ty_param_name} as {}>::", bound.print_only_trait_path()),
+                            format!("<{qself_str} as {}>::", bound.print_only_trait_path()),
                             Applicability::MaybeIncorrect,
                         );
                     }
@@ -943,7 +956,7 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
             if !where_bounds.is_empty() {
                 err.help(format!(
                     "consider introducing a new type parameter `T` and adding `where` constraints:\
-                     \n    where\n        T: {ty_param_name},\n{}",
+                     \n    where\n        T: {qself_str},\n{}",
                     where_bounds.join(",\n"),
                 ));
             }
@@ -997,11 +1010,6 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
         let tcx = self.tcx();
 
         let assoc_ident = assoc_segment.ident;
-        let qself_res = if let hir::TyKind::Path(hir::QPath::Resolved(_, path)) = &qself.kind {
-            path.res
-        } else {
-            Res::Err
-        };
 
         // Check if we have an enum variant or an inherent associated type.
         let mut variant_resolution = None;
@@ -1038,6 +1046,12 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
             }
         }
 
+        let qself_res = if let hir::TyKind::Path(hir::QPath::Resolved(_, path)) = &qself.kind {
+            path.res
+        } else {
+            Res::Err
+        };
+
         // Find the type of the associated item, and the trait where the associated
         // item is declared.
         let bound = match (&qself_ty.kind(), qself_res) {
@@ -1056,8 +1070,7 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
                             ty::Binder::dummy(trait_ref.instantiate_identity()),
                         )
                     },
-                    kw::SelfUpper,
-                    None,
+                    AssocItemQSelf::SelfTyAlias,
                     ty::AssocKind::Type,
                     assoc_ident,
                     span,
@@ -1069,6 +1082,7 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
                 Res::SelfTyParam { trait_: param_did } | Res::Def(DefKind::TyParam, param_did),
             ) => self.probe_single_ty_param_bound_for_assoc_ty(
                 param_did.expect_local(),
+                qself.span,
                 assoc_ident,
                 span,
             )?,
@@ -1993,93 +2007,11 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
         self.lower_ty_common(hir_ty, false, true)
     }
 
-    fn check_delegation_constraints(&self, sig_id: DefId, span: Span, emit: bool) -> bool {
-        let mut error_occured = false;
-        let sig_span = self.tcx().def_span(sig_id);
-        let mut try_emit = |descr| {
-            if emit {
-                self.dcx().emit_err(crate::errors::NotSupportedDelegation {
-                    span,
-                    descr,
-                    callee_span: sig_span,
-                });
-            }
-            error_occured = true;
-        };
-
-        if let Some(node) = self.tcx().hir().get_if_local(sig_id)
-            && let Some(decl) = node.fn_decl()
-            && let hir::FnRetTy::Return(ty) = decl.output
-            && let hir::TyKind::InferDelegation(_, _) = ty.kind
-        {
-            try_emit("recursive delegation");
-        }
-
-        let sig_generics = self.tcx().generics_of(sig_id);
-        let parent = self.tcx().local_parent(self.item_def_id());
-        let parent_generics = self.tcx().generics_of(parent);
-
-        let parent_is_trait = (self.tcx().def_kind(parent) == DefKind::Trait) as usize;
-        let sig_has_self = sig_generics.has_self as usize;
-
-        if sig_generics.count() > sig_has_self || parent_generics.count() > parent_is_trait {
-            try_emit("delegation with early bound generics");
-        }
-
-        // There is no way to instantiate `Self` param for caller if
-        // 1. callee is a trait method
-        // 2. delegation item isn't an associative item
-        if let DefKind::AssocFn = self.tcx().def_kind(sig_id)
-            && let DefKind::Fn = self.tcx().def_kind(self.item_def_id())
-            && self.tcx().associated_item(sig_id).container
-                == ty::AssocItemContainer::TraitContainer
-        {
-            try_emit("delegation to a trait method from a free function");
-        }
-
-        error_occured
-    }
-
-    fn lower_delegation_ty(
-        &self,
-        sig_id: DefId,
-        idx: hir::InferDelegationKind,
-        span: Span,
-    ) -> Ty<'tcx> {
-        if self.check_delegation_constraints(sig_id, span, idx == hir::InferDelegationKind::Output)
-        {
-            let e = self.dcx().span_delayed_bug(span, "not supported delegation case");
-            return Ty::new_error(self.tcx(), e);
-        };
-        let sig = self.tcx().fn_sig(sig_id);
-        let sig_generics = self.tcx().generics_of(sig_id);
-
-        let parent = self.tcx().local_parent(self.item_def_id());
-        let parent_def_kind = self.tcx().def_kind(parent);
-
-        let sig = if let DefKind::Impl { .. } = parent_def_kind
-            && sig_generics.has_self
-        {
-            // Generic params can't be here except the trait self type.
-            // They are not supported yet.
-            assert_eq!(sig_generics.count(), 1);
-            assert_eq!(self.tcx().generics_of(parent).count(), 0);
-
-            let self_ty = self.tcx().type_of(parent).instantiate_identity();
-            let generic_self_ty = ty::GenericArg::from(self_ty);
-            let args = self.tcx().mk_args_from_iter(std::iter::once(generic_self_ty));
-            sig.instantiate(self.tcx(), args)
-        } else {
-            sig.instantiate_identity()
-        };
-
-        // Bound vars are also inherited from `sig_id`.
-        // They will be rebound later in `lower_fn_ty`.
-        let sig = sig.skip_binder();
-
+    fn lower_delegation_ty(&self, idx: hir::InferDelegationKind) -> Ty<'tcx> {
+        let delegation_sig = self.tcx().inherit_sig_for_delegation_item(self.item_def_id());
         match idx {
-            hir::InferDelegationKind::Input(id) => sig.inputs()[id],
-            hir::InferDelegationKind::Output => sig.output(),
+            hir::InferDelegationKind::Input(idx) => delegation_sig[idx],
+            hir::InferDelegationKind::Output => *delegation_sig.last().unwrap(),
         }
     }
 
@@ -2096,9 +2028,7 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
         let tcx = self.tcx();
 
         let result_ty = match &hir_ty.kind {
-            hir::TyKind::InferDelegation(sig_id, idx) => {
-                self.lower_delegation_ty(*sig_id, *idx, hir_ty.span)
-            }
+            hir::TyKind::InferDelegation(_, idx) => self.lower_delegation_ty(*idx),
             hir::TyKind::Slice(ty) => Ty::new_slice(tcx, self.lower_ty(ty)),
             hir::TyKind::Ptr(mt) => Ty::new_ptr(tcx, self.lower_ty(mt.ty), mt.mutbl),
             hir::TyKind::Ref(region, mt) => {
@@ -2520,13 +2450,5 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
             self.dcx().emit_err(AmbiguousLifetimeBound { span });
         }
         Some(r)
-    }
-}
-
-fn assoc_kind_str(kind: ty::AssocKind) -> &'static str {
-    match kind {
-        ty::AssocKind::Fn => "function",
-        ty::AssocKind::Const => "constant",
-        ty::AssocKind::Type => "type",
     }
 }

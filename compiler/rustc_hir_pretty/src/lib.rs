@@ -5,12 +5,13 @@
 #![recursion_limit = "256"]
 // tidy-alphabetical-end
 
-use rustc_ast as ast;
+use std::cell::Cell;
+use std::vec;
+
 use rustc_ast::util::parser::{self, AssocOp, Fixity};
 use rustc_ast_pretty::pp::Breaks::{Consistent, Inconsistent};
 use rustc_ast_pretty::pp::{self, Breaks};
 use rustc_ast_pretty::pprust::{Comments, PrintState};
-use rustc_hir as hir;
 use rustc_hir::{
     BindingMode, ByRef, ConstArgKind, GenericArg, GenericBound, GenericParam, GenericParamKind,
     HirId, LifetimeParamKind, Node, PatKind, PreciseCapturingArg, RangeEnd, Term,
@@ -20,9 +21,7 @@ use rustc_span::source_map::SourceMap;
 use rustc_span::symbol::{kw, Ident, Symbol};
 use rustc_span::FileName;
 use rustc_target::spec::abi::Abi;
-
-use std::cell::Cell;
-use std::vec;
+use {rustc_ast as ast, rustc_hir as hir};
 
 pub fn id_to_string(map: &dyn rustc_hir::intravisit::Map<'_>, hir_id: HirId) -> String {
     to_string(&map, |s| s.print_node(map.hir_node(hir_id)))
@@ -300,12 +299,15 @@ impl<'a> State<'a> {
                     self.word_space("dyn");
                 }
                 let mut first = true;
-                for bound in bounds {
+                for (bound, modifier) in bounds {
                     if first {
                         first = false;
                     } else {
                         self.nbsp();
                         self.word_space("+");
+                    }
+                    if *modifier == TraitBoundModifier::Maybe {
+                        self.word("?");
                     }
                     self.print_poly_trait_ref(bound);
                 }
@@ -1298,35 +1300,7 @@ impl<'a> State<'a> {
             AsmArg::Options(opts) => {
                 s.word("options");
                 s.popen();
-                let mut options = vec![];
-                if opts.contains(ast::InlineAsmOptions::PURE) {
-                    options.push("pure");
-                }
-                if opts.contains(ast::InlineAsmOptions::NOMEM) {
-                    options.push("nomem");
-                }
-                if opts.contains(ast::InlineAsmOptions::READONLY) {
-                    options.push("readonly");
-                }
-                if opts.contains(ast::InlineAsmOptions::PRESERVES_FLAGS) {
-                    options.push("preserves_flags");
-                }
-                if opts.contains(ast::InlineAsmOptions::NORETURN) {
-                    options.push("noreturn");
-                }
-                if opts.contains(ast::InlineAsmOptions::NOSTACK) {
-                    options.push("nostack");
-                }
-                if opts.contains(ast::InlineAsmOptions::ATT_SYNTAX) {
-                    options.push("att_syntax");
-                }
-                if opts.contains(ast::InlineAsmOptions::RAW) {
-                    options.push("raw");
-                }
-                if opts.contains(ast::InlineAsmOptions::MAY_UNWIND) {
-                    options.push("may_unwind");
-                }
-                s.commasep(Inconsistent, &options, |s, &opt| {
+                s.commasep(Inconsistent, &opts.human_readable_names(), |s, &opt| {
                     s.word(opt);
                 });
                 s.pclose();

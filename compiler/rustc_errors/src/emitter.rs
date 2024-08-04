@@ -7,25 +7,6 @@
 //!
 //! The output types are defined in `rustc_session::config::ErrorOutputType`.
 
-use rustc_span::source_map::SourceMap;
-use rustc_span::{FileLines, FileName, SourceFile, Span};
-
-use crate::snippet::{
-    Annotation, AnnotationColumn, AnnotationType, Line, MultilineAnnotation, Style, StyledString,
-};
-use crate::styled_buffer::StyledBuffer;
-use crate::translation::{to_fluent_args, Translate};
-use crate::{
-    diagnostic::DiagLocation, CodeSuggestion, DiagCtxt, DiagInner, DiagMessage, ErrCode,
-    FluentBundle, LazyFallbackBundle, Level, MultiSpan, Subdiag, SubstitutionHighlight,
-    SuggestionStyle, TerminalUrl,
-};
-use derive_setters::Setters;
-use rustc_data_structures::fx::{FxHashMap, FxIndexMap, FxIndexSet};
-use rustc_data_structures::sync::{DynSend, IntoDynSyncSend, Lrc};
-use rustc_error_messages::{FluentArgs, SpanLabel};
-use rustc_lint_defs::pluralize;
-use rustc_span::hygiene::{ExpnKind, MacroKind};
 use std::borrow::Cow;
 use std::cmp::{max, min, Reverse};
 use std::error::Report;
@@ -33,9 +14,28 @@ use std::io::prelude::*;
 use std::io::{self, IsTerminal};
 use std::iter;
 use std::path::Path;
-use termcolor::{Buffer, BufferWriter, ColorChoice, ColorSpec, StandardStream};
-use termcolor::{Color, WriteColor};
+
+use derive_setters::Setters;
+use rustc_data_structures::fx::{FxHashMap, FxIndexMap, FxIndexSet};
+use rustc_data_structures::sync::{DynSend, IntoDynSyncSend, Lrc};
+use rustc_error_messages::{FluentArgs, SpanLabel};
+use rustc_lint_defs::pluralize;
+use rustc_span::hygiene::{ExpnKind, MacroKind};
+use rustc_span::source_map::SourceMap;
+use rustc_span::{char_width, FileLines, FileName, SourceFile, Span};
+use termcolor::{Buffer, BufferWriter, Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
 use tracing::{debug, instrument, trace, warn};
+
+use crate::diagnostic::DiagLocation;
+use crate::snippet::{
+    Annotation, AnnotationColumn, AnnotationType, Line, MultilineAnnotation, Style, StyledString,
+};
+use crate::styled_buffer::StyledBuffer;
+use crate::translation::{to_fluent_args, Translate};
+use crate::{
+    CodeSuggestion, DiagCtxt, DiagInner, DiagMessage, ErrCode, FluentBundle, LazyFallbackBundle,
+    Level, MultiSpan, Subdiag, SubstitutionHighlight, SuggestionStyle, TerminalUrl,
+};
 
 /// Default column width, used in tests and when terminal dimensions cannot be determined.
 const DEFAULT_COLUMN_WIDTH: usize = 140;
@@ -677,10 +677,7 @@ impl HumanEmitter {
             .skip(left)
             .take_while(|ch| {
                 // Make sure that the trimming on the right will fall within the terminal width.
-                // FIXME: `unicode_width` sometimes disagrees with terminals on how wide a `char`
-                // is. For now, just accept that sometimes the code line will be longer than
-                // desired.
-                let next = unicode_width::UnicodeWidthChar::width(*ch).unwrap_or(1);
+                let next = char_width(*ch);
                 if taken + next > right - left {
                     return false;
                 }
@@ -742,11 +739,7 @@ impl HumanEmitter {
         let left = margin.left(source_string.len());
 
         // Account for unicode characters of width !=0 that were removed.
-        let left = source_string
-            .chars()
-            .take(left)
-            .map(|ch| unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1))
-            .sum();
+        let left = source_string.chars().take(left).map(|ch| char_width(ch)).sum();
 
         self.draw_line(
             buffer,
@@ -1774,7 +1767,10 @@ impl HumanEmitter {
         debug!(?suggestions);
 
         if suggestions.is_empty() {
-            // Suggestions coming from macros can have malformed spans. This is a heavy handed
+            // Here we check if there are suggestions that have actual code changes. We sometimes
+            // suggest the same code that is already there, instead of changing how we produce the
+            // suggestions and filtering there, we just don't emit the suggestion.
+            // Suggestions coming from macros can also have malformed spans. This is a heavy handed
             // approach to avoid ICEs by ignoring the suggestion outright.
             return Ok(());
         }
@@ -2039,7 +2035,7 @@ impl HumanEmitter {
                     let sub_len: usize =
                         if is_whitespace_addition { &part.snippet } else { part.snippet.trim() }
                             .chars()
-                            .map(|ch| unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1))
+                            .map(|ch| char_width(ch))
                             .sum();
 
                     let offset: isize = offsets
@@ -2053,7 +2049,9 @@ impl HumanEmitter {
                     assert!(underline_start >= 0 && underline_end >= 0);
                     let padding: usize = max_line_num_len + 3;
                     for p in underline_start..underline_end {
-                        if let DisplaySuggestion::Underline = show_code_change {
+                        if let DisplaySuggestion::Underline = show_code_change
+                            && is_different(sm, &part.snippet, part.span)
+                        {
                             // If this is a replacement, underline with `~`, if this is an addition
                             // underline with `+`.
                             buffer.putc(
@@ -2076,11 +2074,8 @@ impl HumanEmitter {
                     }
 
                     // length of the code after substitution
-                    let full_sub_len = part
-                        .snippet
-                        .chars()
-                        .map(|ch| unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1))
-                        .sum::<usize>() as isize;
+                    let full_sub_len =
+                        part.snippet.chars().map(|ch| char_width(ch)).sum::<usize>() as isize;
 
                     // length of the code to be substituted
                     let snippet_len = span_end_pos as isize - span_start_pos as isize;
@@ -2568,18 +2563,53 @@ fn num_decimal_digits(num: usize) -> usize {
 }
 
 // We replace some characters so the CLI output is always consistent and underlines aligned.
+// Keep the following list in sync with `rustc_span::char_width`.
 const OUTPUT_REPLACEMENTS: &[(char, &str)] = &[
-    ('\t', "    "),   // We do our own tab replacement
+    ('\t', "    "),    // We do our own tab replacement
     ('\u{200D}', ""), // Replace ZWJ with nothing for consistent terminal output of grapheme clusters.
-    ('\u{202A}', ""), // The following unicode text flow control characters are inconsistently
-    ('\u{202B}', ""), // supported across CLIs and can cause confusion due to the bytes on disk
-    ('\u{202D}', ""), // not corresponding to the visible source code, so we replace them always.
-    ('\u{202E}', ""),
-    ('\u{2066}', ""),
-    ('\u{2067}', ""),
-    ('\u{2068}', ""),
-    ('\u{202C}', ""),
-    ('\u{2069}', ""),
+    ('\u{202A}', "�"), // The following unicode text flow control characters are inconsistently
+    ('\u{202B}', "�"), // supported across CLIs and can cause confusion due to the bytes on disk
+    ('\u{202D}', "�"), // not corresponding to the visible source code, so we replace them always.
+    ('\u{202E}', "�"),
+    ('\u{2066}', "�"),
+    ('\u{2067}', "�"),
+    ('\u{2068}', "�"),
+    ('\u{202C}', "�"),
+    ('\u{2069}', "�"),
+    // In terminals without Unicode support the following will be garbled, but in *all* terminals
+    // the underlying codepoint will be as well. We could gate this replacement behind a "unicode
+    // support" gate.
+    ('\u{0000}', "␀"),
+    ('\u{0001}', "␁"),
+    ('\u{0002}', "␂"),
+    ('\u{0003}', "␃"),
+    ('\u{0004}', "␄"),
+    ('\u{0005}', "␅"),
+    ('\u{0006}', "␆"),
+    ('\u{0007}', "␇"),
+    ('\u{0008}', "␈"),
+    ('\u{000B}', "␋"),
+    ('\u{000C}', "␌"),
+    ('\u{000D}', "␍"),
+    ('\u{000E}', "␎"),
+    ('\u{000F}', "␏"),
+    ('\u{0010}', "␐"),
+    ('\u{0011}', "␑"),
+    ('\u{0012}', "␒"),
+    ('\u{0013}', "␓"),
+    ('\u{0014}', "␔"),
+    ('\u{0015}', "␕"),
+    ('\u{0016}', "␖"),
+    ('\u{0017}', "␗"),
+    ('\u{0018}', "␘"),
+    ('\u{0019}', "␙"),
+    ('\u{001A}', "␚"),
+    ('\u{001B}', "␛"),
+    ('\u{001C}', "␜"),
+    ('\u{001D}', "␝"),
+    ('\u{001E}', "␞"),
+    ('\u{001F}', "␟"),
+    ('\u{007F}', "␡"),
 ];
 
 fn normalize_whitespace(str: &str) -> String {
@@ -2797,6 +2827,18 @@ impl Style {
         }
         spec
     }
+}
+
+/// Whether the original and suggested code are the same.
+pub fn is_different(sm: &SourceMap, suggested: &str, sp: Span) -> bool {
+    let found = match sm.span_to_snippet(sp) {
+        Ok(snippet) => snippet,
+        Err(e) => {
+            warn!(error = ?e, "Invalid span {:?}", sp);
+            return true;
+        }
+    };
+    found != suggested
 }
 
 /// Whether the original and suggested code are visually similar enough to warrant extra wording.

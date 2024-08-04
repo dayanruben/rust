@@ -9,19 +9,17 @@
 //! pieces of `rustup.rs`!
 
 use std::collections::HashSet;
-use std::env;
 use std::ffi::OsStr;
-use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::{env, fs};
 
 use object::read::archive::ArchiveFile;
 use object::BinaryFormat;
 
-use crate::core::build_steps::compile;
 use crate::core::build_steps::doc::DocumentationFormat;
-use crate::core::build_steps::llvm;
 use crate::core::build_steps::tool::{self, Tool};
+use crate::core::build_steps::{compile, llvm};
 use crate::core::builder::{Builder, Kind, RunConfig, ShouldRun, Step};
 use crate::core::config::TargetSelection;
 use crate::utils::channel::{self, Info};
@@ -108,7 +106,6 @@ impl Step for JsonDocs {
         builder.ensure(crate::core::build_steps::doc::Std::new(
             builder.top_stage,
             host,
-            builder,
             DocumentationFormat::Json,
         ));
 
@@ -182,7 +179,7 @@ fn make_win_dist(
     //Ask gcc where it keeps its stuff
     let mut cmd = command(builder.cc(target));
     cmd.arg("-print-search-dirs");
-    let gcc_out = cmd.capture_stdout().run(builder).stdout();
+    let gcc_out = cmd.run_capture_stdout(builder).stdout();
 
     let mut bin_path: Vec<_> = env::split_paths(&env::var_os("PATH").unwrap_or_default()).collect();
     let mut lib_path = Vec::new();
@@ -907,7 +904,7 @@ impl Step for Src {
     /// Creates the `rust-src` installer component
     fn run(self, builder: &Builder<'_>) -> GeneratedTarball {
         if !builder.config.dry_run() {
-            builder.update_submodule(Path::new("src/llvm-project"));
+            builder.require_submodule("src/llvm-project", None);
         }
 
         let tarball = Tarball::new_targetless(builder, "rust-src");
@@ -1022,10 +1019,7 @@ impl Step for PlainSourceTarball {
             // FIXME: This code looks _very_ similar to what we have in `src/core/build_steps/vendor.rs`
             // perhaps it should be removed in favor of making `dist` perform the `vendor` step?
 
-            // Ensure we have all submodules from src and other directories checked out.
-            for submodule in build_helper::util::parse_gitmodules(&builder.src) {
-                builder.update_submodule(Path::new(submodule));
-            }
+            builder.require_and_update_all_submodules();
 
             // Vendor all Cargo dependencies
             let mut cmd = command(&builder.initial_cargo);
@@ -1067,7 +1061,7 @@ impl Step for PlainSourceTarball {
                 cmd.arg("--sync").arg(manifest_path);
             }
 
-            let config = cmd.capture().run(builder).stdout();
+            let config = cmd.run_capture(builder).stdout();
 
             let cargo_config_dir = plain_dst_src.join(".cargo");
             builder.create_dir(&cargo_config_dir);
@@ -2075,7 +2069,7 @@ fn maybe_install_llvm(
         let mut cmd = command(llvm_config);
         cmd.arg("--libfiles");
         builder.verbose(|| println!("running {cmd:?}"));
-        let files = cmd.capture_stdout().run(builder).stdout();
+        let files = cmd.run_capture_stdout(builder).stdout();
         let build_llvm_out = &builder.llvm_out(builder.config.build);
         let target_llvm_out = &builder.llvm_out(target);
         for file in files.trim_end().split(' ') {
@@ -2128,8 +2122,13 @@ impl Step for LlvmTools {
 
     fn should_run(run: ShouldRun<'_>) -> ShouldRun<'_> {
         let default = should_build_extended_tool(run.builder, "llvm-tools");
-        // FIXME: allow using the names of the tools themselves?
-        run.alias("llvm-tools").default_condition(default)
+
+        let mut run = run.alias("llvm-tools");
+        for tool in LLVM_TOOLS {
+            run = run.alias(tool);
+        }
+
+        run.default_condition(default)
     }
 
     fn make_run(run: RunConfig<'_>) {
@@ -2137,6 +2136,32 @@ impl Step for LlvmTools {
     }
 
     fn run(self, builder: &Builder<'_>) -> Option<GeneratedTarball> {
+        fn tools_to_install(paths: &[PathBuf]) -> Vec<&'static str> {
+            let mut tools = vec![];
+
+            for path in paths {
+                let path = path.to_str().unwrap();
+
+                // Include all tools if path is 'llvm-tools'.
+                if path == "llvm-tools" {
+                    return LLVM_TOOLS.to_owned();
+                }
+
+                for tool in LLVM_TOOLS {
+                    if path == *tool {
+                        tools.push(*tool);
+                    }
+                }
+            }
+
+            // If no specific tool is requested, include all tools.
+            if tools.is_empty() {
+                tools = LLVM_TOOLS.to_owned();
+            }
+
+            tools
+        }
+
         let target = self.target;
 
         /* run only if llvm-config isn't used */
@@ -2157,7 +2182,7 @@ impl Step for LlvmTools {
             // Prepare the image directory
             let src_bindir = builder.llvm_out(target).join("bin");
             let dst_bindir = format!("lib/rustlib/{}/bin", target.triple);
-            for tool in LLVM_TOOLS {
+            for tool in tools_to_install(&builder.paths) {
                 let exe = src_bindir.join(exe(tool, target));
                 tarball.add_file(&exe, &dst_bindir, 0o755);
             }

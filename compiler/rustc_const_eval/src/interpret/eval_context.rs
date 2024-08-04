@@ -2,16 +2,14 @@ use std::cell::Cell;
 use std::{fmt, mem};
 
 use either::{Either, Left, Right};
-use rustc_infer::infer::at::ToTrace;
-use rustc_infer::traits::ObligationCause;
-use rustc_trait_selection::traits::ObligationCtxt;
-use tracing::{debug, info, info_span, instrument, trace};
-
 use rustc_errors::DiagCtxtHandle;
-use rustc_hir::{self as hir, def_id::DefId, definitions::DefPathData};
+use rustc_hir::def_id::DefId;
+use rustc_hir::definitions::DefPathData;
+use rustc_hir::{self as hir};
 use rustc_index::IndexVec;
+use rustc_infer::infer::at::ToTrace;
 use rustc_infer::infer::TyCtxtInferExt;
-use rustc_middle::mir;
+use rustc_infer::traits::ObligationCause;
 use rustc_middle::mir::interpret::{
     CtfeProvenance, ErrorHandled, InvalidMetaKind, ReportedErrorInfo,
 };
@@ -21,11 +19,14 @@ use rustc_middle::ty::layout::{
     TyAndLayout,
 };
 use rustc_middle::ty::{self, GenericArgsRef, ParamEnv, Ty, TyCtxt, TypeFoldable, Variance};
-use rustc_middle::{bug, span_bug};
+use rustc_middle::{bug, mir, span_bug};
 use rustc_mir_dataflow::storage::always_storage_live_locals;
 use rustc_session::Limit;
 use rustc_span::Span;
-use rustc_target::abi::{call::FnAbi, Align, HasDataLayout, Size, TargetDataLayout};
+use rustc_target::abi::call::FnAbi;
+use rustc_target::abi::{Align, HasDataLayout, Size, TargetDataLayout};
+use rustc_trait_selection::traits::ObligationCtxt;
+use tracing::{debug, info, info_span, instrument, trace};
 
 use super::{
     err_inval, throw_inval, throw_ub, throw_ub_custom, throw_unsup, GlobalId, Immediate,
@@ -33,9 +34,7 @@ use super::{
     OpTy, Operand, Place, PlaceTy, Pointer, PointerArithmetic, Projectable, Provenance,
     ReturnAction, Scalar,
 };
-use crate::errors;
-use crate::util;
-use crate::{fluent_generated as fluent, ReportErrorExt};
+use crate::{errors, fluent_generated as fluent, util, ReportErrorExt};
 
 pub struct InterpCx<'tcx, M: Machine<'tcx>> {
     /// Stores the `Machine` instance.
@@ -561,17 +560,6 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
         self.frame().body
     }
 
-    #[inline(always)]
-    pub fn sign_extend(&self, value: u128, ty: TyAndLayout<'_>) -> u128 {
-        assert!(ty.abi.is_signed());
-        ty.size.sign_extend(value)
-    }
-
-    #[inline(always)]
-    pub fn truncate(&self, value: u128, ty: TyAndLayout<'_>) -> u128 {
-        ty.size.truncate(value)
-    }
-
     #[inline]
     pub fn type_is_freeze(&self, ty: Ty<'tcx>) -> bool {
         ty.is_freeze(*self.tcx, self.param_env)
@@ -889,7 +877,7 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
         body: &'tcx mir::Body<'tcx>,
     ) -> InterpResult<'tcx> {
         // Make sure all the constants required by this frame evaluate successfully (post-monomorphization check).
-        for &const_ in &body.required_consts {
+        for &const_ in body.required_consts() {
             let c =
                 self.instantiate_from_current_frame_and_normalize_erasing_regions(const_.const_)?;
             c.eval(*self.tcx, self.param_env, const_.span).map_err(|err| {

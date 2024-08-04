@@ -3,13 +3,11 @@
 //! The main entry point is the `step` method.
 
 use either::Either;
-use tracing::{info, instrument, trace};
-
 use rustc_index::IndexSlice;
-use rustc_middle::mir;
 use rustc_middle::ty::layout::LayoutOf;
-use rustc_middle::{bug, span_bug};
+use rustc_middle::{bug, mir, span_bug};
 use rustc_target::abi::{FieldIdx, FIRST_VARIANT};
+use tracing::{info, instrument, trace};
 
 use super::{
     ImmTy, Immediate, InterpCx, InterpResult, Machine, MemPlaceMeta, PlaceTy, Projectable, Scalar,
@@ -364,7 +362,7 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
             // of the first element.
             let elem_size = first.layout.size;
             let first_ptr = first.ptr();
-            let rest_ptr = first_ptr.offset(elem_size, self)?;
+            let rest_ptr = first_ptr.wrapping_offset(elem_size, self);
             // No alignment requirement since `copy_op` above already checked it.
             self.mem_copy_repeatedly(
                 first_ptr,

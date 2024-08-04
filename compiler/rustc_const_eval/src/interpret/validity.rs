@@ -9,17 +9,15 @@ use std::hash::Hash;
 use std::num::NonZero;
 
 use either::{Left, Right};
-use tracing::trace;
-
 use hir::def::DefKind;
 use rustc_ast::Mutability;
 use rustc_data_structures::fx::FxHashSet;
 use rustc_hir as hir;
 use rustc_middle::bug;
+use rustc_middle::mir::interpret::ValidationErrorKind::{self, *};
 use rustc_middle::mir::interpret::{
     ExpectedKind, InterpError, InvalidMetaKind, Misalignment, PointerKind, Provenance,
     UnsupportedOpInfo, ValidationErrorInfo,
-    ValidationErrorKind::{self, *},
 };
 use rustc_middle::ty::layout::{LayoutOf, TyAndLayout};
 use rustc_middle::ty::{self, Ty};
@@ -27,13 +25,17 @@ use rustc_span::symbol::{sym, Symbol};
 use rustc_target::abi::{
     Abi, FieldIdx, Scalar as ScalarAbi, Size, VariantIdx, Variants, WrappingRange,
 };
+use tracing::trace;
 
+use super::machine::AllocMap;
 use super::{
-    err_ub, format_interp_error, machine::AllocMap, throw_ub, AllocId, AllocKind, CheckInAllocMsg,
-    GlobalAlloc, ImmTy, Immediate, InterpCx, InterpResult, MPlaceTy, Machine, MemPlaceMeta, OpTy,
-    Pointer, Projectable, Scalar, ValueVisitor,
+    err_ub, format_interp_error, throw_ub, AllocId, AllocKind, CheckInAllocMsg, GlobalAlloc, ImmTy,
+    Immediate, InterpCx, InterpResult, MPlaceTy, Machine, MemPlaceMeta, OpTy, Pointer, Projectable,
+    Scalar, ValueVisitor,
 };
 
+// for the validation errors
+#[rustfmt::skip]
 use super::InterpError::UndefinedBehavior as Ub;
 use super::InterpError::Unsupported as Unsup;
 use super::UndefinedBehaviorInfo::*;
@@ -346,7 +348,7 @@ impl<'rt, 'tcx, M: Machine<'tcx>> ValidityVisitor<'rt, 'tcx, M> {
                 try_validation!(
                     self.ecx.get_ptr_vtable_ty(vtable, Some(data)),
                     self.path,
-                    Ub(DanglingIntPointer(..) | InvalidVTablePointer(..)) =>
+                    Ub(DanglingIntPointer{ .. } | InvalidVTablePointer(..)) =>
                         InvalidVTablePtr { value: format!("{vtable}") },
                     Ub(InvalidVTableTrait { expected_trait, vtable_trait }) => {
                         InvalidMetaWrongTrait { expected_trait, vtable_trait: *vtable_trait }
@@ -403,8 +405,8 @@ impl<'rt, 'tcx, M: Machine<'tcx>> ValidityVisitor<'rt, 'tcx, M> {
                 CheckInAllocMsg::InboundsTest, // will anyway be replaced by validity message
             ),
             self.path,
-            Ub(DanglingIntPointer(0, _)) => NullPtr { ptr_kind },
-            Ub(DanglingIntPointer(i, _)) => DanglingPtrNoProvenance {
+            Ub(DanglingIntPointer { addr: 0, .. }) => NullPtr { ptr_kind },
+            Ub(DanglingIntPointer { addr: i, .. }) => DanglingPtrNoProvenance {
                 ptr_kind,
                 // FIXME this says "null pointer" when null but we need translate
                 pointer: format!("{}", Pointer::<Option<AllocId>>::from_addr_invalid(*i))
@@ -453,7 +455,7 @@ impl<'rt, 'tcx, M: Machine<'tcx>> ValidityVisitor<'rt, 'tcx, M> {
             };
             // Proceed recursively even for ZST, no reason to skip them!
             // `!` is a ZST and we want to validate it.
-            if let Ok((alloc_id, _offset, _prov)) = self.ecx.ptr_try_get_alloc_id(place.ptr()) {
+            if let Ok((alloc_id, _offset, _prov)) = self.ecx.ptr_try_get_alloc_id(place.ptr(), 0) {
                 let mut skip_recursive_check = false;
                 if let Some(GlobalAlloc::Static(did)) = self.ecx.tcx.try_get_global_alloc(alloc_id)
                 {
@@ -603,7 +605,7 @@ impl<'rt, 'tcx, M: Machine<'tcx>> ValidityVisitor<'rt, 'tcx, M> {
                     let _fn = try_validation!(
                         self.ecx.get_ptr_fn(ptr),
                         self.path,
-                        Ub(DanglingIntPointer(..) | InvalidFunctionPointer(..)) =>
+                        Ub(DanglingIntPointer{ .. } | InvalidFunctionPointer(..)) =>
                             InvalidFnPtr { value: format!("{ptr}") },
                     );
                     // FIXME: Check if the signature matches

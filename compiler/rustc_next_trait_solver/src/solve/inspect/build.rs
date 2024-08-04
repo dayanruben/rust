@@ -7,15 +7,15 @@
 use std::marker::PhantomData;
 use std::mem;
 
+use derive_where::derive_where;
 use rustc_type_ir::inherent::*;
 use rustc_type_ir::{self as ty, search_graph, Interner};
 
 use crate::delegate::SolverDelegate;
 use crate::solve::eval_ctxt::canonical;
-use crate::solve::inspect;
 use crate::solve::{
-    CanonicalInput, Certainty, GenerateProofTree, Goal, GoalEvaluationKind, GoalSource, QueryInput,
-    QueryResult,
+    inspect, CanonicalInput, Certainty, GenerateProofTree, Goal, GoalEvaluationKind, GoalSource,
+    QueryInput, QueryResult,
 };
 
 /// The core data structure when building proof trees.
@@ -51,8 +51,7 @@ where
 /// in the code, only one or two variants are actually possible.
 ///
 /// We simply ICE in case that assumption is broken.
-#[derive(derivative::Derivative)]
-#[derivative(Debug(bound = ""))]
+#[derive_where(Debug; I: Interner)]
 enum DebugSolver<I: Interner> {
     Root,
     GoalEvaluation(WipGoalEvaluation<I>),
@@ -78,8 +77,7 @@ impl<I: Interner> From<WipCanonicalGoalEvaluationStep<I>> for DebugSolver<I> {
     }
 }
 
-#[derive(derivative::Derivative)]
-#[derivative(PartialEq(bound = ""), Eq(bound = ""), Debug(bound = ""))]
+#[derive_where(PartialEq, Eq, Debug; I: Interner)]
 struct WipGoalEvaluation<I: Interner> {
     pub uncanonicalized_goal: Goal<I, I::Predicate>,
     pub orig_values: Vec<I::GenericArg>,
@@ -96,8 +94,7 @@ impl<I: Interner> WipGoalEvaluation<I> {
     }
 }
 
-#[derive(derivative::Derivative)]
-#[derivative(PartialEq(bound = ""), Eq(bound = ""))]
+#[derive_where(PartialEq, Eq; I: Interner)]
 pub(in crate::solve) enum WipCanonicalGoalEvaluationKind<I: Interner> {
     Overflow,
     CycleInStack,
@@ -118,8 +115,7 @@ impl<I: Interner> std::fmt::Debug for WipCanonicalGoalEvaluationKind<I> {
     }
 }
 
-#[derive(derivative::Derivative)]
-#[derivative(PartialEq(bound = ""), Eq(bound = ""), Debug(bound = ""))]
+#[derive_where(PartialEq, Eq, Debug; I: Interner)]
 struct WipCanonicalGoalEvaluation<I: Interner> {
     goal: CanonicalInput<I>,
     kind: Option<WipCanonicalGoalEvaluationKind<I>>,
@@ -153,8 +149,7 @@ impl<I: Interner> WipCanonicalGoalEvaluation<I> {
     }
 }
 
-#[derive(derivative::Derivative)]
-#[derivative(PartialEq(bound = ""), Eq(bound = ""), Debug(bound = ""))]
+#[derive_where(PartialEq, Eq, Debug; I: Interner)]
 struct WipCanonicalGoalEvaluationStep<I: Interner> {
     /// Unlike `EvalCtxt::var_values`, we append a new
     /// generic arg here whenever we create a new inference
@@ -193,8 +188,7 @@ impl<I: Interner> WipCanonicalGoalEvaluationStep<I> {
     }
 }
 
-#[derive(derivative::Derivative)]
-#[derivative(PartialEq(bound = ""), Eq(bound = ""), Debug(bound = ""))]
+#[derive_where(PartialEq, Eq, Debug; I: Interner)]
 struct WipProbe<I: Interner> {
     initial_num_var_values: usize,
     steps: Vec<WipProbeStep<I>>,
@@ -212,8 +206,7 @@ impl<I: Interner> WipProbe<I> {
     }
 }
 
-#[derive(derivative::Derivative)]
-#[derivative(PartialEq(bound = ""), Eq(bound = ""), Debug(bound = ""))]
+#[derive_where(PartialEq, Eq, Debug; I: Interner)]
 enum WipProbeStep<I: Interner> {
     AddGoal(GoalSource, inspect::CanonicalState<I, Goal<I, I::Predicate>>),
     NestedProbe(WipProbe<I>),

@@ -4,18 +4,14 @@ use std::hash::Hash;
 use std::ops::ControlFlow;
 
 use rustc_ast::Mutability;
-use rustc_data_structures::fx::FxIndexMap;
-use rustc_data_structures::fx::IndexEntry;
-use rustc_hir::def_id::DefId;
-use rustc_hir::def_id::LocalDefId;
-use rustc_hir::LangItem;
-use rustc_hir::{self as hir, CRATE_HIR_ID};
-use rustc_middle::bug;
-use rustc_middle::mir;
+use rustc_data_structures::fx::{FxIndexMap, IndexEntry};
+use rustc_hir::def_id::{DefId, LocalDefId};
+use rustc_hir::{self as hir, LangItem, CRATE_HIR_ID};
 use rustc_middle::mir::AssertMessage;
 use rustc_middle::query::TyCtxtAt;
 use rustc_middle::ty::layout::{FnAbiOf, TyAndLayout};
 use rustc_middle::ty::{self, TyCtxt};
+use rustc_middle::{bug, mir};
 use rustc_session::lint::builtin::WRITES_THROUGH_IMMUTABLE_POINTER;
 use rustc_span::symbol::{sym, Symbol};
 use rustc_span::Span;
@@ -23,6 +19,7 @@ use rustc_target::abi::{Align, Size};
 use rustc_target::spec::abi::Abi as CallAbi;
 use tracing::debug;
 
+use super::error::*;
 use crate::errors::{LongRunning, LongRunningWarn};
 use crate::fluent_generated as fluent;
 use crate::interpret::{
@@ -30,8 +27,6 @@ use crate::interpret::{
     throw_unsup_format, AllocId, AllocRange, ConstAllocation, CtfeProvenance, FnArg, FnVal, Frame,
     GlobalAlloc, ImmTy, InterpCx, InterpResult, MPlaceTy, OpTy, Pointer, PointerArithmetic, Scalar,
 };
-
-use super::error::*;
 
 /// When hitting this many interpreted terminators we emit a deny by default lint
 /// that notfies the user that their constant takes a long time to evaluate. If that's
@@ -201,7 +196,8 @@ impl<'tcx> CompileTimeInterpCx<'tcx> {
         let topmost = span.ctxt().outer_expn().expansion_cause().unwrap_or(span);
         let caller = self.tcx.sess.source_map().lookup_char_pos(topmost.lo());
 
-        use rustc_session::{config::RemapPathScopeComponents, RemapFileNameExt};
+        use rustc_session::config::RemapPathScopeComponents;
+        use rustc_session::RemapFileNameExt;
         (
             Symbol::intern(
                 &caller
@@ -299,7 +295,7 @@ impl<'tcx> CompileTimeInterpCx<'tcx> {
             );
         }
 
-        match self.ptr_try_get_alloc_id(ptr) {
+        match self.ptr_try_get_alloc_id(ptr, 0) {
             Ok((alloc_id, offset, _extra)) => {
                 let (_size, alloc_align, _kind) = self.get_alloc_info(alloc_id);
 
@@ -514,7 +510,7 @@ impl<'tcx> interpret::Machine<'tcx> for CompileTimeMachine<'tcx> {
 
                 // If an allocation is created in an another const,
                 // we don't deallocate it.
-                let (alloc_id, _, _) = ecx.ptr_get_alloc_id(ptr)?;
+                let (alloc_id, _, _) = ecx.ptr_get_alloc_id(ptr, 0)?;
                 let is_allocated_in_another_const = matches!(
                     ecx.tcx.try_get_global_alloc(alloc_id),
                     Some(interpret::GlobalAlloc::Memory(_))

@@ -3,15 +3,14 @@
 #[cfg(test)]
 mod tests;
 
-use crate::cmp;
+use core::ffi::c_void;
+use core::{cmp, mem, ptr};
+
 use crate::io::{self, BorrowedCursor, ErrorKind, IoSlice, IoSliceMut, Read};
-use crate::mem;
 use crate::os::windows::io::{
     AsHandle, AsRawHandle, BorrowedHandle, FromRawHandle, IntoRawHandle, OwnedHandle, RawHandle,
 };
-use crate::ptr;
-use crate::sys::c;
-use crate::sys::cvt;
+use crate::sys::{c, cvt};
 use crate::sys_common::{AsInner, FromInner, IntoInner};
 
 /// An owned container for `HANDLE` object, closing them on Drop.
@@ -255,7 +254,7 @@ impl Handle {
                 None,
                 ptr::null_mut(),
                 &mut io_status,
-                buf.cast::<core::ffi::c_void>(),
+                buf.cast::<c_void>(),
                 len,
                 offset.as_ref().map(|n| ptr::from_ref(n).cast::<i64>()).unwrap_or(ptr::null()),
                 ptr::null(),
@@ -305,7 +304,7 @@ impl Handle {
                 None,
                 ptr::null_mut(),
                 &mut io_status,
-                buf.as_ptr().cast::<core::ffi::c_void>(),
+                buf.as_ptr().cast::<c_void>(),
                 len,
                 offset.as_ref().map(|n| ptr::from_ref(n).cast::<i64>()).unwrap_or(ptr::null()),
                 ptr::null(),

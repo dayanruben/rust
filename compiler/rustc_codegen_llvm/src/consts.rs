@@ -1,13 +1,5 @@
-use crate::base;
-use crate::common::{self, CodegenCx};
-use crate::debuginfo;
-use crate::errors::{
-    InvalidMinimumAlignmentNotPowerOfTwo, InvalidMinimumAlignmentTooLarge, SymbolAlreadyDefined,
-};
-use crate::llvm::{self, True};
-use crate::type_::Type;
-use crate::type_of::LayoutLlvmExt;
-use crate::value::Value;
+use std::ops::Range;
+
 use rustc_codegen_ssa::traits::*;
 use rustc_hir::def::DefKind;
 use rustc_hir::def_id::DefId;
@@ -24,8 +16,17 @@ use rustc_session::config::Lto;
 use rustc_target::abi::{
     Align, AlignFromBytesError, HasDataLayout, Primitive, Scalar, Size, WrappingRange,
 };
-use std::ops::Range;
 use tracing::{debug, instrument, trace};
+
+use crate::common::{self, CodegenCx};
+use crate::errors::{
+    InvalidMinimumAlignmentNotPowerOfTwo, InvalidMinimumAlignmentTooLarge, SymbolAlreadyDefined,
+};
+use crate::llvm::{self, True};
+use crate::type_::Type;
+use crate::type_of::LayoutLlvmExt;
+use crate::value::Value;
+use crate::{base, debuginfo};
 
 pub fn const_alloc_to_llvm<'ll>(
     cx: &CodegenCx<'ll, '_>,
@@ -330,7 +331,7 @@ impl<'ll> CodegenCx<'ll, '_> {
 
             // If this assertion triggers, there's something wrong with commandline
             // argument validation.
-            debug_assert!(
+            assert!(
                 !(self.tcx.sess.opts.cg.linker_plugin_lto.enabled()
                     && self.tcx.sess.target.is_like_windows
                     && self.tcx.sess.opts.cg.prefer_dynamic)

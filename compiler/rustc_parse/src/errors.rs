@@ -2,9 +2,10 @@ use std::borrow::Cow;
 
 use rustc_ast::token::Token;
 use rustc_ast::{Path, Visibility};
+use rustc_errors::codes::*;
 use rustc_errors::{
-    codes::*, Applicability, Diag, DiagCtxtHandle, Diagnostic, EmissionGuarantee, Level,
-    SubdiagMessageOp, Subdiagnostic,
+    Applicability, Diag, DiagCtxtHandle, Diagnostic, EmissionGuarantee, Level, SubdiagMessageOp,
+    Subdiagnostic,
 };
 use rustc_macros::{Diagnostic, Subdiagnostic};
 use rustc_session::errors::ExprParenthesesNeeded;
@@ -554,12 +555,7 @@ pub(crate) enum MissingInInForLoopSub {
         code = "in"
     )]
     InNotOf(#[primary_span] Span),
-    #[suggestion(
-        parse_add_in,
-        style = "verbose",
-        applicability = "maybe-incorrect",
-        code = " in "
-    )]
+    #[suggestion(parse_add_in, style = "verbose", applicability = "maybe-incorrect", code = " in ")]
     AddIn(#[primary_span] Span),
 }
 
@@ -2729,15 +2725,24 @@ impl HelpUseLatestEdition {
 
 #[derive(Diagnostic)]
 #[diag(parse_box_syntax_removed)]
-pub struct BoxSyntaxRemoved<'a> {
+pub struct BoxSyntaxRemoved {
     #[primary_span]
-    #[suggestion(
-        code = "Box::new({code})",
-        applicability = "machine-applicable",
-        style = "verbose"
-    )]
     pub span: Span,
-    pub code: &'a str,
+    #[subdiagnostic]
+    pub sugg: AddBoxNew,
+}
+
+#[derive(Subdiagnostic)]
+#[multipart_suggestion(
+    parse_box_syntax_removed_suggestion,
+    applicability = "machine-applicable",
+    style = "verbose"
+)]
+pub struct AddBoxNew {
+    #[suggestion_part(code = "Box::new(")]
+    pub box_kw_and_lo: Span,
+    #[suggestion_part(code = ")")]
+    pub hi: Span,
 }
 
 #[derive(Diagnostic)]
@@ -3187,6 +3192,7 @@ pub(crate) struct DotDotRangeAttribute {
 #[note]
 pub struct InvalidAttrUnsafe {
     #[primary_span]
+    #[label]
     pub span: Span,
     pub name: Path,
 }
@@ -3211,4 +3217,34 @@ pub struct UnsafeAttrOutsideUnsafeSuggestion {
     pub left: Span,
     #[suggestion_part(code = ")")]
     pub right: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(parse_binder_before_modifiers)]
+pub struct BinderBeforeModifiers {
+    #[primary_span]
+    pub binder_span: Span,
+    #[label]
+    pub modifiers_span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(parse_binder_and_polarity)]
+pub struct BinderAndPolarity {
+    #[primary_span]
+    pub polarity_span: Span,
+    #[label]
+    pub binder_span: Span,
+    pub polarity: &'static str,
+}
+
+#[derive(Diagnostic)]
+#[diag(parse_modifiers_and_polarity)]
+pub struct PolarityAndModifiers {
+    #[primary_span]
+    pub polarity_span: Span,
+    #[label]
+    pub modifiers_span: Span,
+    pub polarity: &'static str,
+    pub modifiers_concatenated: String,
 }

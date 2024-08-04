@@ -1,10 +1,7 @@
 use std::ops::ControlFlow;
 
-use crate::middle::resolve_bound_vars as rbv;
-use hir::{
-    intravisit::{self, Visitor},
-    GenericParamKind, HirId, Node,
-};
+use hir::intravisit::{self, Visitor};
+use hir::{GenericParamKind, HirId, Node};
 use rustc_hir as hir;
 use rustc_hir::def::DefKind;
 use rustc_hir::def_id::LocalDefId;
@@ -12,6 +9,9 @@ use rustc_middle::ty::{self, TyCtxt};
 use rustc_session::lint;
 use rustc_span::symbol::{kw, Symbol};
 use rustc_span::Span;
+
+use crate::delegation::inherit_generics_for_delegation_item;
+use crate::middle::resolve_bound_vars as rbv;
 
 #[instrument(level = "debug", skip(tcx), ret)]
 pub(super) fn generics_of(tcx: TyCtxt<'_>, def_id: LocalDefId) -> ty::Generics {
@@ -52,6 +52,13 @@ pub(super) fn generics_of(tcx: TyCtxt<'_>, def_id: LocalDefId) -> ty::Generics {
             has_late_bound_regions: opaque_ty_generics.has_late_bound_regions,
             host_effect_index: parent_generics.host_effect_index,
         };
+    }
+
+    // For a delegation item inherit generics from callee.
+    if let Some(sig_id) = tcx.hir().opt_delegation_sig_id(def_id)
+        && let Some(generics) = inherit_generics_for_delegation_item(tcx, def_id, sig_id)
+    {
+        return generics;
     }
 
     let hir_id = tcx.local_def_id_to_hir_id(def_id);

@@ -1,9 +1,11 @@
 // Decoding metadata from a single crate's metadata
 
-use crate::creader::CStore;
-use crate::rmeta::table::IsDefault;
-use crate::rmeta::*;
+use std::iter::TrustedLen;
+use std::path::Path;
+use std::{io, iter, mem};
 
+pub(super) use cstore_impl::provide;
+use proc_macro::bridge::client::ProcMacro;
 use rustc_ast as ast;
 use rustc_data_structures::captures::Captures;
 use rustc_data_structures::fingerprint::Fingerprint;
@@ -27,17 +29,14 @@ use rustc_serialize::opaque::MemDecoder;
 use rustc_serialize::{Decodable, Decoder};
 use rustc_session::cstore::{CrateSource, ExternCrate};
 use rustc_session::Session;
+use rustc_span::hygiene::HygieneDecodeContext;
 use rustc_span::symbol::kw;
 use rustc_span::{BytePos, Pos, SpanData, SpanDecoder, SyntaxContext, DUMMY_SP};
 use tracing::debug;
 
-use proc_macro::bridge::client::ProcMacro;
-use std::iter::TrustedLen;
-use std::path::Path;
-use std::{io, iter, mem};
-
-pub(super) use cstore_impl::provide;
-use rustc_span::hygiene::HygieneDecodeContext;
+use crate::creader::CStore;
+use crate::rmeta::table::IsDefault;
+use crate::rmeta::*;
 
 mod cstore_impl;
 
@@ -1728,7 +1727,6 @@ impl<'a, 'tcx> CrateMetadataRef<'a> {
                     source_len,
                     lines,
                     multibyte_chars,
-                    non_narrow_chars,
                     normalized_pos,
                     stable_id,
                     ..
@@ -1780,7 +1778,6 @@ impl<'a, 'tcx> CrateMetadataRef<'a> {
                     self.cnum,
                     lines,
                     multibyte_chars,
-                    non_narrow_chars,
                     normalized_pos,
                     source_file_index,
                 );

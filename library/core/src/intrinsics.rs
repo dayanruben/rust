@@ -63,10 +63,8 @@
 )]
 #![allow(missing_docs)]
 
-use crate::marker::DiscriminantKind;
-use crate::marker::Tuple;
-use crate::ptr;
-use crate::ub_checks;
+use crate::marker::{DiscriminantKind, Tuple};
+use crate::{ptr, ub_checks};
 
 pub mod mir;
 pub mod simd;
@@ -1010,51 +1008,40 @@ pub const fn unlikely(b: bool) -> bool {
     b
 }
 
+/// Returns either `true_val` or `false_val` depending on condition `b` with a
+/// hint to the compiler that this condition is unlikely to be correctly
+/// predicted by a CPU's branch predictor (e.g. a binary search).
+///
+/// This is otherwise functionally equivalent to `if b { true_val } else { false_val }`.
+///
+/// Note that, unlike most intrinsics, this is safe to call;
+/// it does not require an `unsafe` block.
+/// Therefore, implementations must not require the user to uphold
+/// any safety invariants.
+///
+/// This intrinsic does not have a stable counterpart.
+#[cfg(not(bootstrap))]
+#[unstable(feature = "core_intrinsics", issue = "none")]
+#[rustc_intrinsic]
+#[rustc_nounwind]
+#[miri::intrinsic_fallback_is_spec]
+#[inline]
+pub fn select_unpredictable<T>(b: bool, true_val: T, false_val: T) -> T {
+    if b { true_val } else { false_val }
+}
+
+#[cfg(bootstrap)]
+#[inline]
+pub fn select_unpredictable<T>(b: bool, true_val: T, false_val: T) -> T {
+    if b { true_val } else { false_val }
+}
+
 extern "rust-intrinsic" {
     /// Executes a breakpoint trap, for inspection by a debugger.
     ///
     /// This intrinsic does not have a stable counterpart.
     #[rustc_nounwind]
     pub fn breakpoint();
-
-    #[cfg(bootstrap)]
-    #[rustc_const_stable(feature = "const_size_of", since = "1.40.0")]
-    #[rustc_safe_intrinsic]
-    #[rustc_nounwind]
-    pub fn size_of<T>() -> usize;
-
-    #[cfg(bootstrap)]
-    #[rustc_const_stable(feature = "const_min_align_of", since = "1.40.0")]
-    #[rustc_safe_intrinsic]
-    #[rustc_nounwind]
-    pub fn min_align_of<T>() -> usize;
-
-    #[cfg(bootstrap)]
-    #[rustc_const_unstable(feature = "const_pref_align_of", issue = "91971")]
-    #[rustc_nounwind]
-    pub fn pref_align_of<T>() -> usize;
-
-    #[cfg(bootstrap)]
-    #[rustc_const_unstable(feature = "const_size_of_val", issue = "46571")]
-    #[rustc_nounwind]
-    pub fn size_of_val<T: ?Sized>(_: *const T) -> usize;
-
-    #[cfg(bootstrap)]
-    #[rustc_const_unstable(feature = "const_align_of_val", issue = "46571")]
-    #[rustc_nounwind]
-    pub fn min_align_of_val<T: ?Sized>(_: *const T) -> usize;
-
-    #[cfg(bootstrap)]
-    #[rustc_const_unstable(feature = "const_type_name", issue = "63084")]
-    #[rustc_safe_intrinsic]
-    #[rustc_nounwind]
-    pub fn type_name<T: ?Sized>() -> &'static str;
-
-    #[cfg(bootstrap)]
-    #[rustc_const_unstable(feature = "const_type_id", issue = "77125")]
-    #[rustc_safe_intrinsic]
-    #[rustc_nounwind]
-    pub fn type_id<T: ?Sized + 'static>() -> u128;
 
     /// A guard for unsafe functions that cannot ever be executed if `T` is uninhabited:
     /// This will statically either panic, or do nothing.
@@ -1252,7 +1239,7 @@ extern "rust-intrinsic" {
     /// - If the code actually wants to work on the address the pointer points to, it can use `as`
     ///   casts or [`ptr.addr()`][pointer::addr].
     ///
-    /// Turning a `*mut T` into an `&mut T`:
+    /// Turning a `*mut T` into a `&mut T`:
     ///
     /// ```
     /// let ptr: *mut i32 = &mut 0;
@@ -1264,7 +1251,7 @@ extern "rust-intrinsic" {
     /// let ref_casted = unsafe { &mut *ptr };
     /// ```
     ///
-    /// Turning an `&mut T` into an `&mut U`:
+    /// Turning a `&mut T` into a `&mut U`:
     ///
     /// ```
     /// let ptr = &mut 0;
@@ -1277,7 +1264,7 @@ extern "rust-intrinsic" {
     /// let val_casts = unsafe { &mut *(ptr as *mut i32 as *mut u32) };
     /// ```
     ///
-    /// Turning an `&str` into a `&[u8]`:
+    /// Turning a `&str` into a `&[u8]`:
     ///
     /// ```
     /// // this is not a good way to do this.
@@ -1363,7 +1350,7 @@ extern "rust-intrinsic" {
     /// }
     ///
     /// // This gets rid of the type safety problems; `&mut *` will *only* give
-    /// // you an `&mut T` from an `&mut T` or `*mut T`.
+    /// // you a `&mut T` from a `&mut T` or `*mut T`.
     /// fn split_at_mut_casts<T>(slice: &mut [T], mid: usize)
     ///                          -> (&mut [T], &mut [T]) {
     ///     let len = slice.len();
@@ -1944,7 +1931,7 @@ extern "rust-intrinsic" {
     #[rustc_safe_intrinsic]
     pub fn frem_algebraic<T: Copy>(a: T, b: T) -> T;
 
-    /// Convert with LLVM’s fptoui/fptosi, which may return undef for values out of range
+    /// Converts with LLVM’s fptoui/fptosi, which may return undef for values out of range
     /// (<https://github.com/rust-lang/rust/issues/10184>)
     ///
     /// Stabilized as [`f32::to_int_unchecked`] and [`f64::to_int_unchecked`].
@@ -2385,12 +2372,6 @@ extern "rust-intrinsic" {
     #[rustc_nounwind]
     pub fn discriminant_value<T>(v: &T) -> <T as DiscriminantKind>::Discriminant;
 
-    #[cfg(bootstrap)]
-    #[rustc_const_unstable(feature = "variant_count", issue = "73662")]
-    #[rustc_safe_intrinsic]
-    #[rustc_nounwind]
-    pub fn variant_count<T>() -> usize;
-
     /// Rust's "try catch" construct for unwinding. Invokes the function pointer `try_fn` with the
     /// data pointer `data`, and calls `catch_fn` if unwinding occurs while `try_fn` runs.
     ///
@@ -2455,10 +2436,12 @@ extern "rust-intrinsic" {
     ///
     /// # Safety
     ///
-    /// It's UB to call this if any of the *bytes* in `*a` or `*b` are uninitialized or carry a
-    /// pointer value.
+    /// It's UB to call this if any of the *bytes* in `*a` or `*b` are uninitialized.
     /// Note that this is a stricter criterion than just the *values* being
     /// fully-initialized: if `T` has padding, it's UB to call this intrinsic.
+    ///
+    /// At compile-time, it is furthermore UB to call this if any of the bytes
+    /// in `*a` or `*b` have provenance.
     ///
     /// (The implementation is allowed to branch on the results of comparisons,
     /// which is UB if any of their inputs are `undef`.)
@@ -2768,7 +2751,6 @@ pub unsafe fn vtable_align(_ptr: *const ()) -> usize {
 #[rustc_const_stable(feature = "const_size_of", since = "1.40.0")]
 #[rustc_intrinsic]
 #[rustc_intrinsic_must_be_overridden]
-#[cfg(not(bootstrap))]
 pub const fn size_of<T>() -> usize {
     unreachable!()
 }
@@ -2786,7 +2768,6 @@ pub const fn size_of<T>() -> usize {
 #[rustc_const_stable(feature = "const_min_align_of", since = "1.40.0")]
 #[rustc_intrinsic]
 #[rustc_intrinsic_must_be_overridden]
-#[cfg(not(bootstrap))]
 pub const fn min_align_of<T>() -> usize {
     unreachable!()
 }
@@ -2800,7 +2781,6 @@ pub const fn min_align_of<T>() -> usize {
 #[rustc_const_unstable(feature = "const_pref_align_of", issue = "91971")]
 #[rustc_intrinsic]
 #[rustc_intrinsic_must_be_overridden]
-#[cfg(not(bootstrap))]
 pub const unsafe fn pref_align_of<T>() -> usize {
     unreachable!()
 }
@@ -2819,7 +2799,6 @@ pub const unsafe fn pref_align_of<T>() -> usize {
 #[rustc_const_unstable(feature = "variant_count", issue = "73662")]
 #[rustc_intrinsic]
 #[rustc_intrinsic_must_be_overridden]
-#[cfg(not(bootstrap))]
 pub const fn variant_count<T>() -> usize {
     unreachable!()
 }
@@ -2836,7 +2815,6 @@ pub const fn variant_count<T>() -> usize {
 #[rustc_const_unstable(feature = "const_size_of_val", issue = "46571")]
 #[rustc_intrinsic]
 #[rustc_intrinsic_must_be_overridden]
-#[cfg(not(bootstrap))]
 pub const unsafe fn size_of_val<T: ?Sized>(_ptr: *const T) -> usize {
     unreachable!()
 }
@@ -2853,7 +2831,6 @@ pub const unsafe fn size_of_val<T: ?Sized>(_ptr: *const T) -> usize {
 #[rustc_const_unstable(feature = "const_align_of_val", issue = "46571")]
 #[rustc_intrinsic]
 #[rustc_intrinsic_must_be_overridden]
-#[cfg(not(bootstrap))]
 pub const unsafe fn min_align_of_val<T: ?Sized>(_ptr: *const T) -> usize {
     unreachable!()
 }
@@ -2871,7 +2848,6 @@ pub const unsafe fn min_align_of_val<T: ?Sized>(_ptr: *const T) -> usize {
 #[rustc_const_unstable(feature = "const_type_name", issue = "63084")]
 #[rustc_intrinsic]
 #[rustc_intrinsic_must_be_overridden]
-#[cfg(not(bootstrap))]
 pub const fn type_name<T: ?Sized>() -> &'static str {
     unreachable!()
 }
@@ -2891,7 +2867,6 @@ pub const fn type_name<T: ?Sized>() -> &'static str {
 #[rustc_const_unstable(feature = "const_type_id", issue = "77125")]
 #[rustc_intrinsic]
 #[rustc_intrinsic_must_be_overridden]
-#[cfg(not(bootstrap))]
 pub const fn type_id<T: ?Sized + 'static>() -> u128 {
     unreachable!()
 }
