@@ -205,11 +205,11 @@ dependencies = [
 
 [[package]]
 name = "ar_archive_writer"
-version = "0.3.0"
+version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f8412a2d690663356cba5a2532f3ed55d1e8090743bc6695b88403b27df67733"
+checksum = "3f2bcb7cf51decfbbfc7ef476e28b0775b13e5eb1190f8b7df145cd53d4f4374"
 dependencies = [
- "object 0.35.0",
+ "object 0.36.2",
 ]
 
 [[package]]
@@ -1406,8 +1406,11 @@ name = "generate-copyright"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "cargo_metadata 0.18.1",
+ "rinja",
  "serde",
  "serde_json",
+ "thiserror",
 ]
 
 [[package]]
@@ -2282,6 +2285,7 @@ dependencies = [
  "smallvec",
  "tempfile",
  "ui_test 0.21.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2451,15 +2455,6 @@ dependencies = [
  "indexmap",
  "memchr",
  "ruzstd 0.5.0",
-]
-
-[[package]]
-name = "object"
-version = "0.35.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b8ec7ab813848ba4522158d5517a6093db1ded27575b070f4177b8d12b41db5e"
-dependencies = [
- "memchr",
 ]
 
 [[package]]
@@ -3102,7 +3097,10 @@ version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6d3762e3740cdbf2fd2be465cc2c26d643ad17353cc2e0223d211c1b096118bd"
 dependencies = [
+ "humansize",
  "itoa",
+ "num-traits",
+ "percent-encoding",
  "rinja_derive",
 ]
 
@@ -3156,9 +3154,9 @@ dependencies = [
 
 [[package]]
 name = "rustc-build-sysroot"
-version = "0.5.2"
+version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa3ca63cc537c1cb69e4c2c0afc5fda2ccd36ac84c97d5a4ae05e69b1c834afb"
+checksum = "2471f8f296262437d7e848e527b4210b44a96e53a3b4435b890227ce3e6da106"
 dependencies = [
  "anyhow",
  "rustc_version",

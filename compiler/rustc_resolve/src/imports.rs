@@ -48,6 +48,7 @@ pub(crate) enum ImportKind<'a> {
         /// `source` in `use prefix::source as target`.
         source: Ident,
         /// `target` in `use prefix::source as target`.
+        /// It will directly use `source` when the format is `use prefix::source`.
         target: Ident,
         /// Bindings to which `source` refers to.
         source_bindings: PerNS<Cell<Result<NameBinding<'a>, Determinacy>>>,
@@ -174,7 +175,7 @@ pub(crate) struct ImportData<'a> {
     pub module_path: Vec<Segment>,
     /// The resolution of `module_path`.
     pub imported_module: Cell<Option<ModuleOrUniformRoot<'a>>>,
-    pub vis: Cell<Option<ty::Visibility>>,
+    pub vis: ty::Visibility,
     pub used: Cell<Option<Used>>,
 }
 
@@ -192,10 +193,6 @@ impl<'a> ImportData<'a> {
             ImportKind::Single { nested, .. } => nested,
             _ => false,
         }
-    }
-
-    pub(crate) fn expect_vis(&self) -> ty::Visibility {
-        self.vis.get().expect("encountered cleared import visibility")
     }
 
     pub(crate) fn id(&self) -> Option<NodeId> {
@@ -266,7 +263,7 @@ fn pub_use_of_private_extern_crate_hack(
     match (&import.kind, &binding.kind) {
         (ImportKind::Single { .. }, NameBindingKind::Import { import: binding_import, .. })
             if let ImportKind::ExternCrate { id, .. } = binding_import.kind
-                && import.expect_vis().is_public() =>
+                && import.vis.is_public() =>
         {
             Some(id)
         }
@@ -278,7 +275,7 @@ impl<'a, 'tcx> Resolver<'a, 'tcx> {
     /// Given a binding and an import that resolves to it,
     /// return the corresponding binding defined by the import.
     pub(crate) fn import(&self, binding: NameBinding<'a>, import: Import<'a>) -> NameBinding<'a> {
-        let import_vis = import.expect_vis().to_def_id();
+        let import_vis = import.vis.to_def_id();
         let vis = if binding.vis.is_at_least(import_vis, self.tcx)
             || pub_use_of_private_extern_crate_hack(import, binding).is_some()
         {
@@ -772,11 +769,12 @@ impl<'a, 'tcx> Resolver<'a, 'tcx> {
         let module = if let Some(module) = import.imported_module.get() {
             module
         } else {
-            // For better failure detection, pretend that the import will
-            // not define any names while resolving its module path.
-            let orig_vis = import.vis.take();
-            let path_res = self.maybe_resolve_path(&import.module_path, None, &import.parent_scope);
-            import.vis.set(orig_vis);
+            let path_res = self.maybe_resolve_path(
+                &import.module_path,
+                None,
+                &import.parent_scope,
+                Some(import),
+            );
 
             match path_res {
                 PathResult::Module(module) => module,
@@ -806,16 +804,13 @@ impl<'a, 'tcx> Resolver<'a, 'tcx> {
         self.per_ns(|this, ns| {
             if !type_ns_only || ns == TypeNS {
                 if let Err(Undetermined) = source_bindings[ns].get() {
-                    // For better failure detection, pretend that the import will
-                    // not define any names while resolving its module path.
-                    let orig_vis = import.vis.take();
                     let binding = this.maybe_resolve_ident_in_module(
                         module,
                         source,
                         ns,
                         &import.parent_scope,
+                        Some(import),
                     );
-                    import.vis.set(orig_vis);
                     source_bindings[ns].set(binding);
                 } else {
                     return;
@@ -854,7 +849,6 @@ impl<'a, 'tcx> Resolver<'a, 'tcx> {
     /// Optionally returns an unresolved import error. This error is buffered and used to
     /// consolidate multiple unresolved import errors into a single diagnostic.
     fn finalize_import(&mut self, import: Import<'a>) -> Option<UnresolvedImportError> {
-        let orig_vis = import.vis.take();
         let ignore_binding = match &import.kind {
             ImportKind::Single { target_bindings, .. } => target_bindings[TypeNS].get(),
             _ => None,
@@ -873,11 +867,12 @@ impl<'a, 'tcx> Resolver<'a, 'tcx> {
             &import.parent_scope,
             Some(finalize),
             ignore_binding,
+            Some(import),
         );
 
         let no_ambiguity =
             ambiguity_errors_len(&self.ambiguity_errors) == prev_ambiguity_errors_len;
-        import.vis.set(orig_vis);
+
         let module = match path_res {
             PathResult::Module(module) => {
                 // Consistency checks, analogous to `finalize_macro_resolutions`.
@@ -1012,8 +1007,7 @@ impl<'a, 'tcx> Resolver<'a, 'tcx> {
                     }
                     if !is_prelude
                         && let Some(max_vis) = max_vis.get()
-                        && let import_vis = import.expect_vis()
-                        && !max_vis.is_at_least(import_vis, self.tcx)
+                        && !max_vis.is_at_least(import.vis, self.tcx)
                     {
                         let def_id = self.local_def_id(id);
                         self.lint_buffer.buffer_lint(
@@ -1022,7 +1016,7 @@ impl<'a, 'tcx> Resolver<'a, 'tcx> {
                             import.span,
                             BuiltinLintDiag::RedundantImportVisibility {
                                 max_vis: max_vis.to_string(def_id, self.tcx),
-                                import_vis: import_vis.to_string(def_id, self.tcx),
+                                import_vis: import.vis.to_string(def_id, self.tcx),
                                 span: import.span,
                             },
                         );
@@ -1037,9 +1031,14 @@ impl<'a, 'tcx> Resolver<'a, 'tcx> {
             // importing it if available.
             let mut path = import.module_path.clone();
             path.push(Segment::from_ident(ident));
-            if let PathResult::Module(ModuleOrUniformRoot::Module(module)) =
-                self.resolve_path(&path, None, &import.parent_scope, Some(finalize), ignore_binding)
-            {
+            if let PathResult::Module(ModuleOrUniformRoot::Module(module)) = self.resolve_path(
+                &path,
+                None,
+                &import.parent_scope,
+                Some(finalize),
+                ignore_binding,
+                None,
+            ) {
                 let res = module.res().map(|r| (r, ident));
                 for error in &mut self.privacy_errors[privacy_errors_len..] {
                     error.outermost_res = res;
@@ -1050,7 +1049,6 @@ impl<'a, 'tcx> Resolver<'a, 'tcx> {
         let mut all_ns_err = true;
         self.per_ns(|this, ns| {
             if !type_ns_only || ns == TypeNS {
-                let orig_vis = import.vis.take();
                 let binding = this.resolve_ident_in_module(
                     module,
                     ident,
@@ -1058,8 +1056,8 @@ impl<'a, 'tcx> Resolver<'a, 'tcx> {
                     &import.parent_scope,
                     Some(Finalize { report_private: false, ..finalize }),
                     target_bindings[ns].get(),
+                    Some(import),
                 );
-                import.vis.set(orig_vis);
 
                 match binding {
                     Ok(binding) => {
@@ -1121,6 +1119,7 @@ impl<'a, 'tcx> Resolver<'a, 'tcx> {
                         ns,
                         &import.parent_scope,
                         Some(finalize),
+                        None,
                         None,
                     );
                     if binding.is_ok() {
@@ -1232,7 +1231,7 @@ impl<'a, 'tcx> Resolver<'a, 'tcx> {
         let mut crate_private_reexport = false;
         self.per_ns(|this, ns| {
             if let Ok(binding) = source_bindings[ns].get() {
-                if !binding.vis.is_at_least(import.expect_vis(), this.tcx) {
+                if !binding.vis.is_at_least(import.vis, this.tcx) {
                     reexport_error = Some((ns, binding));
                     if let ty::Visibility::Restricted(binding_def_id) = binding.vis {
                         if binding_def_id.is_top_level_module() {
@@ -1369,6 +1368,7 @@ impl<'a, 'tcx> Resolver<'a, 'tcx> {
                     None,
                     false,
                     target_bindings[ns].get(),
+                    None,
                 ) {
                     Ok(other_binding) => {
                         is_redundant = binding.res() == other_binding.res()

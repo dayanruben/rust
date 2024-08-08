@@ -838,10 +838,14 @@ pub enum Input {
 
 impl Input {
     pub fn filestem(&self) -> &str {
-        match *self {
-            Input::File(ref ifile) => ifile.file_stem().unwrap().to_str().unwrap(),
-            Input::Str { .. } => "rust_out",
+        if let Input::File(ifile) = self {
+            // If for some reason getting the file stem as a UTF-8 string fails,
+            // then fallback to a fixed name.
+            if let Some(name) = ifile.file_stem().and_then(OsStr::to_str) {
+                return name;
+            }
         }
+        "rust_out"
     }
 
     pub fn source_name(&self) -> FileName {
@@ -1300,7 +1304,10 @@ pub(crate) const fn default_lib_output() -> CrateType {
 }
 
 pub fn build_configuration(sess: &Session, mut user_cfg: Cfg) -> Cfg {
-    // Combine the configuration requested by the session (command line) with
+    // First disallow some configuration given on the command line
+    cfg::disallow_cfgs(sess, &user_cfg);
+
+    // Then combine the configuration requested by the session (command line) with
     // some default and generated configuration items.
     user_cfg.extend(cfg::default_configuration(sess));
     user_cfg
