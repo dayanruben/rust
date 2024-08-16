@@ -328,7 +328,7 @@ pub fn parse_asm_args<'a>(
 /// Otherwise, the suggestion will be incorrect.
 fn err_duplicate_option(p: &Parser<'_>, symbol: Symbol, span: Span) {
     // Tool-only output
-    let full_span = if p.token.kind == token::Comma { span.to(p.token.span) } else { span };
+    let full_span = if p.token == token::Comma { span.to(p.token.span) } else { span };
     p.dcx().emit_err(errors::AsmOptAlreadyprovided { span, symbol, full_span });
 }
 
@@ -338,7 +338,7 @@ fn err_duplicate_option(p: &Parser<'_>, symbol: Symbol, span: Span) {
 /// Otherwise, the suggestion will be incorrect.
 fn err_unsupported_option(p: &Parser<'_>, symbol: Symbol, span: Span) {
     // Tool-only output
-    let full_span = if p.token.kind == token::Comma { span.to(p.token.span) } else { span };
+    let full_span = if p.token == token::Comma { span.to(p.token.span) } else { span };
     p.dcx().emit_err(errors::GlobalAsmUnsupportedOption { span, symbol, full_span });
 }
 
@@ -745,10 +745,9 @@ fn expand_preparsed_asm(
             unused_operands.push((args.operands[idx].1, msg));
         }
     }
-    match unused_operands.len() {
-        0 => {}
-        1 => {
-            let (sp, msg) = unused_operands.into_iter().next().unwrap();
+    match unused_operands[..] {
+        [] => {}
+        [(sp, msg)] => {
             ecx.dcx()
                 .struct_span_err(sp, msg)
                 .with_span_label(sp, msg)

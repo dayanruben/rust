@@ -37,13 +37,15 @@ use crate::core::builder;
 use crate::core::builder::{Builder, Kind};
 use crate::core::config::{flags, DryRun, LldMode, LlvmLibunwind, Target, TargetSelection};
 use crate::utils::exec::{command, BehaviorOnFailure, BootstrapCommand, CommandOutput, OutputMode};
-use crate::utils::helpers::{self, dir_is_empty, exe, libdir, mtime, output, symlink_dir};
+use crate::utils::helpers::{
+    self, dir_is_empty, exe, libdir, mtime, output, set_file_times, symlink_dir,
+};
 
 mod core;
 mod utils;
 
 pub use core::builder::PathSet;
-pub use core::config::flags::Subcommand;
+pub use core::config::flags::{Flags, Subcommand};
 pub use core::config::Config;
 
 pub use utils::change_tracker::{
@@ -452,7 +454,7 @@ impl Build {
         }
 
         // Make a symbolic link so we can use a consistent directory in the documentation.
-        let build_triple = build.out.join(build.build.triple);
+        let build_triple = build.out.join(build.build);
         t!(fs::create_dir_all(&build_triple));
         let host = build.out.join("host");
         if host.is_symlink() {
@@ -807,10 +809,7 @@ impl Build {
     }
 
     fn tools_dir(&self, compiler: Compiler) -> PathBuf {
-        let out = self
-            .out
-            .join(&*compiler.host.triple)
-            .join(format!("stage{}-tools-bin", compiler.stage));
+        let out = self.out.join(compiler.host).join(format!("stage{}-tools-bin", compiler.stage));
         t!(fs::create_dir_all(&out));
         out
     }
@@ -827,14 +826,14 @@ impl Build {
             Mode::ToolBootstrap => "-bootstrap-tools",
             Mode::ToolStd | Mode::ToolRustc => "-tools",
         };
-        self.out.join(&*compiler.host.triple).join(format!("stage{}{}", compiler.stage, suffix))
+        self.out.join(compiler.host).join(format!("stage{}{}", compiler.stage, suffix))
     }
 
     /// Returns the root output directory for all Cargo output in a given stage,
     /// running a particular compiler, whether or not we're building the
     /// standard library, and targeting the specified architecture.
     fn cargo_out(&self, compiler: Compiler, mode: Mode, target: TargetSelection) -> PathBuf {
-        self.stage_out(compiler, mode).join(&*target.triple).join(self.cargo_dir())
+        self.stage_out(compiler, mode).join(target).join(self.cargo_dir())
     }
 
     /// Root output directory of LLVM for `target`
@@ -845,36 +844,36 @@ impl Build {
         if self.config.llvm_from_ci && self.config.build == target {
             self.config.ci_llvm_root()
         } else {
-            self.out.join(&*target.triple).join("llvm")
+            self.out.join(target).join("llvm")
         }
     }
 
     fn lld_out(&self, target: TargetSelection) -> PathBuf {
-        self.out.join(&*target.triple).join("lld")
+        self.out.join(target).join("lld")
     }
 
     /// Output directory for all documentation for a target
     fn doc_out(&self, target: TargetSelection) -> PathBuf {
-        self.out.join(&*target.triple).join("doc")
+        self.out.join(target).join("doc")
     }
 
     /// Output directory for all JSON-formatted documentation for a target
     fn json_doc_out(&self, target: TargetSelection) -> PathBuf {
-        self.out.join(&*target.triple).join("json-doc")
+        self.out.join(target).join("json-doc")
     }
 
     fn test_out(&self, target: TargetSelection) -> PathBuf {
-        self.out.join(&*target.triple).join("test")
+        self.out.join(target).join("test")
     }
 
     /// Output directory for all documentation for a target
     fn compiler_doc_out(&self, target: TargetSelection) -> PathBuf {
-        self.out.join(&*target.triple).join("compiler-doc")
+        self.out.join(target).join("compiler-doc")
     }
 
     /// Output directory for some generated md crate documentation for a target (temporary)
     fn md_doc_out(&self, target: TargetSelection) -> PathBuf {
-        self.out.join(&*target.triple).join("md-doc")
+        self.out.join(target).join("md-doc")
     }
 
     /// Returns `true` if this is an external version of LLVM not managed by bootstrap.
@@ -954,7 +953,7 @@ impl Build {
 
     /// Directory for libraries built from C/C++ code and shared between stages.
     fn native_dir(&self, target: TargetSelection) -> PathBuf {
-        self.out.join(&*target.triple).join("native")
+        self.out.join(target).join("native")
     }
 
     /// Root output directory for rust_test_helpers library compiled for
@@ -1059,11 +1058,29 @@ Executed at: {executed_at}"#,
             }
         };
 
-        let fail = |message: &str| {
+        let fail = |message: &str, output: CommandOutput| -> ! {
             if self.is_verbose() {
                 println!("{message}");
             } else {
-                println!("Command has failed. Rerun with -v to see more details.");
+                let (stdout, stderr) = (output.stdout_if_present(), output.stderr_if_present());
+                // If the command captures output, the user would not see any indication that
+                // it has failed. In this case, print a more verbose error, since to provide more
+                // context.
+                if stdout.is_some() || stderr.is_some() {
+                    if let Some(stdout) =
+                        output.stdout_if_present().take_if(|s| !s.trim().is_empty())
+                    {
+                        println!("STDOUT:\n{stdout}\n");
+                    }
+                    if let Some(stderr) =
+                        output.stderr_if_present().take_if(|s| !s.trim().is_empty())
+                    {
+                        println!("STDERR:\n{stderr}\n");
+                    }
+                    println!("Command {command:?} has failed. Rerun with -v to see more details.");
+                } else {
+                    println!("Command has failed. Rerun with -v to see more details.");
+                }
             }
             exit!(1);
         };
@@ -1072,14 +1089,14 @@ Executed at: {executed_at}"#,
             match command.failure_behavior {
                 BehaviorOnFailure::DelayFail => {
                     if self.fail_fast {
-                        fail(&message);
+                        fail(&message, output);
                     }
 
                     let mut failures = self.delayed_failures.borrow_mut();
                     failures.push(message);
                 }
                 BehaviorOnFailure::Exit => {
-                    fail(&message);
+                    fail(&message, output);
                 }
                 BehaviorOnFailure::Ignore => {
                     // If failures are allowed, either the error has been printed already
@@ -1777,21 +1794,20 @@ Executed at: {executed_at}"#,
             }
         }
         if let Ok(()) = fs::hard_link(&src, dst) {
-            // Attempt to "easy copy" by creating a hard link
-            // (symlinks don't work on windows), but if that fails
-            // just fall back to a slow `copy` operation.
+            // Attempt to "easy copy" by creating a hard link (symlinks are priviledged on windows),
+            // but if that fails just fall back to a slow `copy` operation.
         } else {
             if let Err(e) = fs::copy(&src, dst) {
                 panic!("failed to copy `{}` to `{}`: {}", src.display(), dst.display(), e)
             }
             t!(fs::set_permissions(dst, metadata.permissions()));
 
+            // Restore file times because changing permissions on e.g. Linux using `chmod` can cause
+            // file access time to change.
             let file_times = fs::FileTimes::new()
                 .set_accessed(t!(metadata.accessed()))
                 .set_modified(t!(metadata.modified()));
-
-            let dst_file = t!(fs::File::open(dst));
-            t!(dst_file.set_times(file_times));
+            t!(set_file_times(dst, file_times));
         }
     }
 

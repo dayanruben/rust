@@ -15,8 +15,10 @@ extern crate rustc_abi;
 #[cfg(not(feature = "in-rust-tree"))]
 extern crate ra_ap_rustc_abi as rustc_abi;
 
-// Use the crates.io version unconditionally until the API settles enough that we can switch to
-// using the in-tree one.
+#[cfg(feature = "in-rust-tree")]
+extern crate rustc_pattern_analysis;
+
+#[cfg(not(feature = "in-rust-tree"))]
 extern crate ra_ap_rustc_pattern_analysis as rustc_pattern_analysis;
 
 mod builder;
@@ -595,7 +597,7 @@ impl TypeFoldable<Interner> for CallableSig {
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
 pub enum ImplTraitId {
     ReturnTypeImplTrait(hir_def::FunctionId, ImplTraitIdx),
-    AssociatedTypeImplTrait(hir_def::TypeAliasId, ImplTraitIdx),
+    TypeAliasImplTrait(hir_def::TypeAliasId, ImplTraitIdx),
     AsyncBlockTypeImplTrait(hir_def::DefWithBodyId, ExprId),
 }
 impl InternValueTrivial for ImplTraitId {}

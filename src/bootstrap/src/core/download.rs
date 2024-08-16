@@ -379,7 +379,7 @@ impl Config {
         let version = &self.stage0_metadata.compiler.version;
         let host = self.build;
 
-        let bin_root = self.out.join(host.triple).join("stage0");
+        let bin_root = self.out.join(host).join("stage0");
         let clippy_stamp = bin_root.join(".clippy-stamp");
         let cargo_clippy = bin_root.join("bin").join(exe("cargo-clippy", host));
         if cargo_clippy.exists() && !program_out_of_date(&clippy_stamp, date) {
@@ -412,7 +412,7 @@ impl Config {
         let channel = format!("{version}-{date}");
 
         let host = self.build;
-        let bin_root = self.out.join(host.triple).join("rustfmt");
+        let bin_root = self.out.join(host).join("rustfmt");
         let rustfmt_path = bin_root.join("bin").join(exe("rustfmt", host));
         let rustfmt_stamp = bin_root.join(".rustfmt-stamp");
         if rustfmt_path.exists() && !program_out_of_date(&rustfmt_stamp, &channel) {
@@ -592,7 +592,7 @@ impl Config {
             t!(fs::create_dir_all(&cache_dir));
         }
 
-        let bin_root = self.out.join(self.build.triple).join(destination);
+        let bin_root = self.out.join(self.build).join(destination);
         let tarball = cache_dir.join(&filename);
         let (base_url, url, should_verify) = match mode {
             DownloadSource::CI => {
@@ -703,9 +703,7 @@ download-rustc = false
             let file_times = fs::FileTimes::new().set_accessed(now).set_modified(now);
 
             let llvm_config = llvm_root.join("bin").join(exe("llvm-config", self.build));
-            let llvm_config_file = t!(File::options().write(true).open(llvm_config));
-
-            t!(llvm_config_file.set_times(file_times));
+            t!(crate::utils::helpers::set_file_times(llvm_config, file_times));
 
             if self.should_fix_bins_and_dylibs() {
                 let llvm_lib = llvm_root.join("lib");

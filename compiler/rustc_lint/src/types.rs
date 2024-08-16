@@ -211,15 +211,12 @@ fn lint_overflowing_range_endpoint<'tcx>(
     if !is_range_literal(struct_expr) {
         return false;
     };
-    let ExprKind::Struct(_, eps, _) = &struct_expr.kind else { return false };
-    if eps.len() != 2 {
-        return false;
-    }
+    let ExprKind::Struct(_, [start, end], _) = &struct_expr.kind else { return false };
 
     // We can suggest using an inclusive range
     // (`..=`) instead only if it is the `end` that is
     // overflowing and only by 1.
-    if !(eps[1].expr.hir_id == expr.hir_id && lit_val - 1 == max) {
+    if !(end.expr.hir_id == expr.hir_id && lit_val - 1 == max) {
         return false;
     };
 
@@ -232,7 +229,7 @@ fn lint_overflowing_range_endpoint<'tcx>(
     };
 
     let sub_sugg = if expr.span.lo() == lit_span.lo() {
-        let Ok(start) = cx.sess().source_map().span_to_snippet(eps[0].span) else { return false };
+        let Ok(start) = cx.sess().source_map().span_to_snippet(start.span) else { return false };
         UseInclusiveRange::WithoutParen {
             sugg: struct_expr.span.shrink_to_lo().to(lit_span.shrink_to_hi()),
             start,
@@ -1025,7 +1022,7 @@ fn ty_is_known_nonnull<'tcx>(
     let ty = tcx.try_normalize_erasing_regions(param_env, ty).unwrap_or(ty);
 
     match ty.kind() {
-        ty::FnPtr(_) => true,
+        ty::FnPtr(..) => true,
         ty::Ref(..) => true,
         ty::Adt(def, _) if def.is_box() && matches!(mode, CItemKind::Definition) => true,
         ty::Adt(def, args) if def.repr().transparent() && !def.is_union() => {
@@ -1476,7 +1473,8 @@ impl<'a, 'tcx> ImproperCTypesVisitor<'a, 'tcx> {
 
             ty::Array(inner_ty, _) => self.check_type_for_ffi(cache, inner_ty),
 
-            ty::FnPtr(sig) => {
+            ty::FnPtr(sig_tys, hdr) => {
+                let sig = sig_tys.with(hdr);
                 if self.is_internal_abi(sig.abi()) {
                     return FfiUnsafe {
                         ty,
@@ -1712,8 +1710,8 @@ impl<'a, 'tcx> ImproperCTypesVisitor<'a, 'tcx> {
             type Result = ControlFlow<Ty<'tcx>>;
 
             fn visit_ty(&mut self, ty: Ty<'tcx>) -> Self::Result {
-                if let ty::FnPtr(sig) = ty.kind()
-                    && !self.visitor.is_internal_abi(sig.abi())
+                if let ty::FnPtr(_, hdr) = ty.kind()
+                    && !self.visitor.is_internal_abi(hdr.abi)
                 {
                     self.tys.push(ty);
                 }

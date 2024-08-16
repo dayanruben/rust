@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 
-use rustc_hash::FxHashMap;
+pub use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 
 /// The version of JSON output that this crate represents.
@@ -634,7 +634,7 @@ pub struct Discriminant {
     /// hexadecimal, and underscores), making it unsuitable to be machine
     /// interpreted.
     ///
-    /// In some cases, when the value is to complex, this may be `"{ _ }"`.
+    /// In some cases, when the value is too complex, this may be `"{ _ }"`.
     /// When this occurs is unstable, and may change without notice.
     pub expr: String,
     /// The numerical value of the discriminant. Stored as a string due to

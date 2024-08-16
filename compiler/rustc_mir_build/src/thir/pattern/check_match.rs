@@ -483,9 +483,11 @@ impl<'p, 'tcx> MatchVisitor<'p, 'tcx> {
         // Check if the match is exhaustive.
         let witnesses = report.non_exhaustiveness_witnesses;
         if !witnesses.is_empty() {
-            if source == hir::MatchSource::ForLoopDesugar && arms.len() == 2 {
+            if source == hir::MatchSource::ForLoopDesugar
+                && let [_, snd_arm] = *arms
+            {
                 // the for loop pattern is not irrefutable
-                let pat = &self.thir[arms[1]].pattern;
+                let pat = &self.thir[snd_arm].pattern;
                 // `pat` should be `Some(<pat_field>)` from a desugared for loop.
                 debug_assert_eq!(pat.span.desugaring_kind(), Some(DesugaringKind::ForLoop));
                 let PatKind::Variant { ref subpatterns, .. } = pat.kind else { bug!() };
@@ -700,10 +702,12 @@ impl<'p, 'tcx> MatchVisitor<'p, 'tcx> {
             && adt.is_enum()
             && let Constructor::Variant(variant_index) = witness_1.ctor()
         {
-            let variant = adt.variant(*variant_index);
-            let inhabited = variant.inhabited_predicate(self.tcx, *adt).instantiate(self.tcx, args);
-            assert!(inhabited.apply(self.tcx, cx.param_env, cx.module));
-            !inhabited.apply_ignore_module(self.tcx, cx.param_env)
+            let variant_inhabited = adt
+                .variant(*variant_index)
+                .inhabited_predicate(self.tcx, *adt)
+                .instantiate(self.tcx, args);
+            variant_inhabited.apply(self.tcx, cx.param_env, cx.module)
+                && !variant_inhabited.apply_ignore_module(self.tcx, cx.param_env)
         } else {
             false
         };
