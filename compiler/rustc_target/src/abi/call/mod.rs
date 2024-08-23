@@ -652,6 +652,21 @@ impl<'a, Ty> ArgAbi<'a, Ty> {
         }
     }
 
+    /// Same as `make_indirect`, but for arguments that are ignored. Only needed for ABIs that pass
+    /// ZSTs indirectly.
+    pub fn make_indirect_from_ignore(&mut self) {
+        match self.mode {
+            PassMode::Ignore => {
+                self.mode = Self::indirect_pass_mode(&self.layout);
+            }
+            PassMode::Indirect { attrs: _, meta_attrs: _, on_stack: false } => {
+                // already indirect
+                return;
+            }
+            _ => panic!("Tried to make {:?} indirect (expected `PassMode::Ignore`)", self.mode),
+        }
+    }
+
     /// Pass this argument indirectly, by placing it at a fixed stack offset.
     /// This corresponds to the `byval` LLVM argument attribute.
     /// This is only valid for sized arguments.
@@ -871,10 +886,10 @@ impl<'a, Ty> FnAbi<'a, Ty> {
             }
             "x86_64" => match abi {
                 spec::abi::Abi::SysV64 { .. } => x86_64::compute_abi_info(cx, self),
-                spec::abi::Abi::Win64 { .. } => x86_win64::compute_abi_info(self),
+                spec::abi::Abi::Win64 { .. } => x86_win64::compute_abi_info(cx, self),
                 _ => {
                     if cx.target_spec().is_like_windows {
-                        x86_win64::compute_abi_info(self)
+                        x86_win64::compute_abi_info(cx, self)
                     } else {
                         x86_64::compute_abi_info(cx, self)
                     }
@@ -898,7 +913,7 @@ impl<'a, Ty> FnAbi<'a, Ty> {
             "csky" => csky::compute_abi_info(self),
             "mips" | "mips32r6" => mips::compute_abi_info(cx, self),
             "mips64" | "mips64r6" => mips64::compute_abi_info(cx, self),
-            "powerpc" => powerpc::compute_abi_info(self),
+            "powerpc" => powerpc::compute_abi_info(cx, self),
             "powerpc64" => powerpc64::compute_abi_info(cx, self),
             "s390x" => s390x::compute_abi_info(cx, self),
             "msp430" => msp430::compute_abi_info(self),

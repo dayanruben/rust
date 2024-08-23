@@ -1038,7 +1038,7 @@ impl<'tcx> Debug for Rvalue<'tcx> {
 
             CopyForDeref(ref place) => write!(fmt, "deref_copy {place:#?}"),
 
-            AddressOf(mutability, ref place) => {
+            RawPtr(mutability, ref place) => {
                 write!(fmt, "&raw {mut_str} {place:?}", mut_str = mutability.ptr_str())
             }
 
@@ -1159,7 +1159,7 @@ impl<'tcx> Debug for Operand<'tcx> {
         use self::Operand::*;
         match *self {
             Constant(ref a) => write!(fmt, "{a:?}"),
-            Copy(ref place) => write!(fmt, "{place:?}"),
+            Copy(ref place) => write!(fmt, "copy {place:?}"),
             Move(ref place) => write!(fmt, "move {place:?}"),
         }
     }

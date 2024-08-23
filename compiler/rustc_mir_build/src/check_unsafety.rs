@@ -397,7 +397,7 @@ impl<'a, 'tcx> Visitor<'a, 'tcx> for UnsafetyVisitor<'a, 'tcx> {
             | ExprKind::Scope { .. }
             | ExprKind::Cast { .. } => {}
 
-            ExprKind::AddressOf { .. }
+            ExprKind::RawBorrow { .. }
             | ExprKind::Adt { .. }
             | ExprKind::Array { .. }
             | ExprKind::Binary { .. }
@@ -498,7 +498,7 @@ impl<'a, 'tcx> Visitor<'a, 'tcx> for UnsafetyVisitor<'a, 'tcx> {
                     }
                 }
             }
-            ExprKind::AddressOf { arg, .. } => {
+            ExprKind::RawBorrow { arg, .. } => {
                 if let ExprKind::Scope { value: arg, .. } = self.thir[arg].kind
                 // THIR desugars UNSAFE_STATIC into *UNSAFE_STATIC_REF, where
                 // UNSAFE_STATIC_REF holds the addr of the UNSAFE_STATIC, so: take two steps
@@ -793,7 +793,7 @@ impl UnsafeOpKind {
                         missing.iter().map(|feature| Cow::from(feature.to_string())).collect(),
                     ),
                     missing_target_features_count: missing.len(),
-                    note: if build_enabled.is_empty() { None } else { Some(()) },
+                    note: !build_enabled.is_empty(),
                     build_target_features: DiagArgValue::StrListSepByAnd(
                         build_enabled
                             .iter()
@@ -958,7 +958,7 @@ impl UnsafeOpKind {
                         missing.iter().map(|feature| Cow::from(feature.to_string())).collect(),
                     ),
                     missing_target_features_count: missing.len(),
-                    note: if build_enabled.is_empty() { None } else { Some(()) },
+                    note: !build_enabled.is_empty(),
                     build_target_features: DiagArgValue::StrListSepByAnd(
                         build_enabled
                             .iter()
@@ -977,7 +977,7 @@ impl UnsafeOpKind {
                         missing.iter().map(|feature| Cow::from(feature.to_string())).collect(),
                     ),
                     missing_target_features_count: missing.len(),
-                    note: if build_enabled.is_empty() { None } else { Some(()) },
+                    note: !build_enabled.is_empty(),
                     build_target_features: DiagArgValue::StrListSepByAnd(
                         build_enabled
                             .iter()
