@@ -1312,6 +1312,34 @@ macro_rules! int_impl {
             }
         }
 
+        /// Unbounded shift left. Computes `self << rhs`, without bounding the value of `rhs`
+        ///
+        /// If `rhs` is larger or equal to the number of bits in `self`,
+        /// the entire value is shifted out, and `0` is returned.
+        ///
+        /// # Examples
+        ///
+        /// Basic usage:
+        /// ```
+        /// #![feature(unbounded_shifts)]
+        #[doc = concat!("assert_eq!(0x1", stringify!($SelfT), ".unbounded_shl(4), 0x10);")]
+        #[doc = concat!("assert_eq!(0x1", stringify!($SelfT), ".unbounded_shl(129), 0);")]
+        /// ```
+        #[unstable(feature = "unbounded_shifts", issue = "129375")]
+        #[rustc_const_unstable(feature = "const_unbounded_shifts", issue = "129375")]
+        #[must_use = "this returns the result of the operation, \
+                      without modifying the original"]
+        #[inline]
+        pub const fn unbounded_shl(self, rhs: u32) -> $SelfT{
+            if rhs < Self::BITS {
+                // SAFETY:
+                // rhs is just checked to be in-range above
+                unsafe { self.unchecked_shl(rhs) }
+            } else {
+                0
+            }
+        }
+
         /// Checked shift right. Computes `self >> rhs`, returning `None` if `rhs` is
         /// larger than or equal to the number of bits in `self`.
         ///
@@ -1407,6 +1435,40 @@ macro_rules! int_impl {
             // SAFETY: this is guaranteed to be safe by the caller.
             unsafe {
                 intrinsics::unchecked_shr(self, rhs)
+            }
+        }
+
+        /// Unbounded shift right. Computes `self >> rhs`, without bounding the value of `rhs`
+        ///
+        /// If `rhs` is larger or equal to the number of bits in `self`,
+        /// the entire value is shifted out, which yields `0` for a positive number,
+        /// and `-1` for a negative number.
+        ///
+        /// # Examples
+        ///
+        /// Basic usage:
+        /// ```
+        /// #![feature(unbounded_shifts)]
+        #[doc = concat!("assert_eq!(0x10", stringify!($SelfT), ".unbounded_shr(4), 0x1);")]
+        #[doc = concat!("assert_eq!(0x10", stringify!($SelfT), ".unbounded_shr(129), 0);")]
+        #[doc = concat!("assert_eq!(", stringify!($SelfT), "::MIN.unbounded_shr(129), -1);")]
+        /// ```
+        #[unstable(feature = "unbounded_shifts", issue = "129375")]
+        #[rustc_const_unstable(feature = "const_unbounded_shifts", issue = "129375")]
+        #[must_use = "this returns the result of the operation, \
+                      without modifying the original"]
+        #[inline]
+        pub const fn unbounded_shr(self, rhs: u32) -> $SelfT{
+            if rhs < Self::BITS {
+                // SAFETY:
+                // rhs is just checked to be in-range above
+                unsafe { self.unchecked_shr(rhs) }
+            } else {
+                // A shift by `Self::BITS-1` suffices for signed integers, because the sign bit is copied for each of the shifted bits.
+
+                // SAFETY:
+                // `Self::BITS-1` is guaranteed to be less than `Self::BITS`
+                unsafe { self.unchecked_shr(Self::BITS - 1) }
             }
         }
 
@@ -1579,7 +1641,33 @@ macro_rules! int_impl {
             if self < 0 {
                 None
             } else {
-                Some((self as $UnsignedT).isqrt() as Self)
+                // SAFETY: Input is nonnegative in this `else` branch.
+                let result = unsafe {
+                    crate::num::int_sqrt::$ActualT(self as $ActualT) as $SelfT
+                };
+
+                // Inform the optimizer what the range of outputs is. If
+                // testing `core` crashes with no panic message and a
+                // `num::int_sqrt::i*` test failed, it's because your edits
+                // caused these assertions to become false.
+                //
+                // SAFETY: Integer square root is a monotonically nondecreasing
+                // function, which means that increasing the input will never
+                // cause the output to decrease. Thus, since the input for
+                // nonnegative signed integers is bounded by
+                // `[0, <$ActualT>::MAX]`, sqrt(n) will be bounded by
+                // `[sqrt(0), sqrt(<$ActualT>::MAX)]`.
+                unsafe {
+                    // SAFETY: `<$ActualT>::MAX` is nonnegative.
+                    const MAX_RESULT: $SelfT = unsafe {
+                        crate::num::int_sqrt::$ActualT(<$ActualT>::MAX) as $SelfT
+                    };
+
+                    crate::hint::assert_unchecked(result >= 0);
+                    crate::hint::assert_unchecked(result <= MAX_RESULT);
+                }
+
+                Some(result)
             }
         }
 
@@ -2800,15 +2888,11 @@ macro_rules! int_impl {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline]
+        #[track_caller]
         pub const fn isqrt(self) -> Self {
-            // I would like to implement it as
-            // ```
-            // self.checked_isqrt().expect("argument of integer square root must be non-negative")
-            // ```
-            // but `expect` is not yet stable as a `const fn`.
             match self.checked_isqrt() {
                 Some(sqrt) => sqrt,
-                None => panic!("argument of integer square root must be non-negative"),
+                None => crate::num::int_sqrt::panic_for_negative_argument(),
             }
         }
 
@@ -2826,8 +2910,8 @@ macro_rules! int_impl {
         ///
         /// # Panics
         ///
-        /// This function will panic if `rhs` is 0 or if `self` is -1 and `rhs` is
-        /// `Self::MIN`. This behavior is not affected by the `overflow-checks` flag.
+        /// This function will panic if `rhs` is 0 or if `self` is `Self::MIN`
+        /// and `rhs` is -1. This behavior is not affected by the `overflow-checks` flag.
         ///
         /// # Examples
         ///
@@ -2865,8 +2949,8 @@ macro_rules! int_impl {
         ///
         /// # Panics
         ///
-        /// This function will panic if `rhs` is 0 or if `self` is -1 and `rhs` is
-        /// `Self::MIN`. This behavior is not affected by the `overflow-checks` flag.
+        /// This function will panic if `rhs` is 0 or if `self` is `Self::MIN` and
+        /// `rhs` is -1. This behavior is not affected by the `overflow-checks` flag.
         ///
         /// # Examples
         ///
@@ -2880,6 +2964,11 @@ macro_rules! int_impl {
         /// assert_eq!((-a).rem_euclid(b), 1);
         /// assert_eq!(a.rem_euclid(-b), 3);
         /// assert_eq!((-a).rem_euclid(-b), 1);
+        /// ```
+        ///
+        /// This will panic:
+        /// ```should_panic
+        #[doc = concat!("let _ = ", stringify!($SelfT), "::MIN.rem_euclid(-1);")]
         /// ```
         #[doc(alias = "modulo", alias = "mod")]
         #[stable(feature = "euclidean_division", since = "1.38.0")]
@@ -2909,8 +2998,8 @@ macro_rules! int_impl {
         ///
         /// # Panics
         ///
-        /// This function will panic if `rhs` is 0 or if `self` is -1 and `rhs` is
-        /// `Self::MIN`. This behavior is not affected by the `overflow-checks` flag.
+        /// This function will panic if `rhs` is 0 or if `self` is `Self::MIN`
+        /// and `rhs` is -1. This behavior is not affected by the `overflow-checks` flag.
         ///
         /// # Examples
         ///
@@ -2945,8 +3034,8 @@ macro_rules! int_impl {
         ///
         /// # Panics
         ///
-        /// This function will panic if `rhs` is 0 or if `self` is -1 and `rhs` is
-        /// `Self::MIN`. This behavior is not affected by the `overflow-checks` flag.
+        /// This function will panic if `rhs` is 0 or if `self` is `Self::MIN`
+        /// and `rhs` is -1. This behavior is not affected by the `overflow-checks` flag.
         ///
         /// # Examples
         ///

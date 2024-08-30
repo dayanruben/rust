@@ -1501,6 +1501,34 @@ macro_rules! uint_impl {
             }
         }
 
+        /// Unbounded shift left. Computes `self << rhs`, without bounding the value of `rhs`
+        ///
+        /// If `rhs` is larger or equal to the number of bits in `self`,
+        /// the entire value is shifted out, and `0` is returned.
+        ///
+        /// # Examples
+        ///
+        /// Basic usage:
+        /// ```
+        /// #![feature(unbounded_shifts)]
+        #[doc = concat!("assert_eq!(0x1", stringify!($SelfT), ".unbounded_shl(4), 0x10);")]
+        #[doc = concat!("assert_eq!(0x1", stringify!($SelfT), ".unbounded_shl(129), 0);")]
+        /// ```
+        #[unstable(feature = "unbounded_shifts", issue = "129375")]
+        #[rustc_const_unstable(feature = "const_unbounded_shifts", issue = "129375")]
+        #[must_use = "this returns the result of the operation, \
+                      without modifying the original"]
+        #[inline]
+        pub const fn unbounded_shl(self, rhs: u32) -> $SelfT{
+            if rhs < Self::BITS {
+                // SAFETY:
+                // rhs is just checked to be in-range above
+                unsafe { self.unchecked_shl(rhs) }
+            } else {
+                0
+            }
+        }
+
         /// Checked shift right. Computes `self >> rhs`, returning `None`
         /// if `rhs` is larger than or equal to the number of bits in `self`.
         ///
@@ -1596,6 +1624,34 @@ macro_rules! uint_impl {
             // SAFETY: this is guaranteed to be safe by the caller.
             unsafe {
                 intrinsics::unchecked_shr(self, rhs)
+            }
+        }
+
+        /// Unbounded shift right. Computes `self >> rhs`, without bounding the value of `rhs`
+        ///
+        /// If `rhs` is larger or equal to the number of bits in `self`,
+        /// the entire value is shifted out, and `0` is returned.
+        ///
+        /// # Examples
+        ///
+        /// Basic usage:
+        /// ```
+        /// #![feature(unbounded_shifts)]
+        #[doc = concat!("assert_eq!(0x10", stringify!($SelfT), ".unbounded_shr(4), 0x1);")]
+        #[doc = concat!("assert_eq!(0x10", stringify!($SelfT), ".unbounded_shr(129), 0);")]
+        /// ```
+        #[unstable(feature = "unbounded_shifts", issue = "129375")]
+        #[rustc_const_unstable(feature = "const_unbounded_shifts", issue = "129375")]
+        #[must_use = "this returns the result of the operation, \
+                      without modifying the original"]
+        #[inline]
+        pub const fn unbounded_shr(self, rhs: u32) -> $SelfT{
+            if rhs < Self::BITS {
+                // SAFETY:
+                // rhs is just checked to be in-range above
+                unsafe { self.unchecked_shr(rhs) }
+            } else {
+                0
             }
         }
 
@@ -2706,10 +2762,24 @@ macro_rules! uint_impl {
                       without modifying the original"]
         #[inline]
         pub const fn isqrt(self) -> Self {
-            match NonZero::new(self) {
-                Some(x) => x.isqrt().get(),
-                None => 0,
+            let result = crate::num::int_sqrt::$ActualT(self as $ActualT) as $SelfT;
+
+            // Inform the optimizer what the range of outputs is. If testing
+            // `core` crashes with no panic message and a `num::int_sqrt::u*`
+            // test failed, it's because your edits caused these assertions or
+            // the assertions in `fn isqrt` of `nonzero.rs` to become false.
+            //
+            // SAFETY: Integer square root is a monotonically nondecreasing
+            // function, which means that increasing the input will never
+            // cause the output to decrease. Thus, since the input for unsigned
+            // integers is bounded by `[0, <$ActualT>::MAX]`, sqrt(n) will be
+            // bounded by `[sqrt(0), sqrt(<$ActualT>::MAX)]`.
+            unsafe {
+                const MAX_RESULT: $SelfT = crate::num::int_sqrt::$ActualT(<$ActualT>::MAX) as $SelfT;
+                crate::hint::assert_unchecked(result <= MAX_RESULT);
             }
+
+            result
         }
 
         /// Performs Euclidean division.

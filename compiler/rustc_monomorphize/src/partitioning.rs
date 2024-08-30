@@ -626,7 +626,6 @@ fn characteristic_def_id_of_mono_item<'tcx>(
                 | ty::InstanceKind::FnPtrShim(..)
                 | ty::InstanceKind::ClosureOnceShim { .. }
                 | ty::InstanceKind::ConstructCoroutineInClosureShim { .. }
-                | ty::InstanceKind::CoroutineKindShim { .. }
                 | ty::InstanceKind::Intrinsic(..)
                 | ty::InstanceKind::DropGlue(..)
                 | ty::InstanceKind::Virtual(..)
@@ -796,7 +795,6 @@ fn mono_item_visibility<'tcx>(
         | InstanceKind::Intrinsic(..)
         | InstanceKind::ClosureOnceShim { .. }
         | InstanceKind::ConstructCoroutineInClosureShim { .. }
-        | InstanceKind::CoroutineKindShim { .. }
         | InstanceKind::DropGlue(..)
         | InstanceKind::AsyncDropGlueCtorShim(..)
         | InstanceKind::CloneShim(..)
@@ -1302,7 +1300,7 @@ fn dump_mono_items_stats<'tcx>(
     Ok(())
 }
 
-pub fn provide(providers: &mut Providers) {
+pub(crate) fn provide(providers: &mut Providers) {
     providers.collect_and_partition_mono_items = collect_and_partition_mono_items;
 
     providers.is_codegened_item = |tcx, def_id| {
