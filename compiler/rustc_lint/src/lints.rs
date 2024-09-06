@@ -895,6 +895,13 @@ pub(crate) struct QueryInstability {
 }
 
 #[derive(LintDiagnostic)]
+#[diag(lint_query_untracked)]
+#[note]
+pub(crate) struct QueryUntracked {
+    pub method: Symbol,
+}
+
+#[derive(LintDiagnostic)]
 #[diag(lint_span_use_eq_ctxt)]
 pub(crate) struct SpanUseEqCtxtDiag;
 
@@ -917,6 +924,11 @@ pub(crate) struct TyQualified {
     #[suggestion(code = "{ty}", applicability = "maybe-incorrect")]
     pub suggestion: Span,
 }
+
+#[derive(LintDiagnostic)]
+#[diag(lint_type_ir_inherent_usage)]
+#[note]
+pub(crate) struct TypeIrInherentUsage;
 
 #[derive(LintDiagnostic)]
 #[diag(lint_non_glob_import_type_ir_inherent)]
@@ -2609,6 +2621,16 @@ pub(crate) struct MacroExpandedMacroExportsAccessedByAbsolutePaths {
 pub(crate) struct ElidedLifetimesInPaths {
     #[subdiagnostic]
     pub subdiag: ElidedLifetimeInPathSubdiag,
+}
+
+#[derive(LintDiagnostic)]
+#[diag(lint_elided_named_lifetime)]
+pub(crate) struct ElidedNamedLifetime {
+    #[label(lint_label_elided)]
+    pub elided: Span,
+    pub name: Symbol,
+    #[label(lint_label_named)]
+    pub named_declaration: Option<Span>,
 }
 
 #[derive(LintDiagnostic)]

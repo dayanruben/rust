@@ -54,6 +54,9 @@
 //@ revisions: aarch64_unknown_none_softfloat
 //@ [aarch64_unknown_none_softfloat] compile-flags: --target aarch64-unknown-none-softfloat
 //@ [aarch64_unknown_none_softfloat] needs-llvm-components: aarch64
+//@ revisions: aarch64_unknown_nto_qnx700
+//@ [aarch64_unknown_nto_qnx700] compile-flags: --target aarch64-unknown-nto-qnx700
+//@ [aarch64_unknown_nto_qnx700] needs-llvm-components: aarch64
 //@ revisions: aarch64_unknown_nto_qnx710
 //@ [aarch64_unknown_nto_qnx710] compile-flags: --target aarch64-unknown-nto-qnx710
 //@ [aarch64_unknown_nto_qnx710] needs-llvm-components: aarch64
@@ -126,6 +129,9 @@
 //@ revisions: armv7_linux_androideabi
 //@ [armv7_linux_androideabi] compile-flags: --target armv7-linux-androideabi
 //@ [armv7_linux_androideabi] needs-llvm-components: arm
+//@ revisions: armv7_rtems_eabihf
+//@ [armv7_rtems_eabihf] compile-flags: --target armv7-rtems-eabihf
+//@ [armv7_rtems_eabihf] needs-llvm-components: arm
 //@ revisions: armv7_sony_vita_newlibeabihf
 //@ [armv7_sony_vita_newlibeabihf] compile-flags: --target armv7-sony-vita-newlibeabihf
 //@ [armv7_sony_vita_newlibeabihf] needs-llvm-components: arm

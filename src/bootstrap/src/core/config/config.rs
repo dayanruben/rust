@@ -221,6 +221,7 @@ pub struct Config {
     // llvm codegen options
     pub llvm_assertions: bool,
     pub llvm_tests: bool,
+    pub llvm_enzyme: bool,
     pub llvm_plugins: bool,
     pub llvm_optimize: bool,
     pub llvm_thin_lto: bool,
@@ -268,7 +269,6 @@ pub struct Config {
     pub rust_debuginfo_level_std: DebuginfoLevel,
     pub rust_debuginfo_level_tools: DebuginfoLevel,
     pub rust_debuginfo_level_tests: DebuginfoLevel,
-    pub rust_split_debuginfo_for_build_triple: Option<SplitDebuginfo>, // FIXME: Deprecated field. Remove in Q3'24.
     pub rust_rpath: bool,
     pub rust_strip: bool,
     pub rust_frame_pointers: bool,
@@ -280,6 +280,7 @@ pub struct Config {
     pub rust_codegen_backends: Vec<String>,
     pub rust_verify_llvm_ir: bool,
     pub rust_thin_lto_import_instr_limit: Option<u32>,
+    pub rust_randomize_layout: bool,
     pub rust_remap_debuginfo: bool,
     pub rust_new_symbol_mangling: Option<bool>,
     pub rust_profile_use: Option<String>,
@@ -344,6 +345,7 @@ pub struct Config {
     // These are either the stage0 downloaded binaries or the locally installed ones.
     pub initial_cargo: PathBuf,
     pub initial_rustc: PathBuf,
+    pub initial_cargo_clippy: Option<PathBuf>,
 
     #[cfg(not(test))]
     initial_rustfmt: RefCell<RustfmtState>,
@@ -834,6 +836,7 @@ define_config! {
         cargo: Option<PathBuf> = "cargo",
         rustc: Option<PathBuf> = "rustc",
         rustfmt: Option<PathBuf> = "rustfmt",
+        cargo_clippy: Option<PathBuf> = "cargo-clippy",
         docs: Option<bool> = "docs",
         compiler_docs: Option<bool> = "compiler-docs",
         library_docs_private_items: Option<bool> = "library-docs-private-items",
@@ -896,6 +899,7 @@ define_config! {
         release_debuginfo: Option<bool> = "release-debuginfo",
         assertions: Option<bool> = "assertions",
         tests: Option<bool> = "tests",
+        enzyme: Option<bool> = "enzyme",
         plugins: Option<bool> = "plugins",
         ccache: Option<StringOrBool> = "ccache",
         static_libstdcpp: Option<bool> = "static-libstdcpp",
@@ -1088,6 +1092,7 @@ define_config! {
         codegen_units: Option<u32> = "codegen-units",
         codegen_units_std: Option<u32> = "codegen-units-std",
         debug_assertions: Option<bool> = "debug-assertions",
+        randomize_layout: Option<bool> = "randomize-layout",
         debug_assertions_std: Option<bool> = "debug-assertions-std",
         overflow_checks: Option<bool> = "overflow-checks",
         overflow_checks_std: Option<bool> = "overflow-checks-std",
@@ -1097,7 +1102,6 @@ define_config! {
         debuginfo_level_std: Option<DebuginfoLevel> = "debuginfo-level-std",
         debuginfo_level_tools: Option<DebuginfoLevel> = "debuginfo-level-tools",
         debuginfo_level_tests: Option<DebuginfoLevel> = "debuginfo-level-tests",
-        split_debuginfo: Option<String> = "split-debuginfo",
         backtrace: Option<bool> = "backtrace",
         incremental: Option<bool> = "incremental",
         parallel_compiler: Option<bool> = "parallel-compiler",
@@ -1179,6 +1183,7 @@ impl Config {
             backtrace: true,
             rust_optimize: RustOptimize::Bool(true),
             rust_optimize_tests: true,
+            rust_randomize_layout: false,
             submodules: None,
             docs: true,
             docs_minification: true,
@@ -1439,6 +1444,7 @@ impl Config {
             cargo,
             rustc,
             rustfmt,
+            cargo_clippy,
             docs,
             compiler_docs,
             library_docs_private_items,
@@ -1490,6 +1496,14 @@ impl Config {
             // `canonicalize` requires the path to already exist. Use our vendored copy of `absolute` instead.
             config.out = absolute(&config.out).expect("can't make empty path absolute");
         }
+
+        if cargo_clippy.is_some() && rustc.is_none() {
+            println!(
+                "WARNING: Using `build.cargo-clippy` without `build.rustc` usually fails due to toolchain conflict."
+            );
+        }
+
+        config.initial_cargo_clippy = cargo_clippy;
 
         config.initial_rustc = if let Some(rustc) = rustc {
             if !flags.skip_stage0_validation {
@@ -1591,6 +1605,7 @@ impl Config {
         // we'll infer default values for them later
         let mut llvm_assertions = None;
         let mut llvm_tests = None;
+        let mut llvm_enzyme = None;
         let mut llvm_plugins = None;
         let mut debug = None;
         let mut debug_assertions = None;
@@ -1625,10 +1640,10 @@ impl Config {
                 debuginfo_level_std: debuginfo_level_std_toml,
                 debuginfo_level_tools: debuginfo_level_tools_toml,
                 debuginfo_level_tests: debuginfo_level_tests_toml,
-                split_debuginfo,
                 backtrace,
                 incremental,
                 parallel_compiler,
+                randomize_layout,
                 default_linker,
                 channel,
                 description,
@@ -1684,18 +1699,6 @@ impl Config {
             debuginfo_level_tests = debuginfo_level_tests_toml;
             lld_enabled = lld_enabled_toml;
 
-            config.rust_split_debuginfo_for_build_triple = split_debuginfo
-                .as_deref()
-                .map(SplitDebuginfo::from_str)
-                .map(|v| v.expect("invalid value for rust.split-debuginfo"));
-
-            if config.rust_split_debuginfo_for_build_triple.is_some() {
-                println!(
-                    "WARNING: specifying `rust.split-debuginfo` is deprecated, use `target.{}.split-debuginfo` instead",
-                    config.build
-                );
-            }
-
             optimize = optimize_toml;
             omit_git_hash = omit_git_hash_toml;
             config.rust_new_symbol_mangling = new_symbol_mangling;
@@ -1718,9 +1721,12 @@ impl Config {
             set(&mut config.lld_mode, lld_mode);
             set(&mut config.llvm_bitcode_linker_enabled, llvm_bitcode_linker);
 
+            config.rust_randomize_layout = randomize_layout.unwrap_or_default();
             config.llvm_tools_enabled = llvm_tools.unwrap_or(true);
             config.rustc_parallel =
                 parallel_compiler.unwrap_or(config.channel == "dev" || config.channel == "nightly");
+            config.llvm_enzyme =
+                llvm_enzyme.unwrap_or(config.channel == "dev" || config.channel == "nightly");
             config.rustc_default_linker = default_linker;
             config.musl_root = musl_root.map(PathBuf::from);
             config.save_toolstates = save_toolstates.map(PathBuf::from);
@@ -1805,6 +1811,7 @@ impl Config {
                 release_debuginfo,
                 assertions,
                 tests,
+                enzyme,
                 plugins,
                 ccache,
                 static_libstdcpp,
@@ -1838,6 +1845,7 @@ impl Config {
             set(&mut config.ninja_in_file, ninja);
             llvm_assertions = assertions;
             llvm_tests = tests;
+            llvm_enzyme = enzyme;
             llvm_plugins = plugins;
             set(&mut config.llvm_optimize, optimize_toml);
             set(&mut config.llvm_thin_lto, thin_lto);
@@ -2054,6 +2062,7 @@ impl Config {
 
         config.llvm_assertions = llvm_assertions.unwrap_or(false);
         config.llvm_tests = llvm_tests.unwrap_or(false);
+        config.llvm_enzyme = llvm_enzyme.unwrap_or(false);
         config.llvm_plugins = llvm_plugins.unwrap_or(false);
         config.rust_optimize = optimize.unwrap_or(RustOptimize::Bool(true));
 
@@ -2493,9 +2502,6 @@ impl Config {
         self.target_config
             .get(&target)
             .and_then(|t| t.split_debuginfo)
-            .or_else(|| {
-                if self.build == target { self.rust_split_debuginfo_for_build_triple } else { None }
-            })
             .unwrap_or_else(|| SplitDebuginfo::default_for_platform(target))
     }
 
@@ -2889,6 +2895,7 @@ fn check_incompatible_options_for_ci_rustc(
     let Rust {
         // Following options are the CI rustc incompatible ones.
         optimize,
+        randomize_layout,
         debug_logging,
         debuginfo_level_rustc,
         llvm_tools,
@@ -2916,7 +2923,6 @@ fn check_incompatible_options_for_ci_rustc(
         debuginfo_level_std: _,
         debuginfo_level_tools: _,
         debuginfo_level_tests: _,
-        split_debuginfo: _,
         backtrace: _,
         parallel_compiler: _,
         musl_root: _,
@@ -2953,6 +2959,7 @@ fn check_incompatible_options_for_ci_rustc(
     // otherwise, we just print a warning with `warn` macro.
 
     err!(current_rust_config.optimize, optimize);
+    err!(current_rust_config.randomize_layout, randomize_layout);
     err!(current_rust_config.debug_logging, debug_logging);
     err!(current_rust_config.debuginfo_level_rustc, debuginfo_level_rustc);
     err!(current_rust_config.rpath, rpath);

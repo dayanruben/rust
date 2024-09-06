@@ -17,8 +17,8 @@ use tracing::debug;
 
 use crate::lints::{
     BadOptAccessDiag, DefaultHashTypesDiag, DiagOutOfImpl, LintPassByHand, NonExistentDocKeyword,
-    NonGlobImportTypeIrInherent, QueryInstability, SpanUseEqCtxtDiag, TyQualified, TykindDiag,
-    TykindKind, UntranslatableDiag,
+    NonGlobImportTypeIrInherent, QueryInstability, QueryUntracked, SpanUseEqCtxtDiag, TyQualified,
+    TykindDiag, TykindKind, TypeIrInherentUsage, UntranslatableDiag,
 };
 use crate::{EarlyContext, EarlyLintPass, LateContext, LateLintPass, LintContext};
 
@@ -88,7 +88,18 @@ declare_tool_lint! {
     report_in_external_macro: true
 }
 
-declare_lint_pass!(QueryStability => [POTENTIAL_QUERY_INSTABILITY]);
+declare_tool_lint! {
+    /// The `untracked_query_information` lint detects use of methods which leak information not
+    /// tracked by the query system, such as whether a `Steal<T>` value has already been stolen. In
+    /// order not to break incremental compilation, such methods must be used very carefully or not
+    /// at all.
+    pub rustc::UNTRACKED_QUERY_INFORMATION,
+    Allow,
+    "require explicit opt-in when accessing information not tracked by the query system",
+    report_in_external_macro: true
+}
+
+declare_lint_pass!(QueryStability => [POTENTIAL_QUERY_INSTABILITY, UNTRACKED_QUERY_INFORMATION]);
 
 impl LateLintPass<'_> for QueryStability {
     fn check_expr(&mut self, cx: &LateContext<'_>, expr: &Expr<'_>) {
@@ -100,6 +111,13 @@ impl LateLintPass<'_> for QueryStability {
                     POTENTIAL_QUERY_INSTABILITY,
                     span,
                     QueryInstability { query: cx.tcx.item_name(def_id) },
+                );
+            }
+            if cx.tcx.has_attr(def_id, sym::rustc_lint_untracked_query_information) {
+                cx.emit_span_lint(
+                    UNTRACKED_QUERY_INFORMATION,
+                    span,
+                    QueryUntracked { method: cx.tcx.item_name(def_id) },
                 );
             }
         }
@@ -277,13 +295,39 @@ declare_tool_lint! {
     report_in_external_macro: true
 }
 
-declare_lint_pass!(TypeIr => [NON_GLOB_IMPORT_OF_TYPE_IR_INHERENT]);
+declare_tool_lint! {
+    /// The `usage_of_type_ir_inherent` lint detects usage `rustc_type_ir::inherent`.
+    ///
+    /// This module should only be used within the trait solver.
+    pub rustc::USAGE_OF_TYPE_IR_INHERENT,
+    Allow,
+    "usage `rustc_type_ir::inherent` outside of trait system",
+    report_in_external_macro: true
+}
+
+declare_lint_pass!(TypeIr => [NON_GLOB_IMPORT_OF_TYPE_IR_INHERENT, USAGE_OF_TYPE_IR_INHERENT]);
 
 impl<'tcx> LateLintPass<'tcx> for TypeIr {
     fn check_item(&mut self, cx: &LateContext<'tcx>, item: &'tcx Item<'tcx>) {
         let rustc_hir::ItemKind::Use(path, kind) = item.kind else { return };
 
         let is_mod_inherent = |def_id| cx.tcx.is_diagnostic_item(sym::type_ir_inherent, def_id);
+
+        // Path segments except for the final.
+        if let Some(seg) =
+            path.segments.iter().find(|seg| seg.res.opt_def_id().is_some_and(is_mod_inherent))
+        {
+            cx.emit_span_lint(USAGE_OF_TYPE_IR_INHERENT, seg.ident.span, TypeIrInherentUsage);
+        }
+        // Final path resolutions, like `use rustc_type_ir::inherent`
+        else if path.res.iter().any(|res| res.opt_def_id().is_some_and(is_mod_inherent)) {
+            cx.emit_span_lint(
+                USAGE_OF_TYPE_IR_INHERENT,
+                path.segments.last().unwrap().ident.span,
+                TypeIrInherentUsage,
+            );
+        }
+
         let (lo, hi, snippet) = match path.segments {
             [.., penultimate, segment]
                 if penultimate.res.opt_def_id().is_some_and(is_mod_inherent) =>
