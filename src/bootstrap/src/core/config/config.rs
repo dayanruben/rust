@@ -1600,6 +1600,9 @@ impl Config {
 
         config.verbose = cmp::max(config.verbose, flags.verbose as usize);
 
+        // Verbose flag is a good default for `rust.verbose-tests`.
+        config.verbose_tests = config.is_verbose();
+
         if let Some(install) = toml.install {
             let Install { prefix, sysconfdir, docdir, bindir, libdir, mandir, datadir } = install;
             config.prefix = prefix.map(PathBuf::from);
@@ -2763,7 +2766,8 @@ impl Config {
                     );
                 }
 
-                b
+                // If download-ci-llvm=true we also want to check that CI llvm is available
+                b && llvm::is_ci_llvm_available(self, asserts)
             }
             Some(StringOrBool::String(s)) if s == "if-unchanged" => if_unchanged(),
             Some(StringOrBool::String(other)) => {
