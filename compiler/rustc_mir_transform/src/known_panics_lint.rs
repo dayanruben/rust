@@ -1,8 +1,6 @@
-//! A lint that checks for known panics like
-//! overflows, division by zero,
-//! out-of-bound access etc.
-//! Uses const propagation to determine the
-//! values of operands during checks.
+//! A lint that checks for known panics like overflows, division by zero,
+//! out-of-bound access etc. Uses const propagation to determine the values of
+//! operands during checks.
 
 use std::fmt::Debug;
 
@@ -380,19 +378,19 @@ impl<'mir, 'tcx> ConstPropagator<'mir, 'tcx> {
         if let (Some(l), Some(r)) = (l, r)
             && l.layout.ty.is_integral()
             && op.is_overflowing()
-        {
-            if self.use_ecx(|this| {
+            && self.use_ecx(|this| {
                 let (_res, overflow) = this.ecx.binary_op(op, &l, &r)?.to_scalar_pair();
                 overflow.to_bool()
-            })? {
-                self.report_assert_as_lint(
-                    location,
-                    AssertLintKind::ArithmeticOverflow,
-                    AssertKind::Overflow(op, l.to_const_int(), r.to_const_int()),
-                );
-                return None;
-            }
+            })?
+        {
+            self.report_assert_as_lint(
+                location,
+                AssertLintKind::ArithmeticOverflow,
+                AssertKind::Overflow(op, l.to_const_int(), r.to_const_int()),
+            );
+            return None;
         }
+
         Some(())
     }
 
@@ -562,7 +560,8 @@ impl<'mir, 'tcx> ConstPropagator<'mir, 'tcx> {
 
                 let val = self.use_ecx(|this| this.ecx.binary_op(bin_op, &left, &right))?;
                 if matches!(val.layout.abi, Abi::ScalarPair(..)) {
-                    // FIXME `Value` should properly support pairs in `Immediate`... but currently it does not.
+                    // FIXME `Value` should properly support pairs in `Immediate`... but currently
+                    // it does not.
                     let (val, overflow) = val.to_pair(&self.ecx);
                     Value::Aggregate {
                         variant: VariantIdx::ZERO,

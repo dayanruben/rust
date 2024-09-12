@@ -4781,16 +4781,14 @@ impl<'a: 'ast, 'b, 'ast, 'tcx> LateResolutionVisitor<'a, 'b, 'ast, 'tcx> {
                 if let Some(res) = res
                     && let Some(def_id) = res.opt_def_id()
                     && !def_id.is_local()
+                    && self.r.tcx.crate_types().contains(&CrateType::ProcMacro)
+                    && matches!(
+                        self.r.tcx.sess.opts.resolve_doc_links,
+                        ResolveDocLinks::ExportedMetadata
+                    )
                 {
-                    if self.r.tcx.crate_types().contains(&CrateType::ProcMacro)
-                        && matches!(
-                            self.r.tcx.sess.opts.resolve_doc_links,
-                            ResolveDocLinks::ExportedMetadata
-                        )
-                    {
-                        // Encoding foreign def ids in proc macro crate metadata will ICE.
-                        return None;
-                    }
+                    // Encoding foreign def ids in proc macro crate metadata will ICE.
+                    return None;
                 }
                 res
             });
@@ -5016,5 +5014,5 @@ fn def_id_matches_path(tcx: TyCtxt<'_>, mut def_id: DefId, expected_path: &[&str
         }
         def_id = parent;
     }
-    return true;
+    true
 }
