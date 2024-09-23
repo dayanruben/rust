@@ -1,10 +1,10 @@
 //! List of the unstable feature gates.
 
 use rustc_data_structures::fx::FxHashSet;
-use rustc_span::symbol::{sym, Symbol};
 use rustc_span::Span;
+use rustc_span::symbol::{Symbol, sym};
 
-use super::{to_nonzero, Feature};
+use super::{Feature, to_nonzero};
 
 pub struct UnstableFeature {
     pub feature: Feature,
@@ -395,7 +395,7 @@ declare_features! (
     (unstable, closure_lifetime_binder, "1.64.0", Some(97362)),
     /// Allows `#[track_caller]` on closures and coroutines.
     (unstable, closure_track_caller, "1.57.0", Some(87417)),
-    /// Allows to use the `#[cmse_nonsecure_entry]` attribute.
+    /// Allows `extern "C-cmse-nonsecure-entry" fn()`.
     (unstable, cmse_nonsecure_entry, "1.48.0", Some(75835)),
     /// Allows `async {}` expressions in const contexts.
     (unstable, const_async_blocks, "1.53.0", Some(85368)),
@@ -578,7 +578,7 @@ declare_features! (
     /// be used to describe E or vise-versa.
     (unstable, result_ffi_guarantees, "1.80.0", Some(110503)),
     /// Allows bounding the return type of AFIT/RPITIT.
-    (incomplete, return_type_notation, "1.70.0", Some(109417)),
+    (unstable, return_type_notation, "1.70.0", Some(109417)),
     /// Allows `extern "rust-cold"`.
     (unstable, rust_cold_cc, "1.63.0", Some(97544)),
     /// Allows use of x86 SHA512, SM3 and SM4 target-features and intrinsics

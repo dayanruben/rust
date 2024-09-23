@@ -27,9 +27,9 @@ use rustc_ast::tokenstream::{
 };
 use rustc_ast::util::case::Case;
 use rustc_ast::{
-    self as ast, AnonConst, AttrArgs, AttrArgsEq, AttrId, ByRef, Const, CoroutineKind, DelimArgs,
-    Expr, ExprKind, Extern, HasAttrs, HasTokens, Mutability, Recovered, Safety, StrLit, Visibility,
-    VisibilityKind, DUMMY_NODE_ID,
+    self as ast, AnonConst, AttrArgs, AttrArgsEq, AttrId, ByRef, Const, CoroutineKind,
+    DUMMY_NODE_ID, DelimArgs, Expr, ExprKind, Extern, HasAttrs, HasTokens, Mutability, Recovered,
+    Safety, StrLit, Visibility, VisibilityKind,
 };
 use rustc_ast_pretty::pprust;
 use rustc_data_structures::fx::FxHashMap;
@@ -37,8 +37,8 @@ use rustc_data_structures::sync::Lrc;
 use rustc_errors::{Applicability, Diag, FatalError, MultiSpan, PResult};
 use rustc_index::interval::IntervalSet;
 use rustc_session::parse::ParseSess;
-use rustc_span::symbol::{kw, sym, Ident, Symbol};
-use rustc_span::{Span, DUMMY_SP};
+use rustc_span::symbol::{Ident, Symbol, kw, sym};
+use rustc_span::{DUMMY_SP, Span};
 use thin_vec::ThinVec;
 use tracing::debug;
 
@@ -1562,12 +1562,25 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// Checks for `::` or, potentially, `:::` and then look ahead after it.
+    fn check_path_sep_and_look_ahead(&mut self, looker: impl Fn(&Token) -> bool) -> bool {
+        if self.check(&token::PathSep) {
+            if self.may_recover() && self.look_ahead(1, |t| t.kind == token::Colon) {
+                debug_assert!(!self.look_ahead(1, &looker), "Looker must not match on colon");
+                self.look_ahead(2, looker)
+            } else {
+                self.look_ahead(1, looker)
+            }
+        } else {
+            false
+        }
+    }
+
     /// `::{` or `::*`
     fn is_import_coupler(&mut self) -> bool {
-        self.check(&token::PathSep)
-            && self.look_ahead(1, |t| {
-                *t == token::OpenDelim(Delimiter::Brace) || *t == token::BinOp(token::Star)
-            })
+        self.check_path_sep_and_look_ahead(|t| {
+            matches!(t.kind, token::OpenDelim(Delimiter::Brace) | token::BinOp(token::Star))
+        })
     }
 
     // Debug view of the parser's token stream, up to `{lookahead}` tokens.
