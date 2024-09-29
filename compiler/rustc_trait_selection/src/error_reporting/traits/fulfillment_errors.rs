@@ -33,11 +33,12 @@ use tracing::{debug, instrument};
 use super::on_unimplemented::{AppendConstMessage, OnUnimplementedNote};
 use super::suggestions::get_explanation_based_on_obligation;
 use super::{
-    ArgKind, CandidateSimilarity, GetSafeTransmuteErrorAndReason, ImplCandidate, UnsatisfiedConst,
+    ArgKind, CandidateSimilarity, FindExprBySpan, GetSafeTransmuteErrorAndReason, ImplCandidate,
+    UnsatisfiedConst,
 };
 use crate::error_reporting::TypeErrCtxt;
 use crate::error_reporting::infer::TyCategory;
-use crate::error_reporting::traits::report_object_safety_error;
+use crate::error_reporting::traits::report_dyn_incompatibility;
 use crate::errors::{
     AsyncClosureNotFn, ClosureFnMutLabel, ClosureFnOnceLabel, ClosureKindMismatch,
 };
@@ -46,7 +47,7 @@ use crate::traits::query::evaluate_obligation::InferCtxtExt as _;
 use crate::traits::{
     MismatchedProjectionTypes, NormalizeExt, Obligation, ObligationCause, ObligationCauseCode,
     ObligationCtxt, Overflow, PredicateObligation, SelectionError, SignatureMismatch,
-    TraitNotObjectSafe, elaborate,
+    TraitDynIncompatible, elaborate,
 };
 
 impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
@@ -378,14 +379,34 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
                             if let (ty::FnPtr(..), ty::FnDef(..)) =
                                 (cand.self_ty().kind(), main_trait_ref.self_ty().skip_binder().kind())
                             {
-                                err.span_suggestion(
-                                    span.shrink_to_hi(),
+                                // Wrap method receivers and `&`-references in parens
+                                let suggestion = if self.tcx.sess.source_map().span_look_ahead(span, ".", Some(50)).is_some() {
+                                    vec![
+                                        (span.shrink_to_lo(), format!("(")),
+                                        (span.shrink_to_hi(), format!(" as {})", cand.self_ty())),
+                                    ]
+                                } else if let Some(body) = self.tcx.hir().maybe_body_owned_by(obligation.cause.body_id) {
+                                    let mut expr_finder = FindExprBySpan::new(span, self.tcx);
+                                    expr_finder.visit_expr(body.value);
+                                    if let Some(expr) = expr_finder.result &&
+                                        let hir::ExprKind::AddrOf(_, _, expr) = expr.kind {
+                                        vec![
+                                            (expr.span.shrink_to_lo(), format!("(")),
+                                            (expr.span.shrink_to_hi(), format!(" as {})", cand.self_ty())),
+                                        ]
+                                    } else {
+                                        vec![(span.shrink_to_hi(), format!(" as {}", cand.self_ty()))]
+                                    }
+                                } else {
+                                    vec![(span.shrink_to_hi(), format!(" as {}", cand.self_ty()))]
+                                };
+                                err.multipart_suggestion(
                                     format!(
                                         "the trait `{}` is implemented for fn pointer `{}`, try casting using `as`",
                                         cand.print_trait_sugared(),
                                         cand.self_ty(),
                                     ),
-                                    format!(" as {}", cand.self_ty()),
+                                    suggestion,
                                     Applicability::MaybeIncorrect,
                                 );
                                 true
@@ -547,9 +568,9 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
                         )
                     }
 
-                    ty::PredicateKind::ObjectSafe(trait_def_id) => {
-                        let violations = self.tcx.object_safety_violations(trait_def_id);
-                        report_object_safety_error(self.tcx, span, None, trait_def_id, violations)
+                    ty::PredicateKind::DynCompatible(trait_def_id) => {
+                        let violations = self.tcx.dyn_compatibility_violations(trait_def_id);
+                        report_dyn_incompatibility(self.tcx, span, None, trait_def_id, violations)
                     }
 
                     ty::PredicateKind::Clause(ty::ClauseKind::WellFormed(ty)) => {
@@ -624,9 +645,9 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
                 def_id,
             ),
 
-            TraitNotObjectSafe(did) => {
-                let violations = self.tcx.object_safety_violations(did);
-                report_object_safety_error(self.tcx, span, None, did, violations)
+            TraitDynIncompatible(did) => {
+                let violations = self.tcx.dyn_compatibility_violations(did);
+                report_dyn_incompatibility(self.tcx, span, None, did, violations)
             }
 
             SelectionError::NotConstEvaluatable(NotConstEvaluatable::MentionsInfer) => {
@@ -2635,49 +2656,47 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
         // This shouldn't be common unless manually implementing one of the
         // traits manually, but don't make it more confusing when it does
         // happen.
-        Ok(
-            if Some(expected_trait_ref.def_id) != self.tcx.lang_items().coroutine_trait()
-                && not_tupled
-            {
-                self.report_and_explain_type_error(
-                    TypeTrace::trait_refs(
-                        &obligation.cause,
-                        true,
-                        expected_trait_ref,
-                        found_trait_ref,
-                    ),
-                    ty::error::TypeError::Mismatch,
-                )
-            } else if found.len() == expected.len() {
-                self.report_closure_arg_mismatch(
-                    span,
-                    found_span,
-                    found_trait_ref,
-                    expected_trait_ref,
-                    obligation.cause.code(),
-                    found_node,
-                    obligation.param_env,
-                )
-            } else {
-                let (closure_span, closure_arg_span, found) = found_did
-                    .and_then(|did| {
-                        let node = self.tcx.hir().get_if_local(did)?;
-                        let (found_span, closure_arg_span, found) =
-                            self.get_fn_like_arguments(node)?;
-                        Some((Some(found_span), closure_arg_span, found))
-                    })
-                    .unwrap_or((found_span, None, found));
+        if Some(expected_trait_ref.def_id) != self.tcx.lang_items().coroutine_trait() && not_tupled
+        {
+            return Ok(self.report_and_explain_type_error(
+                TypeTrace::trait_refs(&obligation.cause, true, expected_trait_ref, found_trait_ref),
+                ty::error::TypeError::Mismatch,
+            ));
+        }
+        if found.len() != expected.len() {
+            let (closure_span, closure_arg_span, found) = found_did
+                .and_then(|did| {
+                    let node = self.tcx.hir().get_if_local(did)?;
+                    let (found_span, closure_arg_span, found) = self.get_fn_like_arguments(node)?;
+                    Some((Some(found_span), closure_arg_span, found))
+                })
+                .unwrap_or((found_span, None, found));
 
-                self.report_arg_count_mismatch(
+            // If the coroutine take a single () as its argument,
+            // the trait argument would found the coroutine take 0 arguments,
+            // but get_fn_like_arguments would give 1 argument.
+            // This would result in "Expected to take 1 argument, but it takes 1 argument".
+            // Check again to avoid this.
+            if found.len() != expected.len() {
+                return Ok(self.report_arg_count_mismatch(
                     span,
                     closure_span,
                     expected,
                     found,
                     found_trait_ty.is_closure(),
                     closure_arg_span,
-                )
-            },
-        )
+                ));
+            }
+        }
+        Ok(self.report_closure_arg_mismatch(
+            span,
+            found_span,
+            found_trait_ref,
+            expected_trait_ref,
+            obligation.cause.code(),
+            found_node,
+            obligation.param_env,
+        ))
     }
 
     /// Given some node representing a fn-like thing in the HIR map,
