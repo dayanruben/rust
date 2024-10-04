@@ -1,4 +1,4 @@
-//! There are four type combiners: [TypeRelating], [Lub], and [Glb],
+//! There are four type combiners: [TypeRelating], `Lub`, and `Glb`,
 //! and `NllTypeRelating` in rustc_borrowck, which is only used for NLL.
 //!
 //! Each implements the trait [TypeRelation] and contains methods for
@@ -26,8 +26,7 @@ use rustc_middle::ty::{self, InferConst, IntType, Ty, TyCtxt, TypeVisitableExt, 
 pub use rustc_next_trait_solver::relate::combine::*;
 use tracing::debug;
 
-use super::glb::Glb;
-use super::lub::Lub;
+use super::lattice::{LatticeOp, LatticeOpKind};
 use super::type_relating::TypeRelating;
 use super::{RelateResult, StructurallyRelateAliases};
 use crate::infer::{DefineOpaqueTypes, InferCtxt, TypeTrace, relate};
@@ -36,10 +35,15 @@ use crate::traits::{Obligation, PredicateObligation};
 #[derive(Clone)]
 pub struct CombineFields<'infcx, 'tcx> {
     pub infcx: &'infcx InferCtxt<'tcx>,
+    // Immutable fields
     pub trace: TypeTrace<'tcx>,
     pub param_env: ty::ParamEnv<'tcx>,
-    pub goals: Vec<Goal<'tcx, ty::Predicate<'tcx>>>,
     pub define_opaque_types: DefineOpaqueTypes,
+    // Mutable fields
+    //
+    // Adding any additional field likely requires
+    // changes to the cache of `TypeRelating`.
+    pub goals: Vec<Goal<'tcx, ty::Predicate<'tcx>>>,
 }
 
 impl<'infcx, 'tcx> CombineFields<'infcx, 'tcx> {
@@ -298,12 +302,12 @@ impl<'infcx, 'tcx> CombineFields<'infcx, 'tcx> {
         TypeRelating::new(self, StructurallyRelateAliases::No, ty::Contravariant)
     }
 
-    pub fn lub<'a>(&'a mut self) -> Lub<'a, 'infcx, 'tcx> {
-        Lub::new(self)
+    pub(crate) fn lub<'a>(&'a mut self) -> LatticeOp<'a, 'infcx, 'tcx> {
+        LatticeOp::new(self, LatticeOpKind::Lub)
     }
 
-    pub fn glb<'a>(&'a mut self) -> Glb<'a, 'infcx, 'tcx> {
-        Glb::new(self)
+    pub(crate) fn glb<'a>(&'a mut self) -> LatticeOp<'a, 'infcx, 'tcx> {
+        LatticeOp::new(self, LatticeOpKind::Glb)
     }
 
     pub fn register_obligations(
