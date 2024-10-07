@@ -5,7 +5,6 @@
 #![doc(rust_logo)]
 #![feature(assert_matches)]
 #![feature(box_patterns)]
-#![feature(control_flow_enum)]
 #![feature(file_buffered)]
 #![feature(let_chains)]
 #![feature(never_type)]
@@ -743,6 +742,7 @@ impl<'a, 'tcx, R> rustc_mir_dataflow::ResultsVisitor<'a, 'tcx, R>
             }
 
             TerminatorKind::InlineAsm {
+                asm_macro: _,
                 template: _,
                 operands,
                 options: _,

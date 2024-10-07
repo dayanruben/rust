@@ -925,6 +925,7 @@ users_on_vacation = [
     "jhpratt",
     "jyn514",
     "oli-obk",
+    "jieyouxu",
 ]
 
 [assign.adhoc_groups]
@@ -938,7 +939,6 @@ compiler-team = [
     "@oli-obk",
     "@pnkfelix",
     "@wesleywiser",
-    "@michaelwoerister",
 ]
 compiler-team-contributors = [
     "@TaKO8Ki",
@@ -989,7 +989,6 @@ query-system = [
     "@cjgillot",
 ]
 incremental = [
-    "@michaelwoerister",
     "@wesleywiser",
 ]
 diagnostics = [
@@ -1048,7 +1047,6 @@ ast_lowering = [
     "@spastorino",
 ]
 debuginfo = [
-    "@michaelwoerister",
     "@davidtwco"
 ]
 fallback = [

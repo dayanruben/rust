@@ -992,7 +992,7 @@ pub const fn slice_from_raw_parts<T>(data: *const T, len: usize) -> *const [T] {
 /// ```
 #[inline]
 #[stable(feature = "slice_from_raw_parts", since = "1.42.0")]
-#[rustc_const_unstable(feature = "const_slice_from_raw_parts_mut", issue = "67456")]
+#[rustc_const_stable(feature = "const_slice_from_raw_parts_mut", since = "CURRENT_RUSTC_VERSION")]
 #[rustc_diagnostic_item = "ptr_slice_from_raw_parts_mut"]
 pub const fn slice_from_raw_parts_mut<T>(data: *mut T, len: usize) -> *mut [T] {
     from_raw_parts_mut(data, len)
@@ -1909,6 +1909,7 @@ pub unsafe fn write_volatile<T>(dst: *mut T, src: T) {
 /// than trying to adapt this to accommodate that change.
 ///
 /// Any questions go to @nagisa.
+#[cfg_attr(not(bootstrap), allow(ptr_to_integer_transmute_in_consts))]
 #[lang = "align_offset"]
 pub(crate) const unsafe fn align_offset<T: Sized>(p: *const T, a: usize) -> usize {
     // FIXME(#75598): Direct use of these intrinsics improves codegen significantly at opt-level <=
