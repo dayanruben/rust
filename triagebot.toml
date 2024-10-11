@@ -923,7 +923,6 @@ contributing_url = "https://rustc-dev-guide.rust-lang.org/getting-started.html"
 users_on_vacation = [
     "BoxyUwU",
     "fmease",
-    "jhpratt",
     "jyn514",
     "oli-obk",
 ]
@@ -971,6 +970,7 @@ bootstrap = [
     "@albertlarsan68",
     "@onur-ozkan",
     "@kobzol",
+    "@jieyouxu",
 ]
 infra-ci = [
     "@Mark-Simulacrum",
