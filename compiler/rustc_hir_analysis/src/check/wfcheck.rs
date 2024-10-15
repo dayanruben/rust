@@ -531,7 +531,7 @@ fn check_gat_where_clauses(tcx: TyCtxt<'_>, trait_def_id: LocalDefId) {
         debug!(?required_bounds);
         let param_env = tcx.param_env(gat_def_id);
 
-        let mut unsatisfied_bounds: Vec<_> = required_bounds
+        let unsatisfied_bounds: Vec<_> = required_bounds
             .into_iter()
             .filter(|clause| match clause.kind().skip_binder() {
                 ty::ClauseKind::RegionOutlives(ty::OutlivesPredicate(a, b)) => {
@@ -551,9 +551,6 @@ fn check_gat_where_clauses(tcx: TyCtxt<'_>, trait_def_id: LocalDefId) {
             })
             .map(|clause| clause.to_string())
             .collect();
-
-        // We sort so that order is predictable
-        unsatisfied_bounds.sort();
 
         if !unsatisfied_bounds.is_empty() {
             let plural = pluralize!(unsatisfied_bounds.len());
@@ -832,7 +829,7 @@ impl<'tcx> TypeVisitor<TyCtxt<'tcx>> for GATArgsCollector<'tcx> {
 
 fn could_be_self(trait_def_id: LocalDefId, ty: &hir::Ty<'_>) -> bool {
     match ty.kind {
-        hir::TyKind::TraitObject([(trait_ref, _)], ..) => match trait_ref.trait_ref.path.segments {
+        hir::TyKind::TraitObject([trait_ref], ..) => match trait_ref.trait_ref.path.segments {
             [s] => s.res.opt_def_id() == Some(trait_def_id.to_def_id()),
             _ => false,
         },

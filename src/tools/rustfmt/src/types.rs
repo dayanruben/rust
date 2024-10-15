@@ -610,16 +610,14 @@ impl Rewrite for ast::GenericBound {
 
     fn rewrite_result(&self, context: &RewriteContext<'_>, shape: Shape) -> RewriteResult {
         match *self {
-            ast::GenericBound::Trait(
-                ref poly_trait_ref,
-                ast::TraitBoundModifiers {
+            ast::GenericBound::Trait(ref poly_trait_ref) => {
+                let snippet = context.snippet(self.span());
+                let has_paren = snippet.starts_with('(') && snippet.ends_with(')');
+                let ast::TraitBoundModifiers {
                     constness,
                     asyncness,
                     polarity,
-                },
-            ) => {
-                let snippet = context.snippet(self.span());
-                let has_paren = snippet.starts_with('(') && snippet.ends_with(')');
+                } = poly_trait_ref.modifiers;
                 let mut constness = constness.as_str().to_string();
                 if !constness.is_empty() {
                     constness.push(' ');
@@ -827,7 +825,8 @@ impl Rewrite for ast::Ty {
 
                 rewrite_unary_prefix(context, prefix, &*mt.ty, shape)
             }
-            ast::TyKind::Ref(ref lifetime, ref mt) => {
+            ast::TyKind::Ref(ref lifetime, ref mt)
+            | ast::TyKind::PinnedRef(ref lifetime, ref mt) => {
                 let mut_str = format_mutability(mt.mutbl);
                 let mut_len = mut_str.len();
                 let mut result = String::with_capacity(128);
@@ -859,6 +858,13 @@ impl Rewrite for ast::Ty {
                     }
                     result.push(' ');
                     cmnt_lo = lifetime.ident.span.hi();
+                }
+
+                if let ast::TyKind::PinnedRef(..) = self.kind {
+                    result.push_str("pin ");
+                    if ast::Mutability::Not == mt.mutbl {
+                        result.push_str("const ");
+                    }
                 }
 
                 if ast::Mutability::Mut == mt.mutbl {
@@ -1260,9 +1266,9 @@ pub(crate) fn can_be_overflowed_type(
 ) -> bool {
     match ty.kind {
         ast::TyKind::Tup(..) => context.use_block_indent() && len == 1,
-        ast::TyKind::Ref(_, ref mutty) | ast::TyKind::Ptr(ref mutty) => {
-            can_be_overflowed_type(context, &*mutty.ty, len)
-        }
+        ast::TyKind::Ref(_, ref mutty)
+        | ast::TyKind::PinnedRef(_, ref mutty)
+        | ast::TyKind::Ptr(ref mutty) => can_be_overflowed_type(context, &*mutty.ty, len),
         _ => false,
     }
 }
