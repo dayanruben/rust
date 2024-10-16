@@ -120,6 +120,7 @@
 #![feature(const_char_encode_utf16)]
 #![feature(const_eval_select)]
 #![feature(const_exact_div)]
+#![feature(const_float_methods)]
 #![feature(const_fmt_arguments_new)]
 #![feature(const_hash)]
 #![feature(const_heap)]
@@ -172,9 +173,6 @@
 //
 // Language features:
 // tidy-alphabetical-start
-#![cfg_attr(bootstrap, feature(const_mut_refs))]
-#![cfg_attr(bootstrap, feature(const_refs_to_cell))]
-#![cfg_attr(bootstrap, feature(const_refs_to_static))]
 #![feature(abi_unadjusted)]
 #![feature(adt_const_params)]
 #![feature(allow_internal_unsafe)]
