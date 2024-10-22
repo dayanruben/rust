@@ -1,5 +1,3 @@
-// ignore-tidy-filelength
-
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
@@ -468,7 +466,19 @@ impl<'test> TestCx<'test> {
 
         if let Some(revision) = self.revision {
             let normalized_revision = normalize_revision(revision);
-            cmd.args(&["--cfg", &normalized_revision]);
+            let cfg_arg = ["--cfg", &normalized_revision];
+            let arg = format!("--cfg={normalized_revision}");
+            if self
+                .props
+                .compile_flags
+                .windows(2)
+                .any(|args| args == cfg_arg || args[0] == arg || args[1] == arg)
+            {
+                panic!(
+                    "error: redundant cfg argument `{normalized_revision}` is already created by the revision"
+                );
+            }
+            cmd.args(cfg_arg);
         }
 
         if !self.props.no_auto_check_cfg {
@@ -1885,7 +1895,7 @@ impl<'test> TestCx<'test> {
     }
 
     fn compare_to_default_rustdoc(&mut self, out_dir: &Path) {
-        if !self.config.has_tidy {
+        if !self.config.has_html_tidy {
             return;
         }
         println!("info: generating a diff against nightly rustdoc");

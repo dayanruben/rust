@@ -124,7 +124,7 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                 }
                 [sym::inline, ..] => self.check_inline(hir_id, attr, span, target),
                 [sym::coverage, ..] => self.check_coverage(attr, span, target),
-                [sym::optimize, ..] => self.check_optimize(hir_id, attr, target),
+                [sym::optimize, ..] => self.check_optimize(hir_id, attr, span, target),
                 [sym::no_sanitize, ..] => {
                     self.check_applied_to_fn_or_method(hir_id, attr, span, target)
                 }
@@ -433,23 +433,19 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
 
     /// Checks that `#[optimize(..)]` is applied to a function/closure/method,
     /// or to an impl block or module.
-    // FIXME(#128488): this should probably be elevated to an error?
-    fn check_optimize(&self, hir_id: HirId, attr: &Attribute, target: Target) {
-        match target {
+    fn check_optimize(&self, hir_id: HirId, attr: &Attribute, span: Span, target: Target) {
+        let is_valid = matches!(
+            target,
             Target::Fn
-            | Target::Closure
-            | Target::Method(MethodKind::Trait { body: true } | MethodKind::Inherent)
-            | Target::Impl
-            | Target::Mod => {}
-
-            _ => {
-                self.tcx.emit_node_span_lint(
-                    UNUSED_ATTRIBUTES,
-                    hir_id,
-                    attr.span,
-                    errors::OptimizeNotFnOrClosure,
-                );
-            }
+                | Target::Closure
+                | Target::Method(MethodKind::Trait { body: true } | MethodKind::Inherent)
+        );
+        if !is_valid {
+            self.dcx().emit_err(errors::OptimizeInvalidTarget {
+                attr_span: attr.span,
+                defn_span: span,
+                on_crate: hir_id == CRATE_HIR_ID,
+            });
         }
     }
 
@@ -1187,15 +1183,7 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
 
                         sym::masked => self.check_doc_masked(attr, meta, hir_id, target),
 
-                        // no_default_passes: deprecated
-                        // passes: deprecated
-                        // plugins: removed, but rustdoc warns about it itself
-                        sym::cfg
-                        | sym::hidden
-                        | sym::no_default_passes
-                        | sym::notable_trait
-                        | sym::passes
-                        | sym::plugins => {}
+                        sym::cfg | sym::hidden | sym::notable_trait => {}
 
                         sym::rust_logo => {
                             if self.check_attr_crate_level(attr, meta, hir_id)
@@ -1243,6 +1231,22 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                                         },
                                         sugg: (attr.meta().unwrap().span, applicability),
                                     },
+                                );
+                            } else if i_meta.has_name(sym::passes)
+                                || i_meta.has_name(sym::no_default_passes)
+                            {
+                                self.tcx.emit_node_span_lint(
+                                    INVALID_DOC_ATTRIBUTES,
+                                    hir_id,
+                                    i_meta.span,
+                                    errors::DocTestUnknownPasses { path, span: i_meta.span },
+                                );
+                            } else if i_meta.has_name(sym::plugins) {
+                                self.tcx.emit_node_span_lint(
+                                    INVALID_DOC_ATTRIBUTES,
+                                    hir_id,
+                                    i_meta.span,
+                                    errors::DocTestUnknownPlugins { path, span: i_meta.span },
                                 );
                             } else {
                                 self.tcx.emit_node_span_lint(

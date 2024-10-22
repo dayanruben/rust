@@ -360,6 +360,7 @@ bootstrap_tool!(
     CoverageDump, "src/tools/coverage-dump", "coverage-dump";
     RustcPerfWrapper, "src/tools/rustc-perf-wrapper", "rustc-perf-wrapper";
     WasmComponentLd, "src/tools/wasm-component-ld", "wasm-component-ld", is_unstable_tool = true, allow_features = "min_specialization";
+    UnicodeTableGenerator, "src/tools/unicode-table-generator", "unicode-table-generator";
 );
 
 /// These are the submodules that are required for rustbook to work due to
@@ -1095,6 +1096,38 @@ tool_extended!((self, builder),
     Rls, "src/tools/rls", "rls", stable=true;
     Rustfmt, "src/tools/rustfmt", "rustfmt", stable=true, add_bins_to_sysroot = ["rustfmt", "cargo-fmt"];
 );
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TestFloatParse {
+    pub host: TargetSelection,
+}
+
+impl Step for TestFloatParse {
+    type Output = ();
+    const ONLY_HOSTS: bool = true;
+    const DEFAULT: bool = false;
+
+    fn should_run(run: ShouldRun<'_>) -> ShouldRun<'_> {
+        run.path("src/etc/test-float-parse")
+    }
+
+    fn run(self, builder: &Builder<'_>) {
+        let bootstrap_host = builder.config.build;
+        let compiler = builder.compiler(builder.top_stage, bootstrap_host);
+
+        builder.ensure(ToolBuild {
+            compiler,
+            target: bootstrap_host,
+            tool: "test-float-parse",
+            mode: Mode::ToolStd,
+            path: "src/etc/test-float-parse",
+            source_type: SourceType::InTree,
+            extra_features: Vec::new(),
+            allow_features: "",
+            cargo_args: Vec::new(),
+        });
+    }
+}
 
 impl Builder<'_> {
     /// Gets a `BootstrapCommand` which is ready to run `tool` in `stage` built for

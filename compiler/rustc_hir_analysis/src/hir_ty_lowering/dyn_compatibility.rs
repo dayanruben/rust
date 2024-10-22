@@ -20,7 +20,7 @@ use tracing::{debug, instrument};
 use super::HirTyLowerer;
 use crate::bounds::Bounds;
 use crate::hir_ty_lowering::{
-    GenericArgCountMismatch, GenericArgCountResult, OnlySelfBounds, RegionInferReason,
+    GenericArgCountMismatch, GenericArgCountResult, PredicateFilter, RegionInferReason,
 };
 
 impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
@@ -51,13 +51,11 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
             } = self.lower_poly_trait_ref(
                 &trait_bound.trait_ref,
                 trait_bound.span,
-                ty::BoundConstness::NotConst,
+                None,
                 ty::PredicatePolarity::Positive,
                 dummy_self,
                 &mut bounds,
-                // True so we don't populate `bounds` with associated type bounds, even
-                // though they're disallowed from object types.
-                OnlySelfBounds(true),
+                PredicateFilter::SelfOnly,
             ) {
                 potential_assoc_types.extend(cur_potential_assoc_types);
             }
@@ -261,7 +259,6 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
                         }
                     })
                     .collect();
-                let args = tcx.mk_args(&args);
 
                 let span = i.bottom().1;
                 let empty_generic_args = hir_trait_bounds.iter().any(|hir_bound| {
@@ -294,7 +291,7 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
                     .emit();
                 }
 
-                ty::ExistentialTraitRef { def_id: trait_ref.def_id, args }
+                ty::ExistentialTraitRef::new(tcx, trait_ref.def_id, args)
             })
         });
 

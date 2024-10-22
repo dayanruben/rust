@@ -2288,10 +2288,10 @@ impl EarlyLintPass for IncompleteInternalFeatures {
     fn check_crate(&mut self, cx: &EarlyContext<'_>, _: &ast::Crate) {
         let features = cx.builder.features();
         features
-            .declared_lang_features
+            .enabled_lang_features()
             .iter()
             .map(|(name, span, _)| (name, span))
-            .chain(features.declared_lib_features.iter().map(|(name, span)| (name, span)))
+            .chain(features.enabled_lib_features().iter().map(|(name, span)| (name, span)))
             .filter(|(&name, _)| features.incomplete(name) || features.internal(name))
             .for_each(|(&name, &span)| {
                 if features.incomplete(name) {
@@ -2601,7 +2601,7 @@ impl<'tcx> LateLintPass<'tcx> for InvalidValue {
                     ty.tuple_fields().iter().find_map(|field| ty_find_init_error(cx, field, init))
                 }
                 Array(ty, len) => {
-                    if matches!(len.try_eval_target_usize(cx.tcx, cx.param_env), Some(v) if v > 0) {
+                    if matches!(len.try_to_target_usize(cx.tcx), Some(v) if v > 0) {
                         // Array length known at array non-empty -- recurse.
                         ty_find_init_error(cx, *ty, init)
                     } else {
