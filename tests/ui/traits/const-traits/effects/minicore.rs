@@ -137,12 +137,12 @@ macro_rules! impl_fn_mut_tuple {
 //impl_fn_mut_tuple!(A B C D);
 //impl_fn_mut_tuple!(A B C D E);
 
-#[lang = "receiver"]
-trait Receiver {}
+#[lang = "legacy_receiver"]
+trait LegacyReceiver {}
 
-impl<T: ?Sized> Receiver for &T {}
+impl<T: ?Sized> LegacyReceiver for &T {}
 
-impl<T: ?Sized> Receiver for &mut T {}
+impl<T: ?Sized> LegacyReceiver for &mut T {}
 
 #[lang = "destruct"]
 #[const_trait]
@@ -454,7 +454,7 @@ impl<T> /* const */ Deref for Option<T> {
     }
 }
 
-impl<P: Receiver> Receiver for Pin<P> {}
+impl<P: LegacyReceiver> LegacyReceiver for Pin<P> {}
 
 impl<T: Clone> Clone for RefCell<T> {
     fn clone(&self) -> RefCell<T> {
@@ -535,36 +535,4 @@ fn test_const_eval_select() {
     fn rt_fn() {}
 
     const_eval_select((), const_fn, rt_fn);
-}
-
-mod effects {
-    use super::Sized;
-
-    #[lang = "EffectsNoRuntime"]
-    pub struct NoRuntime;
-    #[lang = "EffectsMaybe"]
-    pub struct Maybe;
-    #[lang = "EffectsRuntime"]
-    pub struct Runtime;
-
-    #[lang = "EffectsCompat"]
-    pub trait Compat<#[rustc_runtime] const RUNTIME: bool> {}
-
-    impl Compat<false> for NoRuntime {}
-    impl Compat<true> for Runtime {}
-    impl<#[rustc_runtime] const RUNTIME: bool> Compat<RUNTIME> for Maybe {}
-
-    #[lang = "EffectsTyCompat"]
-    #[marker]
-    pub trait TyCompat<T: ?Sized> {}
-
-    impl<T: ?Sized> TyCompat<T> for T {}
-    impl<T: ?Sized> TyCompat<T> for Maybe {}
-    impl<T: ?Sized> TyCompat<Maybe> for T {}
-
-    #[lang = "EffectsIntersection"]
-    pub trait Intersection {
-        #[lang = "EffectsIntersectionOutput"]
-        type Output: ?Sized;
-    }
 }
