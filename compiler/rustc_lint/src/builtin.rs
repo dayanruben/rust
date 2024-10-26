@@ -73,7 +73,6 @@ use crate::{
     EarlyContext, EarlyLintPass, LateContext, LateLintPass, Level, LintContext,
     fluent_generated as fluent,
 };
-
 declare_lint! {
     /// The `while_true` lint detects `while true { }`.
     ///
@@ -241,7 +240,8 @@ declare_lint! {
     /// behavior.
     UNSAFE_CODE,
     Allow,
-    "usage of `unsafe` code and other potentially unsound constructs"
+    "usage of `unsafe` code and other potentially unsound constructs",
+    @eval_always = true
 }
 
 declare_lint_pass!(UnsafeCode => [UNSAFE_CODE]);
@@ -389,6 +389,7 @@ declare_lint! {
     report_in_external_macro
 }
 
+#[derive(Default)]
 pub struct MissingDoc;
 
 impl_lint_pass!(MissingDoc => [MISSING_DOCS]);
@@ -819,8 +820,8 @@ pub struct DeprecatedAttr {
 
 impl_lint_pass!(DeprecatedAttr => []);
 
-impl DeprecatedAttr {
-    pub fn new() -> DeprecatedAttr {
+impl Default for DeprecatedAttr {
+    fn default() -> Self {
         DeprecatedAttr { depr_attrs: deprecated_attributes() }
     }
 }
@@ -1894,11 +1895,11 @@ impl EarlyLintPass for KeywordIdents {
     fn check_mac(&mut self, cx: &EarlyContext<'_>, mac: &ast::MacCall) {
         self.check_tokens(cx, &mac.args.tokens);
     }
-    fn check_ident(&mut self, cx: &EarlyContext<'_>, ident: Ident) {
+    fn check_ident(&mut self, cx: &EarlyContext<'_>, ident: &Ident) {
         if ident.name.as_str().starts_with('\'') {
             self.check_ident_token(cx, UnderMacro(false), ident.without_first_quote(), "'");
         } else {
-            self.check_ident_token(cx, UnderMacro(false), ident, "");
+            self.check_ident_token(cx, UnderMacro(false), *ident, "");
         }
     }
 }
@@ -2289,13 +2290,15 @@ declare_lint_pass!(
 impl EarlyLintPass for IncompleteInternalFeatures {
     fn check_crate(&mut self, cx: &EarlyContext<'_>, _: &ast::Crate) {
         let features = cx.builder.features();
-        features
-            .enabled_lang_features()
-            .iter()
-            .map(|(name, span, _)| (name, span))
-            .chain(features.enabled_lib_features().iter().map(|(name, span)| (name, span)))
-            .filter(|(&name, _)| features.incomplete(name) || features.internal(name))
-            .for_each(|(&name, &span)| {
+        let lang_features =
+            features.enabled_lang_features().iter().map(|feat| (feat.gate_name, feat.attr_sp));
+        let lib_features =
+            features.enabled_lib_features().iter().map(|feat| (feat.gate_name, feat.attr_sp));
+
+        lang_features
+            .chain(lib_features)
+            .filter(|(name, _)| features.incomplete(*name) || features.internal(*name))
+            .for_each(|(name, span)| {
                 if features.incomplete(name) {
                     let note = rustc_feature::find_feature_issue(name, GateIssue::Language)
                         .map(|n| BuiltinFeatureIssueNote { n });

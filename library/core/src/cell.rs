@@ -1221,7 +1221,7 @@ impl<T: ?Sized> RefCell<T> {
     /// Unlike `RefCell::borrow`, this method is unsafe because it does not
     /// return a `Ref`, thus leaving the borrow flag untouched. Mutably
     /// borrowing the `RefCell` while the reference returned by this method
-    /// is alive is undefined behaviour.
+    /// is alive is undefined behavior.
     ///
     /// # Examples
     ///
@@ -2287,6 +2287,7 @@ impl<T> SyncUnsafeCell<T> {
 
     /// Unwraps the value, consuming the cell.
     #[inline]
+    #[rustc_const_unstable(feature = "sync_unsafe_cell", issue = "95439")]
     pub const fn into_inner(self) -> T {
         self.value.into_inner()
     }

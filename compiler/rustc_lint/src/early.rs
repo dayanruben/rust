@@ -202,7 +202,7 @@ impl<'a, T: EarlyLintPass> ast_visit::Visitor<'a> for EarlyContextAndPass<'a, T>
         ast_visit::walk_ty(self, t);
     }
 
-    fn visit_ident(&mut self, ident: Ident) {
+    fn visit_ident(&mut self, ident: &Ident) {
         lint_callback!(self, check_ident, ident);
     }
 
@@ -307,6 +307,9 @@ struct RuntimeCombinedEarlyLintPass<'a> {
 #[allow(rustc::lint_pass_impl_without_macro)]
 impl LintPass for RuntimeCombinedEarlyLintPass<'_> {
     fn name(&self) -> &'static str {
+        panic!()
+    }
+    fn get_lints(&self) -> crate::LintVec {
         panic!()
     }
 }
