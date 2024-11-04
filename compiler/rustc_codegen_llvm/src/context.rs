@@ -3,6 +3,8 @@ use std::cell::{Cell, RefCell};
 use std::ffi::{CStr, c_uint};
 use std::str;
 
+use rustc_abi::{HasDataLayout, TargetDataLayout, VariantIdx};
+use rustc_codegen_ssa::back::versioned_llvm_target;
 use rustc_codegen_ssa::base::{wants_msvc_seh, wants_wasm_eh};
 use rustc_codegen_ssa::errors as ssa_errors;
 use rustc_codegen_ssa::traits::*;
@@ -23,7 +25,6 @@ use rustc_session::config::{
 };
 use rustc_span::source_map::Spanned;
 use rustc_span::{DUMMY_SP, Span};
-use rustc_target::abi::{HasDataLayout, TargetDataLayout, VariantIdx};
 use rustc_target::spec::{HasTargetSpec, RelocModel, SmallDataThresholdSupport, Target, TlsModel};
 use smallvec::SmallVec;
 
@@ -182,7 +183,7 @@ pub(crate) unsafe fn create_module<'ll>(
         llvm::LLVMSetDataLayout(llmod, data_layout.as_ptr());
     }
 
-    let llvm_target = SmallCStr::new(&sess.target.llvm_target);
+    let llvm_target = SmallCStr::new(&versioned_llvm_target(sess));
     unsafe {
         llvm::LLVMRustSetNormalizedTarget(llmod, llvm_target.as_ptr());
     }
