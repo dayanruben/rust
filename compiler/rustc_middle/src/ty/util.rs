@@ -735,8 +735,11 @@ impl<'tcx> TyCtxt<'tcx> {
                 let ty = self.fold_regions(decl.ty, |re, debruijn| {
                     assert_eq!(re, self.lifetimes.re_erased);
                     let var = ty::BoundVar::from_usize(vars.len());
-                    vars.push(ty::BoundVariableKind::Region(ty::BrAnon));
-                    ty::Region::new_bound(self, debruijn, ty::BoundRegion { var, kind: ty::BrAnon })
+                    vars.push(ty::BoundVariableKind::Region(ty::BoundRegionKind::Anon));
+                    ty::Region::new_bound(self, debruijn, ty::BoundRegion {
+                        var,
+                        kind: ty::BoundRegionKind::Anon,
+                    })
                 });
                 ty::EarlyBinder::bind(ty::Binder::bind_with_vars(
                     ty,
@@ -1789,6 +1792,7 @@ pub fn intrinsic_raw(tcx: TyCtxt<'_>, def_id: LocalDefId) -> Option<ty::Intrinsi
         Some(ty::IntrinsicDef {
             name: tcx.item_name(def_id.into()),
             must_be_overridden: tcx.has_attr(def_id, sym::rustc_intrinsic_must_be_overridden),
+            const_stable: tcx.has_attr(def_id, sym::rustc_const_stable_intrinsic),
         })
     } else {
         None

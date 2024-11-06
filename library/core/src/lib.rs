@@ -107,6 +107,7 @@
 //
 // Library features:
 // tidy-alphabetical-start
+#![cfg_attr(bootstrap, feature(const_exact_div))]
 #![cfg_attr(bootstrap, feature(const_fmt_arguments_new))]
 #![feature(array_ptr_get)]
 #![feature(asm_experimental_arch)]
@@ -114,9 +115,8 @@
 #![feature(const_align_of_val_raw)]
 #![feature(const_alloc_layout)]
 #![feature(const_black_box)]
-#![feature(const_char_encode_utf16)]
+#![feature(const_eq_ignore_ascii_case)]
 #![feature(const_eval_select)]
-#![feature(const_exact_div)]
 #![feature(const_float_methods)]
 #![feature(const_heap)]
 #![feature(const_nonnull_new)]
