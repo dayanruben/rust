@@ -29,7 +29,7 @@ use rustc_errors::{
 use rustc_hir::def::DefKind;
 use rustc_hir::def_id::{DefId, LocalDefId};
 use rustc_hir::intravisit::{self, Visitor, walk_generics};
-use rustc_hir::{self as hir, GenericParamKind, Node};
+use rustc_hir::{self as hir, GenericParamKind, HirId, Node};
 use rustc_infer::infer::{InferCtxt, TyCtxtInferExt};
 use rustc_infer::traits::ObligationCause;
 use rustc_middle::hir::nested_filter;
@@ -201,12 +201,13 @@ pub(crate) fn placeholder_type_error_diag<'cx, 'tcx>(
         placeholder_types.iter().map(|sp| (*sp, (*type_name).to_string())).collect();
 
     if let Some(generics) = generics {
-        if let Some(arg) = params.iter().find(|arg| {
-            matches!(arg.name, hir::ParamName::Plain(Ident { name: kw::Underscore, .. }))
+        if let Some(span) = params.iter().find_map(|arg| match arg.name {
+            hir::ParamName::Plain(Ident { name: kw::Underscore, span }) => Some(span),
+            _ => None,
         }) {
             // Account for `_` already present in cases like `struct S<_>(_);` and suggest
             // `struct S<T>(T);` instead of `struct S<_, T>(T);`.
-            sugg.push((arg.span, (*type_name).to_string()));
+            sugg.push((span, (*type_name).to_string()));
         } else if let Some(span) = generics.span_for_param_suggestion() {
             // Account for bounds, we want `fn foo<T: E, K>(_: K)` not `fn foo<T, K: E>(_: K)`.
             sugg.push((span, format!(", {type_name}")));
@@ -434,6 +435,15 @@ impl<'tcx> HirTyLowerer<'tcx> for ItemCtxt<'tcx> {
 
     fn ct_infer(&self, _: Option<&ty::GenericParamDef>, span: Span) -> Const<'tcx> {
         ty::Const::new_error_with_message(self.tcx(), span, "bad placeholder constant")
+    }
+
+    fn register_trait_ascription_bounds(
+        &self,
+        _: Vec<(ty::Clause<'tcx>, Span)>,
+        _: HirId,
+        span: Span,
+    ) {
+        self.dcx().span_delayed_bug(span, "trait ascription type not allowed here");
     }
 
     fn probe_ty_param_bounds(

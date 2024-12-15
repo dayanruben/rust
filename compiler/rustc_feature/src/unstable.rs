@@ -517,6 +517,8 @@ declare_features! (
     (unstable, if_let_guard, "1.47.0", Some(51114)),
     /// Allows `impl Trait` to be used inside associated types (RFC 2515).
     (unstable, impl_trait_in_assoc_type, "1.70.0", Some(63063)),
+    /// Allows `impl Trait` in bindings (`let`).
+    (unstable, impl_trait_in_bindings, "1.64.0", Some(63065)),
     /// Allows `impl Trait` as output type in `Fn` traits in return position of functions.
     (unstable, impl_trait_in_fn_trait_return, "1.64.0", Some(99697)),
     /// Allows associated types in inherent impls.
@@ -636,6 +638,8 @@ declare_features! (
     /// Allows creation of instances of a struct by moving fields that have
     /// not changed from prior instances of the same struct (RFC #2528)
     (unstable, type_changing_struct_update, "1.58.0", Some(86555)),
+    /// Allows using `unsafe<'a> &'a T` unsafe binder types.
+    (incomplete, unsafe_binders, "CURRENT_RUSTC_VERSION", Some(130516)),
     /// Allows declaring fields `unsafe`.
     (incomplete, unsafe_fields, "CURRENT_RUSTC_VERSION", Some(132922)),
     /// Allows const generic parameters to be defined with types that
