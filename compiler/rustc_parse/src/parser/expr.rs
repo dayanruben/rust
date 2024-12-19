@@ -8,6 +8,7 @@ use ast::token::IdentIsRaw;
 use ast::{CoroutineKind, ForLoopKind, GenBlockKind, MatchKind, Pat, Path, PathSegment, Recovered};
 use rustc_ast::ptr::P;
 use rustc_ast::token::{self, Delimiter, Token, TokenKind};
+use rustc_ast::tokenstream::TokenTree;
 use rustc_ast::util::case::Case;
 use rustc_ast::util::classify;
 use rustc_ast::util::parser::{AssocOp, ExprPrecedence, Fixity, prec_let_scrutinee_needs_par};
@@ -26,8 +27,7 @@ use rustc_session::errors::{ExprParenthesesNeeded, report_lit_error};
 use rustc_session::lint::BuiltinLintDiag;
 use rustc_session::lint::builtin::BREAK_WITH_LABEL_AND_LOOP;
 use rustc_span::source_map::{self, Spanned};
-use rustc_span::symbol::{Ident, Symbol, kw, sym};
-use rustc_span::{BytePos, ErrorGuaranteed, Pos, Span};
+use rustc_span::{BytePos, ErrorGuaranteed, Ident, Pos, Span, Symbol, kw, sym};
 use thin_vec::{ThinVec, thin_vec};
 use tracing::instrument;
 
@@ -2393,7 +2393,8 @@ impl<'a> Parser<'a> {
         }
 
         if self.token == TokenKind::Semi
-            && matches!(self.token_cursor.stack.last(), Some((.., Delimiter::Parenthesis)))
+            && let Some(last) = self.token_cursor.stack.last()
+            && let Some(TokenTree::Delimited(_, _, Delimiter::Parenthesis, _)) = last.curr()
             && self.may_recover()
         {
             // It is likely that the closure body is a block but where the

@@ -16,7 +16,7 @@ use rustc_session::parse::feature_err;
 use rustc_session::search_paths::PathKind;
 use rustc_session::utils::NativeLibKind;
 use rustc_span::def_id::{DefId, LOCAL_CRATE};
-use rustc_span::symbol::{Symbol, sym};
+use rustc_span::{Symbol, sym};
 use rustc_target::spec::LinkSelfContainedComponents;
 
 use crate::{errors, fluent_generated};
@@ -544,7 +544,7 @@ impl<'tcx> Collector<'tcx> {
             // can move them to the end of the list below.
             let mut existing = self
                 .libs
-                .extract_if(|lib| {
+                .extract_if(.., |lib| {
                     if lib.name.as_str() == passed_lib.name {
                         // FIXME: This whole logic is questionable, whether modifiers are
                         // involved or not, library reordering and kind overriding without

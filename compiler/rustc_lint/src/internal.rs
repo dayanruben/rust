@@ -10,9 +10,8 @@ use rustc_hir::{
 };
 use rustc_middle::ty::{self, GenericArgsRef, Ty as MiddleTy};
 use rustc_session::{declare_lint_pass, declare_tool_lint};
-use rustc_span::Span;
 use rustc_span::hygiene::{ExpnKind, MacroKind};
-use rustc_span::symbol::sym;
+use rustc_span::{Span, sym};
 use tracing::debug;
 
 use crate::lints::{
@@ -171,27 +170,11 @@ impl<'tcx> LateLintPass<'tcx> for TyTyKind {
                                 | PatKind::TupleStruct(qpath, ..)
                                 | PatKind::Struct(qpath, ..),
                             ..
-                        }) => {
-                            if let QPath::TypeRelative(qpath_ty, ..) = qpath
-                                && qpath_ty.hir_id == ty.hir_id
-                            {
-                                Some(path.span)
-                            } else {
-                                None
-                            }
-                        }
-                        Node::Expr(Expr { kind: ExprKind::Path(qpath), .. }) => {
-                            if let QPath::TypeRelative(qpath_ty, ..) = qpath
-                                && qpath_ty.hir_id == ty.hir_id
-                            {
-                                Some(path.span)
-                            } else {
-                                None
-                            }
-                        }
-                        // Can't unify these two branches because qpath below is `&&` and above is `&`
-                        // and `A | B` paths don't play well together with adjustments, apparently.
-                        Node::Expr(Expr { kind: ExprKind::Struct(qpath, ..), .. }) => {
+                        })
+                        | Node::Expr(
+                            Expr { kind: ExprKind::Path(qpath), .. }
+                            | &Expr { kind: ExprKind::Struct(qpath, ..), .. },
+                        ) => {
                             if let QPath::TypeRelative(qpath_ty, ..) = qpath
                                 && qpath_ty.hir_id == ty.hir_id
                             {
