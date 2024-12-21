@@ -12,15 +12,15 @@ runners:
 
   # Large runner used mainly for its bigger disk capacity
   - &job-linux-4c-largedisk
-    os: ubuntu-20.04-4core-16gb
+    os: ubuntu-22.04-4core-16gb
     <<: *base-job
 
   - &job-linux-8c
-    os: ubuntu-20.04-8core-32gb
+    os: ubuntu-22.04-8core-32gb
     <<: *base-job
 
   - &job-linux-16c
-    os: ubuntu-20.04-16core-64gb
+    os: ubuntu-22.04-16core-64gb
     <<: *base-job
 
   - &job-macos-xl
@@ -129,15 +129,15 @@ auto:
   - image: aarch64-gnu-debug
     <<: *job-linux-8c-aarch64
 
-  - image: dist-aarch64-linux
-    env:
-      CODEGEN_BACKENDS: llvm,cranelift
-    <<: *job-linux-8c-aarch64
-
   - image: arm-android
     <<: *job-linux-4c
 
   - image: armhf-gnu
+    <<: *job-linux-4c
+
+  - image: dist-aarch64-linux
+    env:
+      CODEGEN_BACKENDS: llvm,cranelift
     <<: *job-linux-4c
 
   - image: dist-android
