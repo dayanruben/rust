@@ -136,6 +136,7 @@ struct LoweringContext<'a, 'hir> {
 
     allow_try_trait: Arc<[Symbol]>,
     allow_gen_future: Arc<[Symbol]>,
+    allow_pattern_type: Arc<[Symbol]>,
     allow_async_iterator: Arc<[Symbol]>,
     allow_for_await: Arc<[Symbol]>,
     allow_async_fn_traits: Arc<[Symbol]>,
@@ -176,6 +177,7 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
             impl_trait_defs: Vec::new(),
             impl_trait_bounds: Vec::new(),
             allow_try_trait: [sym::try_trait_v2, sym::yeet_desugar_details].into(),
+            allow_pattern_type: [sym::pattern_types, sym::pattern_type_range_trait].into(),
             allow_gen_future: if tcx.features().async_fn_track_caller() {
                 [sym::gen_future, sym::closure_track_caller].into()
             } else {
@@ -492,7 +494,7 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
         &mut self,
         parent: LocalDefId,
         node_id: ast::NodeId,
-        name: Symbol,
+        name: Option<Symbol>,
         def_kind: DefKind,
         span: Span,
     ) -> LocalDefId {
@@ -772,7 +774,7 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
                 let _def_id = self.create_def(
                     self.current_hir_id_owner.def_id,
                     param,
-                    kw::UnderscoreLifetime,
+                    Some(kw::UnderscoreLifetime),
                     DefKind::LifetimeParam,
                     ident.span,
                 );
@@ -926,7 +928,6 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
                     if let Some(first_char) = constraint.ident.as_str().chars().next()
                         && first_char.is_ascii_lowercase()
                     {
-                        tracing::info!(?data, ?data.inputs);
                         let err = match (&data.inputs[..], &data.output) {
                             ([_, ..], FnRetTy::Default(_)) => {
                                 errors::BadReturnTypeNotation::Inputs { span: data.inputs_span }
@@ -1365,7 +1366,7 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
                 }
             }
             TyKind::Pat(ty, pat) => {
-                hir::TyKind::Pat(self.lower_ty(ty, itctx), self.lower_ty_pat(pat))
+                hir::TyKind::Pat(self.lower_ty(ty, itctx), self.lower_ty_pat(pat, ty.span))
             }
             TyKind::MacCall(_) => {
                 span_bug!(t.span, "`TyKind::MacCall` should have been expanded by now")
@@ -2088,8 +2089,7 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
             // We're lowering a const argument that was originally thought to be a type argument,
             // so the def collector didn't create the def ahead of time. That's why we have to do
             // it here.
-            let def_id =
-                self.create_def(parent_def_id, node_id, kw::Empty, DefKind::AnonConst, span);
+            let def_id = self.create_def(parent_def_id, node_id, None, DefKind::AnonConst, span);
             let hir_id = self.lower_node_id(node_id);
 
             let path_expr = Expr {
