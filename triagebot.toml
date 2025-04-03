@@ -1142,7 +1142,6 @@ compiler_leads = [
 ]
 compiler = [
     "@BoxyUwU",
-    "@cjgillot",
     "@compiler-errors",
     "@davidtwco",
     "@estebank",
@@ -1191,13 +1190,13 @@ docs = [
     "@ehuss",
     "@GuillaumeGomez",
 ]
-
 codegen = [
+    "@dianqk",
     "@saethlin",
     "@workingjubilee",
 ]
 query-system = [
-    "@cjgillot",
+    "@oli-obk",
 ]
 incremental = [
     "@wesleywiser",
