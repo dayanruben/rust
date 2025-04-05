@@ -715,7 +715,7 @@ fn print_crate_info(
                         // lint is unstable and feature gate isn't active, don't print
                         continue;
                     }
-                    let level = lint_levels.lint_level(lint).0;
+                    let level = lint_levels.lint_level(lint).level;
                     println_info!("{}={}", lint.name_lower(), level.as_str());
                 }
             }
@@ -807,7 +807,7 @@ fn print_crate_info(
                 }
             }
             DeploymentTarget => {
-                if sess.target.is_like_osx {
+                if sess.target.is_like_darwin {
                     println_info!(
                         "{}={}",
                         apple::deployment_target_env_var(&sess.target.os),
