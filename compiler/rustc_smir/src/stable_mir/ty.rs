@@ -2,15 +2,16 @@ use std::fmt::{self, Debug, Display, Formatter};
 use std::ops::Range;
 
 use serde::Serialize;
+use stable_mir::abi::{FnAbi, Layout};
+use stable_mir::crate_def::{CrateDef, CrateDefItems, CrateDefType};
+use stable_mir::mir::alloc::{AllocId, read_target_int, read_target_uint};
+use stable_mir::mir::mono::StaticDef;
+use stable_mir::target::MachineInfo;
+use stable_mir::{Filename, Opaque};
 
 use super::mir::{Body, Mutability, Safety};
 use super::{DefId, Error, Symbol, with};
-use crate::abi::{FnAbi, Layout};
-use crate::crate_def::{CrateDef, CrateDefType};
-use crate::mir::alloc::{AllocId, read_target_int, read_target_uint};
-use crate::mir::mono::StaticDef;
-use crate::target::MachineInfo;
-use crate::{Filename, Opaque};
+use crate::stable_mir;
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Serialize)]
 pub struct Ty(usize);
@@ -588,7 +589,7 @@ pub enum IntTy {
 impl IntTy {
     pub fn num_bytes(self) -> usize {
         match self {
-            IntTy::Isize => crate::target::MachineInfo::target_pointer_width().bytes(),
+            IntTy::Isize => MachineInfo::target_pointer_width().bytes(),
             IntTy::I8 => 1,
             IntTy::I16 => 2,
             IntTy::I32 => 4,
@@ -611,7 +612,7 @@ pub enum UintTy {
 impl UintTy {
     pub fn num_bytes(self) -> usize {
         match self {
-            UintTy::Usize => crate::target::MachineInfo::target_pointer_width().bytes(),
+            UintTy::Usize => MachineInfo::target_pointer_width().bytes(),
             UintTy::U8 => 1,
             UintTy::U16 => 2,
             UintTy::U32 => 4,
@@ -910,6 +911,10 @@ crate_def! {
     pub TraitDef;
 }
 
+impl_crate_def_items! {
+    TraitDef;
+}
+
 impl TraitDef {
     pub fn declaration(trait_def: &TraitDef) -> TraitDecl {
         with(|cx| cx.trait_decl(trait_def))
@@ -930,6 +935,10 @@ crate_def! {
     /// A trait impl definition.
     #[derive(Serialize)]
     pub ImplDef;
+}
+
+impl_crate_def_items! {
+    ImplDef;
 }
 
 impl ImplDef {
@@ -1555,3 +1564,60 @@ index_impl!(Span);
 pub struct VariantIdx(usize);
 
 index_impl!(VariantIdx);
+
+crate_def! {
+    /// Hold infomation about an Opaque definition, particularly useful in `RPITIT`.
+    #[derive(Serialize)]
+    pub OpaqueDef;
+}
+
+crate_def! {
+    #[derive(Serialize)]
+    pub AssocDef;
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct AssocItem {
+    pub def_id: AssocDef,
+    pub name: Symbol,
+    pub kind: AssocKind,
+    pub container: AssocItemContainer,
+
+    /// If this is an item in an impl of a trait then this is the `DefId` of
+    /// the associated item on the trait that this implements.
+    pub trait_item_def_id: Option<AssocDef>,
+
+    /// Whether this is a method with an explicit self
+    /// as its first parameter, allowing method calls.
+    pub fn_has_self_parameter: bool,
+
+    /// `Some` if the associated item (an associated type) comes from the
+    /// return-position `impl Trait` in trait desugaring. The `ImplTraitInTraitData`
+    /// provides additional information about its source.
+    pub opt_rpitit_info: Option<ImplTraitInTraitData>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub enum AssocKind {
+    Const,
+    Fn,
+    Type,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub enum AssocItemContainer {
+    Trait,
+    Impl,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, Serialize)]
+pub enum ImplTraitInTraitData {
+    Trait { fn_def_id: FnDef, opaque_def_id: OpaqueDef },
+    Impl { fn_def_id: FnDef },
+}
+
+impl AssocItem {
+    pub fn is_impl_trait_in_trait(&self) -> bool {
+        self.opt_rpitit_info.is_some()
+    }
+}
