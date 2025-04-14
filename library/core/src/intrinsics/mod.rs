@@ -1326,7 +1326,7 @@ pub const fn unlikely(b: bool) -> bool {
 /// Therefore, implementations must not require the user to uphold
 /// any safety invariants.
 ///
-/// The public form of this instrinsic is [`bool::select_unpredictable`].
+/// The public form of this instrinsic is [`core::hint::select_unpredictable`].
 #[unstable(feature = "core_intrinsics", issue = "none")]
 #[rustc_intrinsic]
 #[rustc_nounwind]
@@ -2737,6 +2737,7 @@ pub const fn carrying_mul_add<T: ~const fallback::CarryingMulAdd<Unsigned = U>, 
 /// `x % y != 0` or `y == 0` or `x == T::MIN && y == -1`
 ///
 /// This intrinsic does not have a stable counterpart.
+#[rustc_intrinsic_const_stable_indirect]
 #[rustc_nounwind]
 #[rustc_intrinsic]
 pub const unsafe fn exact_div<T: Copy>(x: T, y: T) -> T;
