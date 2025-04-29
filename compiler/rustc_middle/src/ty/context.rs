@@ -226,7 +226,7 @@ impl<'tcx> Interner for TyCtxt<'tcx> {
                 }
             }
             DefKind::OpaqueTy => ty::Opaque,
-            DefKind::TyAlias => ty::Weak,
+            DefKind::TyAlias => ty::Free,
             kind => bug!("unexpected DefKind in AliasTy: {kind:?}"),
         }
     }
@@ -242,7 +242,7 @@ impl<'tcx> Interner for TyCtxt<'tcx> {
                 }
             }
             DefKind::OpaqueTy => ty::AliasTermKind::OpaqueTy,
-            DefKind::TyAlias => ty::AliasTermKind::WeakTy,
+            DefKind::TyAlias => ty::AliasTermKind::FreeTy,
             DefKind::AssocConst => ty::AliasTermKind::ProjectionConst,
             DefKind::AnonConst | DefKind::Const | DefKind::Ctor(_, CtorKind::Const) => {
                 ty::AliasTermKind::UnevaluatedConst
@@ -717,7 +717,6 @@ macro_rules! bidirectional_lang_item_map {
 
 bidirectional_lang_item_map! {
 // tidy-alphabetical-start
-    AsyncDestruct,
     AsyncFn,
     AsyncFnKindHelper,
     AsyncFnKindUpvars,
@@ -1713,6 +1712,10 @@ impl<'tcx> TyCtxt<'tcx> {
 
     pub fn is_coroutine(self, def_id: DefId) -> bool {
         self.coroutine_kind(def_id).is_some()
+    }
+
+    pub fn is_async_drop_in_place_coroutine(self, def_id: DefId) -> bool {
+        self.is_lang_item(self.parent(def_id), LangItem::AsyncDropInPlace)
     }
 
     /// Returns the movability of the coroutine of `def_id`, or panics
