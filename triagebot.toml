@@ -1002,7 +1002,7 @@ message = "This PR changes a file inside `tests/crashes`. If a crash was fixed, 
 
 [mentions."tests/rustdoc-json"]
 message = """
-These commits modify `test/rustdoc-json`.
+These commits modify `tests/rustdoc-json`.
 rustdoc-json is a **public** (but unstable) interface.
 
 Please ensure that if you've changed the output:
@@ -1397,3 +1397,7 @@ compiletest = [
 # Enable issue transfers within the org
 # Documentation at: https://forge.rust-lang.org/triagebot/transfer.html
 [transfer]
+
+# Enable `@rustbot note` functionality
+# Documentation at: https://forge.rust-lang.org/triagebot/note.html
+[note]
