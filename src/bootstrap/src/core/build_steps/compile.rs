@@ -24,7 +24,8 @@ use crate::core::build_steps::tool::SourceType;
 use crate::core::build_steps::{dist, llvm};
 use crate::core::builder;
 use crate::core::builder::{
-    Builder, Cargo, Kind, PathSet, RunConfig, ShouldRun, Step, TaskPath, crate_description,
+    Builder, Cargo, Kind, PathSet, RunConfig, ShouldRun, Step, StepMetadata, TaskPath,
+    crate_description,
 };
 use crate::core::config::{DebuginfoLevel, LlvmLibunwind, RustcLto, TargetSelection};
 use crate::utils::build_stamp;
@@ -304,6 +305,14 @@ impl Step for Std {
             self,
             builder.compiler(compiler.stage, builder.config.host_target),
         ));
+    }
+
+    fn metadata(&self) -> Option<StepMetadata> {
+        Some(
+            StepMetadata::build("std", self.target)
+                .built_by(self.compiler)
+                .stage(self.compiler.stage),
+        )
     }
 }
 
@@ -1170,6 +1179,14 @@ impl Step for Rustc {
         ));
 
         build_compiler.stage
+    }
+
+    fn metadata(&self) -> Option<StepMetadata> {
+        Some(
+            StepMetadata::build("rustc", self.target)
+                .built_by(self.build_compiler)
+                .stage(self.build_compiler.stage + 1),
+        )
     }
 }
 
@@ -2105,19 +2122,20 @@ impl Step for Assemble {
         if builder.config.llvm_enzyme && !builder.config.dry_run() {
             debug!("`llvm_enzyme` requested");
             let enzyme_install = builder.ensure(llvm::Enzyme { target: build_compiler.host });
-            let llvm_config = builder.llvm_config(builder.config.host_target).unwrap();
-            let llvm_version_major = llvm::get_llvm_version_major(builder, &llvm_config);
-            let lib_ext = std::env::consts::DLL_EXTENSION;
-            let libenzyme = format!("libEnzyme-{llvm_version_major}");
-            let src_lib =
-                enzyme_install.join("build/Enzyme").join(&libenzyme).with_extension(lib_ext);
-            let libdir = builder.sysroot_target_libdir(build_compiler, build_compiler.host);
-            let target_libdir =
-                builder.sysroot_target_libdir(target_compiler, target_compiler.host);
-            let dst_lib = libdir.join(&libenzyme).with_extension(lib_ext);
-            let target_dst_lib = target_libdir.join(&libenzyme).with_extension(lib_ext);
-            builder.copy_link(&src_lib, &dst_lib, FileType::NativeLibrary);
-            builder.copy_link(&src_lib, &target_dst_lib, FileType::NativeLibrary);
+            if let Some(llvm_config) = builder.llvm_config(builder.config.host_target) {
+                let llvm_version_major = llvm::get_llvm_version_major(builder, &llvm_config);
+                let lib_ext = std::env::consts::DLL_EXTENSION;
+                let libenzyme = format!("libEnzyme-{llvm_version_major}");
+                let src_lib =
+                    enzyme_install.join("build/Enzyme").join(&libenzyme).with_extension(lib_ext);
+                let libdir = builder.sysroot_target_libdir(build_compiler, build_compiler.host);
+                let target_libdir =
+                    builder.sysroot_target_libdir(target_compiler, target_compiler.host);
+                let dst_lib = libdir.join(&libenzyme).with_extension(lib_ext);
+                let target_dst_lib = target_libdir.join(&libenzyme).with_extension(lib_ext);
+                builder.copy_link(&src_lib, &dst_lib, FileType::NativeLibrary);
+                builder.copy_link(&src_lib, &target_dst_lib, FileType::NativeLibrary);
+            }
         }
 
         // Build the libraries for this compiler to link to (i.e., the libraries
