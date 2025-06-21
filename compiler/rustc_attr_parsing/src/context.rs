@@ -15,6 +15,7 @@ use rustc_session::Session;
 use rustc_span::{DUMMY_SP, ErrorGuaranteed, Span, Symbol, sym};
 
 use crate::attributes::allow_unstable::{AllowConstFnUnstableParser, AllowInternalUnstableParser};
+use crate::attributes::codegen_attrs::OptimizeParser;
 use crate::attributes::confusables::ConfusablesParser;
 use crate::attributes::deprecation::DeprecationParser;
 use crate::attributes::inline::{InlineParser, RustcForceInlineParser};
@@ -108,6 +109,7 @@ attribute_parsers!(
         Single<ConstStabilityIndirectParser>,
         Single<DeprecationParser>,
         Single<InlineParser>,
+        Single<OptimizeParser>,
         Single<RustcForceInlineParser>,
         Single<TransparencyParser>,
         // tidy-alphabetical-end
@@ -420,19 +422,13 @@ impl<'sess> AttributeParser<'sess, Early> {
 
         parsed.pop()
     }
-
-    pub fn new_early(sess: &'sess Session, features: &'sess Features, tools: Vec<Symbol>) -> Self {
-        Self { features: Some(features), tools, parse_only: None, sess, stage: PhantomData }
-    }
-}
-
-impl<'sess> AttributeParser<'sess, Late> {
-    pub fn new(sess: &'sess Session, features: &'sess Features, tools: Vec<Symbol>) -> Self {
-        Self { features: Some(features), tools, parse_only: None, sess, stage: PhantomData }
-    }
 }
 
 impl<'sess, S: Stage> AttributeParser<'sess, S> {
+    pub fn new(sess: &'sess Session, features: &'sess Features, tools: Vec<Symbol>) -> Self {
+        Self { features: Some(features), tools, parse_only: None, sess, stage: PhantomData }
+    }
+
     pub(crate) fn sess(&self) -> &'sess Session {
         &self.sess
     }
