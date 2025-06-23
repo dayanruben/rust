@@ -237,8 +237,18 @@ pub enum AttributeKind {
     /// Represents [`#[may_dangle]`](https://std-dev-guide.rust-lang.org/tricky/may-dangle.html).
     MayDangle(Span),
 
+    /// Represents `#[must_use]`.
+    MustUse {
+        span: Span,
+        /// must_use can optionally have a reason: `#[must_use = "reason this must be used"]`
+        reason: Option<Symbol>,
+    },
+
     /// Represents `#[optimize(size|speed)]`
     Optimize(OptimizeAttr, Span),
+
+    /// Represents `#[rustc_pub_transparent]` (used by the `repr_transparent_external_private_fields` lint).
+    PubTransparent(Span),
 
     /// Represents [`#[repr]`](https://doc.rust-lang.org/stable/reference/type-layout.html#representations).
     Repr(ThinVec<(ReprAttr, Span)>),

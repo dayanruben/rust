@@ -19,7 +19,8 @@ use crate::attributes::codegen_attrs::{ColdParser, OptimizeParser};
 use crate::attributes::confusables::ConfusablesParser;
 use crate::attributes::deprecation::DeprecationParser;
 use crate::attributes::inline::{InlineParser, RustcForceInlineParser};
-use crate::attributes::lint_helpers::AsPtrParser;
+use crate::attributes::lint_helpers::{AsPtrParser, PubTransparentParser};
+use crate::attributes::must_use::MustUseParser;
 use crate::attributes::repr::{AlignParser, ReprParser};
 use crate::attributes::semantics::MayDangleParser;
 use crate::attributes::stability::{
@@ -112,7 +113,9 @@ attribute_parsers!(
         Single<DeprecationParser>,
         Single<InlineParser>,
         Single<MayDangleParser>,
+        Single<MustUseParser>,
         Single<OptimizeParser>,
+        Single<PubTransparentParser>,
         Single<RustcForceInlineParser>,
         Single<TransparencyParser>,
         // tidy-alphabetical-end
