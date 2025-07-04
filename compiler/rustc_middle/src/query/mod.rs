@@ -355,7 +355,7 @@ rustc_queries! {
     /// Returns whether the type alias given by `DefId` is lazy.
     ///
     /// I.e., if the type alias expands / ought to expand to a [free] [alias type]
-    /// instead of the underyling aliased type.
+    /// instead of the underlying aliased type.
     ///
     /// Relevant for features `lazy_type_alias` and `type_alias_impl_trait`.
     ///
@@ -440,7 +440,6 @@ rustc_queries! {
     query predicates_of(key: DefId) -> ty::GenericPredicates<'tcx> {
         desc { |tcx| "computing predicates of `{}`", tcx.def_path_str(key) }
         cache_on_disk_if { key.is_local() }
-        feedable
     }
 
     query opaque_types_defined_by(
