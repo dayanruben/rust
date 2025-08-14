@@ -478,7 +478,19 @@ impl Step for Rustc {
             if libdir_relative.to_str() != Some("bin") {
                 let libdir = builder.rustc_libdir(compiler);
                 for entry in builder.read_dir(&libdir) {
-                    if is_dylib(&entry.path()) {
+                    // A safeguard that we will not ship libgccjit.so from the libdir, in case the
+                    // GCC codegen backend is enabled by default.
+                    // Long-term we should probably split the config options for:
+                    // - Include cg_gcc in the rustc sysroot by default
+                    // - Run dist of a specific codegen backend in `x dist` by default
+                    if is_dylib(&entry.path())
+                        && !entry
+                            .path()
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .map(|n| n.contains("libgccjit"))
+                            .unwrap_or(false)
+                    {
                         // Don't use custom libdir here because ^lib/ will be resolved again
                         // with installer
                         builder.install(&entry.path(), &image.join("lib"), FileType::NativeLibrary);
@@ -1410,6 +1422,7 @@ impl Step for Miri {
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct CraneliftCodegenBackend {
     pub build_compiler: Compiler,
+    pub target: TargetSelection,
 }
 
 impl Step for CraneliftCodegenBackend {
@@ -1437,6 +1450,7 @@ impl Step for CraneliftCodegenBackend {
                 run.builder.config.host_target,
                 run.target,
             ),
+            target: run.target,
         });
     }
 
@@ -1448,7 +1462,7 @@ impl Step for CraneliftCodegenBackend {
             return None;
         }
 
-        let target = self.build_compiler.host;
+        let target = self.target;
         let compilers =
             RustcPrivateCompilers::from_build_compiler(builder, self.build_compiler, target);
         if !target_supports_cranelift_backend(target) {
@@ -1608,6 +1622,7 @@ impl Step for Extended {
         add_component!("analysis" => Analysis { compiler, target });
         add_component!("rustc-codegen-cranelift" => CraneliftCodegenBackend {
             build_compiler: compiler,
+            target
         });
         add_component!("llvm-bitcode-linker" => LlvmBitcodeLinker {
             build_compiler: compiler,
