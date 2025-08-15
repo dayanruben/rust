@@ -1016,16 +1016,14 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         .emit()
     }
 
-    /// Lookup typo candidate in scope for a macro or import.
-    fn early_lookup_typo_candidate(
+    pub(crate) fn add_scope_set_candidates(
         &mut self,
+        suggestions: &mut Vec<TypoSuggestion>,
         scope_set: ScopeSet<'ra>,
         parent_scope: &ParentScope<'ra>,
-        ident: Ident,
+        ctxt: SyntaxContext,
         filter_fn: &impl Fn(Res) -> bool,
-    ) -> Option<TypoSuggestion> {
-        let mut suggestions = Vec::new();
-        let ctxt = ident.span.ctxt();
+    ) {
         self.cm().visit_scopes(scope_set, parent_scope, ctxt, |this, scope, use_prelude, _| {
             match scope {
                 Scope::DeriveHelpers(expn_id) => {
@@ -1041,28 +1039,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                     }
                 }
                 Scope::DeriveHelpersCompat => {
-                    let res = Res::NonMacroAttr(NonMacroAttrKind::DeriveHelperCompat);
-                    if filter_fn(res) {
-                        for derive in parent_scope.derives {
-                            let parent_scope = &ParentScope { derives: &[], ..*parent_scope };
-                            let Ok((Some(ext), _)) = this.reborrow().resolve_macro_path(
-                                derive,
-                                Some(MacroKind::Derive),
-                                parent_scope,
-                                false,
-                                false,
-                                None,
-                                None,
-                            ) else {
-                                continue;
-                            };
-                            suggestions.extend(
-                                ext.helper_attrs
-                                    .iter()
-                                    .map(|name| TypoSuggestion::typo_from_name(*name, res)),
-                            );
-                        }
-                    }
+                    // Never recommend deprecated helper attributes.
                 }
                 Scope::MacroRules(macro_rules_scope) => {
                     if let MacroRulesScope::Binding(macro_rules_binding) = macro_rules_scope.get() {
@@ -1076,7 +1053,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                     }
                 }
                 Scope::Module(module, _) => {
-                    this.add_module_candidates(module, &mut suggestions, filter_fn, None);
+                    this.add_module_candidates(module, suggestions, filter_fn, None);
                 }
                 Scope::MacroUsePrelude => {
                     suggestions.extend(this.macro_use_prelude.iter().filter_map(
@@ -1096,12 +1073,14 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                         );
                     }
                 }
-                Scope::ExternPrelude => {
+                Scope::ExternPreludeItems => {
+                    // Add idents from both item and flag scopes.
                     suggestions.extend(this.extern_prelude.keys().filter_map(|ident| {
                         let res = Res::Def(DefKind::Mod, CRATE_DEF_ID.to_def_id());
                         filter_fn(res).then_some(TypoSuggestion::typo_from_ident(ident.0, res))
                     }));
                 }
+                Scope::ExternPreludeFlags => {}
                 Scope::ToolPrelude => {
                     let res = Res::NonMacroAttr(NonMacroAttrKind::Tool);
                     suggestions.extend(
@@ -1132,6 +1111,19 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
 
             None::<()>
         });
+    }
+
+    /// Lookup typo candidate in scope for a macro or import.
+    fn early_lookup_typo_candidate(
+        &mut self,
+        scope_set: ScopeSet<'ra>,
+        parent_scope: &ParentScope<'ra>,
+        ident: Ident,
+        filter_fn: &impl Fn(Res) -> bool,
+    ) -> Option<TypoSuggestion> {
+        let mut suggestions = Vec::new();
+        let ctxt = ident.span.ctxt();
+        self.add_scope_set_candidates(&mut suggestions, scope_set, parent_scope, ctxt, filter_fn);
 
         // Make sure error reporting is deterministic.
         suggestions.sort_by(|a, b| a.candidate.as_str().cmp(b.candidate.as_str()));
@@ -1873,14 +1865,20 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         }
     }
 
-    fn ambiguity_diagnostics(&self, ambiguity_error: &AmbiguityError<'_>) -> AmbiguityErrorDiag {
+    fn ambiguity_diagnostics(&self, ambiguity_error: &AmbiguityError<'ra>) -> AmbiguityErrorDiag {
         let AmbiguityError { kind, ident, b1, b2, misc1, misc2, .. } = *ambiguity_error;
+        let extern_prelude_ambiguity = || {
+            self.extern_prelude.get(&Macros20NormalizedIdent::new(ident)).is_some_and(|entry| {
+                entry.item_binding == Some(b1) && entry.flag_binding.get() == Some(b2)
+            })
+        };
         let (b1, b2, misc1, misc2, swapped) = if b2.span.is_dummy() && !b1.span.is_dummy() {
             // We have to print the span-less alternative first, otherwise formatting looks bad.
             (b2, b1, misc2, misc1, true)
         } else {
             (b1, b2, misc1, misc2, false)
         };
+
         let could_refer_to = |b: NameBinding<'_>, misc: AmbiguityErrorMisc, also: &str| {
             let what = self.binding_description(b, ident, misc == AmbiguityErrorMisc::FromPrelude);
             let note_msg = format!("`{ident}` could{also} refer to {what}");
@@ -1896,7 +1894,8 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                     "consider adding an explicit import of `{ident}` to disambiguate"
                 ))
             }
-            if b.is_extern_crate() && ident.span.at_least_rust_2018() {
+            if b.is_extern_crate() && ident.span.at_least_rust_2018() && !extern_prelude_ambiguity()
+            {
                 help_msgs.push(format!("use `::{ident}` to refer to this {thing} unambiguously"))
             }
             match misc {
