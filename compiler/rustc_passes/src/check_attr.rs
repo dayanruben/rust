@@ -194,9 +194,6 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                 Attribute::Parsed(AttributeKind::MayDangle(attr_span)) => {
                     self.check_may_dangle(hir_id, *attr_span)
                 }
-                Attribute::Parsed(AttributeKind::MustUse { span, .. }) => {
-                    self.check_must_use(hir_id, *span, target)
-                }
                 &Attribute::Parsed(AttributeKind::CustomMir(dialect, phase, attr_span)) => {
                     self.check_custom_mir(dialect, phase, attr_span)
                 }
@@ -249,7 +246,8 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                     | AttributeKind::Coverage (..)
                     | AttributeKind::ShouldPanic { .. }
                     | AttributeKind::Coroutine(..)
-                    | AttributeKind::Linkage(..),
+                    | AttributeKind::Linkage(..)
+                    | AttributeKind::MustUse { .. },
                 ) => { /* do nothing  */ }
                 Attribute::Unparsed(attr_item) => {
                     style = Some(attr_item.style);
@@ -260,8 +258,8 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                         [sym::diagnostic, sym::on_unimplemented, ..] => {
                             self.check_diagnostic_on_unimplemented(attr.span(), hir_id, target)
                         }
-                        [sym::no_sanitize, ..] => {
-                            self.check_no_sanitize(attr, span, target)
+                        [sym::sanitize, ..] => {
+                            self.check_sanitize(attr, span, target)
                         }
                         [sym::thread_local, ..] => self.check_thread_local(attr, span, target),
                         [sym::doc, ..] => self.check_doc_attrs(
@@ -483,39 +481,43 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
         }
     }
 
-    fn check_no_sanitize(&self, attr: &Attribute, span: Span, target: Target) {
+    /// Checks that the `#[sanitize(..)]` attribute is applied to a
+    /// function/closure/method, or to an impl block or module.
+    fn check_sanitize(&self, attr: &Attribute, target_span: Span, target: Target) {
+        let mut not_fn_impl_mod = None;
+        let mut no_body = None;
+
         if let Some(list) = attr.meta_item_list() {
             for item in list.iter() {
-                let sym = item.name();
-                match sym {
-                    Some(s @ sym::address | s @ sym::hwaddress) => {
-                        let is_valid =
-                            matches!(target, Target::Fn | Target::Method(..) | Target::Static);
-                        if !is_valid {
-                            self.dcx().emit_err(errors::NoSanitize {
-                                attr_span: item.span(),
-                                defn_span: span,
-                                accepted_kind: "a function or static",
-                                attr_str: s.as_str(),
-                            });
-                        }
+                let MetaItemInner::MetaItem(set) = item else {
+                    return;
+                };
+                let segments = set.path.segments.iter().map(|x| x.ident.name).collect::<Vec<_>>();
+                match target {
+                    Target::Fn
+                    | Target::Closure
+                    | Target::Method(MethodKind::Trait { body: true } | MethodKind::Inherent)
+                    | Target::Impl { .. }
+                    | Target::Mod => return,
+                    Target::Static if matches!(segments.as_slice(), [sym::address]) => return,
+
+                    // These are "functions", but they aren't allowed because they don't
+                    // have a body, so the usual explanation would be confusing.
+                    Target::Method(MethodKind::Trait { body: false }) | Target::ForeignFn => {
+                        no_body = Some(target_span);
                     }
+
                     _ => {
-                        let is_valid = matches!(target, Target::Fn | Target::Method(..));
-                        if !is_valid {
-                            self.dcx().emit_err(errors::NoSanitize {
-                                attr_span: item.span(),
-                                defn_span: span,
-                                accepted_kind: "a function",
-                                attr_str: &match sym {
-                                    Some(name) => name.to_string(),
-                                    None => "...".to_string(),
-                                },
-                            });
-                        }
+                        not_fn_impl_mod = Some(target_span);
                     }
                 }
             }
+            self.dcx().emit_err(errors::SanitizeAttributeNotAllowed {
+                attr_span: attr.span(),
+                not_fn_impl_mod,
+                no_body,
+                help: (),
+            });
         }
     }
 
@@ -562,7 +564,6 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
             }
         }
     }
-
     /// Checks if `#[collapse_debuginfo]` is applied to a macro.
     fn check_collapse_debuginfo(&self, attr: &Attribute, span: Span, target: Target) {
         match target {
@@ -1258,41 +1259,6 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
             // `#[ffi_const]` functions cannot be `#[ffi_pure]`
             self.dcx().emit_err(errors::BothFfiConstAndPure { attr_span });
         }
-    }
-
-    /// Warns against some misuses of `#[must_use]`
-    fn check_must_use(&self, hir_id: HirId, attr_span: Span, target: Target) {
-        if matches!(
-            target,
-            Target::Fn
-                | Target::Enum
-                | Target::Struct
-                | Target::Union
-                | Target::Method(MethodKind::Trait { body: false } | MethodKind::Inherent)
-                | Target::ForeignFn
-                // `impl Trait` in return position can trip
-                // `unused_must_use` if `Trait` is marked as
-                // `#[must_use]`
-                | Target::Trait
-        ) {
-            return;
-        }
-
-        // `#[must_use]` can be applied to a trait method definition with a default body
-        if let Target::Method(MethodKind::Trait { body: true }) = target
-            && let parent_def_id = self.tcx.hir_get_parent_item(hir_id).def_id
-            && let containing_item = self.tcx.hir_expect_item(parent_def_id)
-            && let hir::ItemKind::Trait(..) = containing_item.kind
-        {
-            return;
-        }
-
-        self.tcx.emit_node_span_lint(
-            UNUSED_ATTRIBUTES,
-            hir_id,
-            attr_span,
-            errors::MustUseNoEffect { target: target.plural_name(), attr_span },
-        );
     }
 
     /// Checks if `#[must_not_suspend]` is applied to a struct, enum, union, or trait.
