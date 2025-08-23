@@ -3459,7 +3459,6 @@ dependencies = [
  "rustc_feature",
  "rustc_fluent_macro",
  "rustc_macros",
- "rustc_parse",
  "rustc_session",
  "rustc_span",
  "rustc_target",
@@ -3481,7 +3480,6 @@ dependencies = [
 name = "rustc_attr_parsing"
 version = "0.0.0"
 dependencies = [
- "itertools",
  "rustc_abi",
  "rustc_ast",
  "rustc_ast_pretty",
@@ -3491,6 +3489,7 @@ dependencies = [
  "rustc_hir",
  "rustc_lexer",
  "rustc_macros",
+ "rustc_parse",
  "rustc_session",
  "rustc_span",
  "thin-vec",
@@ -4356,7 +4355,6 @@ dependencies = [
  "rustc-literal-escaper",
  "rustc_ast",
  "rustc_ast_pretty",
- "rustc_attr_parsing",
  "rustc_data_structures",
  "rustc_errors",
  "rustc_feature",

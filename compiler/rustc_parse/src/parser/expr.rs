@@ -2077,7 +2077,7 @@ impl<'a> Parser<'a> {
         (token::Lit { symbol: name, suffix: None, kind: token::Char }, span)
     }
 
-    fn mk_meta_item_lit_char(name: Symbol, span: Span) -> MetaItemLit {
+    pub fn mk_meta_item_lit_char(name: Symbol, span: Span) -> MetaItemLit {
         ast::MetaItemLit {
             symbol: name,
             suffix: None,
@@ -2086,7 +2086,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn handle_missing_lit<L>(
+    pub fn handle_missing_lit<L>(
         &mut self,
         mk_lit_char: impl FnOnce(Symbol, Span) -> L,
     ) -> PResult<'a, L> {
@@ -2156,7 +2156,7 @@ impl<'a> Parser<'a> {
 
     /// Keep this in sync with `Token::can_begin_literal_maybe_minus` and
     /// `Lit::from_token` (excluding unary negation).
-    fn eat_token_lit(&mut self) -> Option<token::Lit> {
+    pub fn eat_token_lit(&mut self) -> Option<token::Lit> {
         let check_expr = |expr: Box<Expr>| {
             if let ast::ExprKind::Lit(token_lit) = expr.kind {
                 Some(token_lit)
@@ -2409,8 +2409,12 @@ impl<'a> Parser<'a> {
 
         let constness = self.parse_closure_constness();
 
-        let movability =
-            if self.eat_keyword(exp!(Static)) { Movability::Static } else { Movability::Movable };
+        let movability = if self.eat_keyword(exp!(Static)) {
+            self.psess.gated_spans.gate(sym::coroutines, self.prev_token.span);
+            Movability::Static
+        } else {
+            Movability::Movable
+        };
 
         let coroutine_kind = if self.token_uninterpolated_span().at_least_rust_2018() {
             self.parse_coroutine_kind(Case::Sensitive)
