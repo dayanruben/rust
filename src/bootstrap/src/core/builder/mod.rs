@@ -1076,6 +1076,7 @@ impl<'a> Builder<'a> {
                 check::CoverageDump,
                 check::Linkchecker,
                 check::BumpStage0,
+                check::Tidy,
                 // This has special staging logic, it may run on stage 1 while others run on stage 0.
                 // It takes quite some time to build stage 1, so put this at the end.
                 //
@@ -1239,6 +1240,7 @@ impl<'a> Builder<'a> {
                 run::CyclicStep,
                 run::CoverageDump,
                 run::Rustfmt,
+                run::GenerateHelp,
             ),
             Kind::Setup => {
                 describe!(setup::Profile, setup::Hook, setup::Link, setup::Editor)
