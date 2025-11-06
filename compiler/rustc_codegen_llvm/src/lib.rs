@@ -17,6 +17,7 @@
 #![feature(macro_derive)]
 #![feature(rustdoc_internals)]
 #![feature(slice_as_array)]
+#![feature(trim_prefix_suffix)]
 #![feature(try_blocks)]
 // tidy-alphabetical-end
 
@@ -247,7 +248,7 @@ impl CodegenBackend for LlvmCodegenBackend {
 
     fn provide(&self, providers: &mut Providers) {
         providers.global_backend_features =
-            |tcx, ()| llvm_util::global_llvm_features(tcx.sess, true, false)
+            |tcx, ()| llvm_util::global_llvm_features(tcx.sess, false)
     }
 
     fn print(&self, req: &PrintRequest, out: &mut String, sess: &Session) {
