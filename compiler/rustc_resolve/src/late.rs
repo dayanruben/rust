@@ -28,7 +28,9 @@ use rustc_hir::def::{self, CtorKind, DefKind, LifetimeRes, NonMacroAttrKind, Par
 use rustc_hir::def_id::{CRATE_DEF_ID, DefId, LOCAL_CRATE, LocalDefId};
 use rustc_hir::{MissingLifetimeKind, PrimTy, TraitCandidate};
 use rustc_middle::middle::resolve_bound_vars::Set1;
-use rustc_middle::ty::{AssocTag, DelegationFnSig, Visibility};
+use rustc_middle::ty::{
+    AssocTag, DELEGATION_INHERIT_ATTRS_START, DelegationFnSig, DelegationFnSigAttrs, Visibility,
+};
 use rustc_middle::{bug, span_bug};
 use rustc_session::config::{CrateType, ResolveDocLinks};
 use rustc_session::lint;
@@ -1222,7 +1224,7 @@ impl<'ast, 'ra, 'tcx> Visitor<'ast> for LateResolutionVisitor<'_, 'ast, 'ra, 'tc
                 if let TyKind::Path(None, ref path) = ty.kind
                     // We cannot disambiguate multi-segment paths right now as that requires type
                     // checking.
-                    && path.is_potential_trivial_const_arg(false)
+                    && path.is_potential_trivial_const_arg()
                 {
                     let mut check_ns = |ns| {
                         self.maybe_resolve_ident_in_lexical_scope(path.segments[0].ident, ns)
@@ -4840,9 +4842,12 @@ impl<'a, 'ast, 'ra, 'tcx> LateResolutionVisitor<'a, 'ast, 'ra, 'tcx> {
             constant, anon_const_kind
         );
 
-        let is_trivial_const_arg = constant
-            .value
-            .is_potential_trivial_const_arg(self.r.tcx.features().min_generic_const_args());
+        let is_trivial_const_arg = if self.r.tcx.features().min_generic_const_args() {
+            matches!(constant.mgca_disambiguation, MgcaDisambiguation::Direct)
+        } else {
+            constant.value.is_potential_trivial_const_arg()
+        };
+
         self.resolve_anon_const_manual(is_trivial_const_arg, anon_const_kind, |this| {
             this.resolve_expr(&constant.value, None)
         })
@@ -5023,9 +5028,9 @@ impl<'a, 'ast, 'ra, 'tcx> LateResolutionVisitor<'a, 'ast, 'ra, 'tcx> {
                     // Constant arguments need to be treated as AnonConst since
                     // that is how they will be later lowered to HIR.
                     if const_args.contains(&idx) {
-                        let is_trivial_const_arg = argument.is_potential_trivial_const_arg(
-                            self.r.tcx.features().min_generic_const_args(),
-                        );
+                        // FIXME(mgca): legacy const generics doesn't support mgca but maybe
+                        // that's okay.
+                        let is_trivial_const_arg = argument.is_potential_trivial_const_arg();
                         self.resolve_anon_const_manual(
                             is_trivial_const_arg,
                             AnonConstKind::ConstArg(IsRepeatExpr::No),
@@ -5294,13 +5299,37 @@ impl ItemInfoCollector<'_, '_, '_> {
         id: NodeId,
         attrs: &[Attribute],
     ) {
+        static NAMES_TO_FLAGS: &[(Symbol, DelegationFnSigAttrs)] = &[
+            (sym::target_feature, DelegationFnSigAttrs::TARGET_FEATURE),
+            (sym::must_use, DelegationFnSigAttrs::MUST_USE),
+        ];
+
+        let mut to_inherit_attrs = AttrVec::new();
+        let mut attrs_flags = DelegationFnSigAttrs::empty();
+
+        'attrs_loop: for attr in attrs {
+            for &(name, flag) in NAMES_TO_FLAGS {
+                if attr.has_name(name) {
+                    attrs_flags.set(flag, true);
+
+                    if flag.bits() >= DELEGATION_INHERIT_ATTRS_START.bits() {
+                        to_inherit_attrs.push(attr.clone());
+                    }
+
+                    continue 'attrs_loop;
+                }
+            }
+        }
+
         let sig = DelegationFnSig {
             header,
             param_count: decl.inputs.len(),
             has_self: decl.has_self(),
             c_variadic: decl.c_variadic(),
-            target_feature: attrs.iter().any(|attr| attr.has_name(sym::target_feature)),
+            attrs_flags,
+            to_inherit_attrs,
         };
+
         self.r.delegation_fn_sigs.insert(self.r.local_def_id(id), sig);
     }
 }
