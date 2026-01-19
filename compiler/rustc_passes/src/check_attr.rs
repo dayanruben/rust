@@ -297,6 +297,7 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                     | AttributeKind::PatternComplexityLimit { .. }
                     | AttributeKind::NoCore { .. }
                     | AttributeKind::NoStd { .. }
+                    | AttributeKind::NoMain
                     | AttributeKind::ObjcClass { .. }
                     | AttributeKind::ObjcSelector { .. }
                     | AttributeKind::RustcCoherenceIsCore(..)
@@ -315,6 +316,7 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                     | AttributeKind::RustcDumpPredicates
                     | AttributeKind::RustcDumpDefParents
                     | AttributeKind::RustcDumpVtable(..)
+                    | AttributeKind::NeedsAllocator
                 ) => { /* do nothing  */ }
                 Attribute::Unparsed(attr_item) => {
                     style = Some(attr_item.style);
@@ -346,7 +348,6 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                             | sym::prelude_import
                             | sym::panic_handler
                             | sym::lang
-                            | sym::needs_allocator
                             | sym::default_lib_allocator
                             | sym::rustc_diagnostic_item
                             | sym::rustc_no_mir_inline
@@ -389,13 +390,25 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                             | sym::rustc_partition_reused
                             | sym::rustc_partition_codegened
                             | sym::rustc_expected_cgu_reuse
-                            | sym::rustc_nounwind,
+                            | sym::rustc_nounwind
+                            // crate-level attrs, are checked below
+                            | sym::feature
+                            | sym::register_tool
+                            | sym::rustc_no_implicit_bounds
+                            | sym::test_runner
+                            | sym::reexport_test_harness_main
+                            | sym::no_main
+                            | sym::no_builtins
+                            | sym::crate_type
+                            | sym::compiler_builtins
+                            | sym::profiler_runtime
+                            | sym::needs_panic_runtime
+                            | sym::panic_runtime
+                            | sym::rustc_preserve_ub_checks,
                             ..
                         ] => {}
                         [name, rest@..] => {
                             match BUILTIN_ATTRIBUTE_MAP.get(name) {
-                                // checked below
-                                Some(BuiltinAttribute { type_: AttributeType::CrateLevel, .. }) => {}
                                 Some(_) => {
                                     if rest.len() > 0 && AttributeParser::<Late>::is_parsed_attribute(slice::from_ref(name)) {
                                         // Check if we tried to use a builtin attribute as an attribute namespace, like `#[must_use::skip]`.

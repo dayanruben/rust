@@ -75,9 +75,11 @@ impl AttributeKind {
             MustNotSupend { .. } => Yes,
             MustUse { .. } => Yes,
             Naked(..) => No,
+            NeedsAllocator => No,
             NoCore(..) => No,
             NoImplicitPrelude(..) => No,
             NoLink => No,
+            NoMain => No,
             NoMangle(..) => Yes, // Needed for rustdoc
             NoStd(..) => No,
             NonExhaustive(..) => Yes, // Needed for rustdoc

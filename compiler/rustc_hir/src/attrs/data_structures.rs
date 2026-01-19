@@ -840,6 +840,9 @@ pub enum AttributeKind {
     /// Represents `#[naked]`
     Naked(Span),
 
+    /// Represents `#[needs_allocator]`
+    NeedsAllocator,
+
     /// Represents `#[no_core]`
     NoCore(Span),
 
@@ -848,6 +851,9 @@ pub enum AttributeKind {
 
     /// Represents `#[no_link]`
     NoLink,
+
+    /// Represents `#[no_main]`
+    NoMain,
 
     /// Represents `#[no_mangle]`
     NoMangle(Span),
