@@ -317,6 +317,13 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                     | AttributeKind::RustcDumpDefParents
                     | AttributeKind::RustcDumpVtable(..)
                     | AttributeKind::NeedsAllocator
+                    | AttributeKind::RustcAllocator
+                    | AttributeKind::RustcAllocatorZeroed
+                    | AttributeKind::RustcAllocatorZeroedVariant { .. }
+                    | AttributeKind::RustcDeallocator
+                    | AttributeKind::RustcReallocator
+                    | AttributeKind::RustcNounwind
+                    | AttributeKind::RustcOffloadKernel
                 ) => { /* do nothing  */ }
                 Attribute::Unparsed(attr_item) => {
                     style = Some(attr_item.style);
@@ -361,12 +368,7 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                             | sym::rustc_do_not_const_check
                             | sym::rustc_reservation_impl
                             | sym::rustc_doc_primitive
-                            | sym::rustc_allocator
-                            | sym::rustc_deallocator
-                            | sym::rustc_reallocator
                             | sym::rustc_conversion_suggestion
-                            | sym::rustc_allocator_zeroed
-                            | sym::rustc_allocator_zeroed_variant
                             | sym::rustc_deprecated_safe_2024
                             | sym::rustc_test_marker
                             | sym::rustc_abi
@@ -390,7 +392,6 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                             | sym::rustc_partition_reused
                             | sym::rustc_partition_codegened
                             | sym::rustc_expected_cgu_reuse
-                            | sym::rustc_nounwind
                             // crate-level attrs, are checked below
                             | sym::feature
                             | sym::register_tool
