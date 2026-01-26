@@ -1918,6 +1918,7 @@ symbols! {
         rust_future,
         rust_logo,
         rust_out,
+        rust_preserve_none_cc,
         rustc,
         rustc_abi,
         // FIXME(#82232, #143834): temporary name to mitigate `#[align]` nameres ambiguity
@@ -2141,6 +2142,7 @@ symbols! {
         simd_shr,
         simd_shuffle,
         simd_shuffle_const_generic,
+        simd_splat,
         simd_sub,
         simd_trunc,
         simd_with_exposed_provenance,
