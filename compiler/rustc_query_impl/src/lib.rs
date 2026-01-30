@@ -10,7 +10,6 @@ use rustc_data_structures::stable_hasher::HashStable;
 use rustc_data_structures::sync::AtomicU64;
 use rustc_middle::arena::Arena;
 use rustc_middle::dep_graph::{self, DepKind, DepKindVTable, DepNodeIndex};
-use rustc_middle::query::erase::{Erase, erase, restore};
 use rustc_middle::query::on_disk_cache::{CacheEncoder, EncodedDepNodeIndex, OnDiskCache};
 use rustc_middle::query::plumbing::{QuerySystem, QuerySystemFns, QueryVTable};
 use rustc_middle::query::{
@@ -67,11 +66,11 @@ impl<'tcx, C: QueryCache, const ANON: bool, const DEPTH_LIMIT: bool, const FEEDA
 
 // This is `impl QueryDispatcher for SemiDynamicQueryDispatcher`.
 impl<'tcx, C: QueryCache, const ANON: bool, const DEPTH_LIMIT: bool, const FEEDABLE: bool>
-    QueryDispatcher<QueryCtxt<'tcx>>
-    for SemiDynamicQueryDispatcher<'tcx, C, ANON, DEPTH_LIMIT, FEEDABLE>
+    QueryDispatcher for SemiDynamicQueryDispatcher<'tcx, C, ANON, DEPTH_LIMIT, FEEDABLE>
 where
     for<'a> C::Key: HashStable<StableHashingContext<'a>>,
 {
+    type Qcx = QueryCtxt<'tcx>;
     type Key = C::Key;
     type Value = C::Value;
     type Cache = C;
@@ -104,10 +103,7 @@ where
     }
 
     #[inline(always)]
-    fn query_cache<'a>(self, qcx: QueryCtxt<'tcx>) -> &'a Self::Cache
-    where
-        'tcx: 'a,
-    {
+    fn query_cache<'a>(self, qcx: QueryCtxt<'tcx>) -> &'a Self::Cache {
         // Safety:
         // This is just manually doing the subfield referencing through pointer math.
         unsafe {
@@ -215,15 +211,13 @@ where
 /// on the type `rustc_query_impl::query_impl::$name::QueryType`.
 trait QueryDispatcherUnerased<'tcx> {
     type UnerasedValue;
-    type Dispatcher: QueryDispatcher<QueryCtxt<'tcx>>;
+    type Dispatcher: QueryDispatcher<Qcx = QueryCtxt<'tcx>>;
 
     const NAME: &'static &'static str;
 
     fn query_dispatcher(tcx: TyCtxt<'tcx>) -> Self::Dispatcher;
 
-    fn restore_val(
-        value: <Self::Dispatcher as QueryDispatcher<QueryCtxt<'tcx>>>::Value,
-    ) -> Self::UnerasedValue;
+    fn restore_val(value: <Self::Dispatcher as QueryDispatcher>::Value) -> Self::UnerasedValue;
 }
 
 pub fn query_system<'a>(
