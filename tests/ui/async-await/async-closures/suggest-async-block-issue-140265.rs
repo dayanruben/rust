@@ -12,6 +12,12 @@ fn main() {
         println!("hi!");
     });
 
+    // Without space between `||` and `{`: should also suggest using async block
+    takes_future(async||{
+        //~^ ERROR is not a future
+        println!("no space!");
+    });
+
     // With arguments: should suggest calling the closure, not using async block
     takes_future(async |x: i32| {
         //~^ ERROR is not a future
