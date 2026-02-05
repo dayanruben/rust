@@ -55,7 +55,7 @@ pub(crate) fn closure_saved_names_of_captured_variables<'tcx>(
     tcx.closure_captures(def_id)
         .iter()
         .map(|captured_place| {
-            let name = captured_place.to_symbol();
+            let name = captured_place.to_symbol(tcx);
             match captured_place.info.capture_kind {
                 ty::UpvarCapture::ByValue | ty::UpvarCapture::ByUse => name,
                 ty::UpvarCapture::ByRef(..) => Symbol::intern(&format!("_ref__{name}")),
@@ -995,7 +995,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
             .zip_eq(capture_tys)
             .enumerate()
             .map(|(i, (captured_place, ty))| {
-                let name = captured_place.to_symbol();
+                let name = captured_place.to_symbol(tcx);
 
                 let capture = captured_place.info.capture_kind;
                 let var_id = match captured_place.place.base {

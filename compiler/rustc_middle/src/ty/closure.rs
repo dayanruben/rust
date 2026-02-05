@@ -13,6 +13,7 @@ use crate::hir::place::{
     Place as HirPlace, PlaceBase as HirPlaceBase, ProjectionKind as HirProjectionKind,
 };
 use crate::query::Providers;
+use crate::ty::Ty;
 use crate::{mir, ty};
 
 /// Captures are represented using fields inside a structure.
@@ -96,26 +97,30 @@ impl<'tcx> CapturedPlace<'tcx> {
     }
 
     /// Returns a symbol of the captured upvar, which looks like `name__field1__field2`.
-    pub fn to_symbol(&self) -> Symbol {
+    pub fn to_symbol(&self, tcx: TyCtxt<'tcx>) -> Symbol {
         let mut symbol = self.var_ident.to_string();
 
+        let typing_env = typing_env_for_place(tcx, &self.place);
         let mut ty = self.place.base_ty;
         for proj in self.place.projections.iter() {
             match proj.kind {
-                HirProjectionKind::Field(idx, variant) => match ty.kind() {
-                    ty::Tuple(_) => write!(&mut symbol, "__{}", idx.index()).unwrap(),
-                    ty::Adt(def, ..) => {
-                        write!(
-                            &mut symbol,
-                            "__{}",
-                            def.variant(variant).fields[idx].name.as_str(),
-                        )
-                        .unwrap();
+                HirProjectionKind::Field(idx, variant) => {
+                    let ty = normalize_place_ty(tcx, typing_env, ty);
+                    match ty.kind() {
+                        ty::Tuple(_) => write!(&mut symbol, "__{}", idx.index()).unwrap(),
+                        ty::Adt(def, ..) => {
+                            write!(
+                                &mut symbol,
+                                "__{}",
+                                def.variant(variant).fields[idx].name.as_str(),
+                            )
+                            .unwrap();
+                        }
+                        ty => {
+                            bug!("Unexpected type {:?} for `Field` projection", ty)
+                        }
                     }
-                    ty => {
-                        bug!("Unexpected type {:?} for `Field` projection", ty)
-                    }
-                },
+                }
 
                 HirProjectionKind::UnwrapUnsafeBinder => {
                     write!(&mut symbol, "__unwrap").unwrap();
@@ -304,29 +309,34 @@ pub fn place_to_string_for_capture<'tcx>(tcx: TyCtxt<'tcx>, place: &HirPlace<'tc
         _ => bug!("Capture_information should only contain upvars"),
     };
 
-    for (i, proj) in place.projections.iter().enumerate() {
+    let typing_env = typing_env_for_place(tcx, place);
+    let mut ty = place.base_ty;
+    for proj in place.projections.iter() {
         match proj.kind {
             HirProjectionKind::Deref => {
                 curr_string = format!("*{curr_string}");
             }
-            HirProjectionKind::Field(idx, variant) => match place.ty_before_projection(i).kind() {
-                ty::Adt(def, ..) => {
-                    curr_string = format!(
-                        "{}.{}",
-                        curr_string,
-                        def.variant(variant).fields[idx].name.as_str()
-                    );
+            HirProjectionKind::Field(idx, variant) => {
+                let ty = normalize_place_ty(tcx, typing_env, ty);
+                match ty.kind() {
+                    ty::Adt(def, ..) => {
+                        curr_string = format!(
+                            "{}.{}",
+                            curr_string,
+                            def.variant(variant).fields[idx].name.as_str()
+                        );
+                    }
+                    ty::Tuple(_) => {
+                        curr_string = format!("{}.{}", curr_string, idx.index());
+                    }
+                    ty => {
+                        bug!(
+                            "Field projection applied to a type other than Adt or Tuple: {:?}.",
+                            ty
+                        )
+                    }
                 }
-                ty::Tuple(_) => {
-                    curr_string = format!("{}.{}", curr_string, idx.index());
-                }
-                _ => {
-                    bug!(
-                        "Field projection applied to a type other than Adt or Tuple: {:?}.",
-                        place.ty_before_projection(i).kind()
-                    )
-                }
-            },
+            }
             HirProjectionKind::UnwrapUnsafeBinder => {
                 curr_string = format!("unwrap_binder!({curr_string})");
             }
@@ -334,9 +344,27 @@ pub fn place_to_string_for_capture<'tcx>(tcx: TyCtxt<'tcx>, place: &HirPlace<'tc
             HirProjectionKind::OpaqueCast => {}
             proj => bug!("{:?} unexpected because it isn't captured", proj),
         }
+        ty = proj.ty;
     }
 
     curr_string
+}
+
+fn typing_env_for_place<'tcx>(tcx: TyCtxt<'tcx>, place: &HirPlace<'tcx>) -> ty::TypingEnv<'tcx> {
+    match place.base {
+        HirPlaceBase::Upvar(upvar_id) => {
+            ty::TypingEnv::post_analysis(tcx, upvar_id.closure_expr_id)
+        }
+        _ => ty::TypingEnv::fully_monomorphized(),
+    }
+}
+
+fn normalize_place_ty<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    typing_env: ty::TypingEnv<'tcx>,
+    ty: Ty<'tcx>,
+) -> Ty<'tcx> {
+    tcx.normalize_erasing_regions(typing_env, ty)
 }
 
 #[derive(Eq, Clone, PartialEq, Debug, TyEncodable, TyDecodable, Copy, HashStable, Hash)]
