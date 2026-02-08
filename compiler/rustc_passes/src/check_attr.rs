@@ -300,6 +300,7 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                     | AttributeKind::RustcConfusables { .. }
                     | AttributeKind::RustcConstStabilityIndirect
                     | AttributeKind::RustcDeallocator
+                    | AttributeKind::RustcDefPath(..)
                     | AttributeKind::RustcDenyExplicitImpl(..)
                     | AttributeKind::RustcDummy
                     | AttributeKind::RustcDumpDefParents
@@ -312,6 +313,8 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                     | AttributeKind::RustcHasIncoherentInherentImpls
                     | AttributeKind::RustcHiddenTypeOfOpaques
                     | AttributeKind::RustcIfThisChanged(..)
+                    | AttributeKind::RustcIntrinsic
+                    | AttributeKind::RustcIntrinsicConstStableIndirect
                     | AttributeKind::RustcLayout(..)
                     | AttributeKind::RustcLayoutScalarValidRangeEnd(..)
                     | AttributeKind::RustcLayoutScalarValidRangeStart(..)
@@ -340,6 +343,7 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                     | AttributeKind::RustcSkipDuringMethodDispatch { .. }
                     | AttributeKind::RustcSpecializationTrait(..)
                     | AttributeKind::RustcStdInternalSymbol (..)
+                    | AttributeKind::RustcSymbolName(..)
                     | AttributeKind::RustcThenThisWouldNeed(..)
                     | AttributeKind::RustcUnsafeSpecializationMarker(..)
                     | AttributeKind::RustcVariance
@@ -383,9 +387,7 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                             | sym::rustc_no_mir_inline
                             | sym::rustc_insignificant_dtor
                             | sym::rustc_nonnull_optimization_guaranteed
-                            | sym::rustc_intrinsic
                             | sym::rustc_inherit_overflow_checks
-                            | sym::rustc_intrinsic_const_stable_indirect
                             | sym::rustc_trivial_field_reads
                             | sym::rustc_on_unimplemented
                             | sym::rustc_do_not_const_check
@@ -403,10 +405,8 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                             | sym::rustc_strict_coherence
                             | sym::rustc_mir
                             | sym::rustc_outlives
-                            | sym::rustc_symbol_name
                             | sym::rustc_evaluate_where_clauses
                             | sym::rustc_delayed_bug_from_inside_query
-                            | sym::rustc_def_path
                             | sym::rustc_partition_reused
                             | sym::rustc_partition_codegened
                             | sym::rustc_expected_cgu_reuse

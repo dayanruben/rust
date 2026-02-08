@@ -1081,6 +1081,9 @@ pub enum AttributeKind {
     /// Represents `#[rustc_deallocator]`
     RustcDeallocator,
 
+    /// Represents `#[rustc_def_path]`
+    RustcDefPath(Span),
+
     /// Represents `#[rustc_deny_explicit_impl]`.
     RustcDenyExplicitImpl(Span),
 
@@ -1116,6 +1119,12 @@ pub enum AttributeKind {
 
     /// Represents `#[rustc_if_this_changed]`
     RustcIfThisChanged(Span, Option<Symbol>),
+
+    /// Represents `#[rustc_intrinsic]`
+    RustcIntrinsic,
+
+    /// Represents `#[rustc_intrinsic_const_stable_indirect]`
+    RustcIntrinsicConstStableIndirect,
 
     /// Represents `#[rustc_layout]`
     RustcLayout(ThinVec<RustcLayoutType>),
@@ -1217,6 +1226,9 @@ pub enum AttributeKind {
 
     /// Represents `#[rustc_std_internal_symbol]`.
     RustcStdInternalSymbol(Span),
+
+    /// Represents `#[rustc_symbol_name]`
+    RustcSymbolName(Span),
 
     /// Represents `#[rustc_then_this_would_need]`
     RustcThenThisWouldNeed(Span, ThinVec<Ident>),

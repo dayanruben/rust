@@ -490,6 +490,7 @@ impl<S: Stage> CombineAttributeParser<S> for RustcMirParser {
             .collect()
     }
 }
+
 pub(crate) struct RustcNonConstTraitMethodParser;
 
 impl<S: Stage> NoArgsAttributeParser<S> for RustcNonConstTraitMethodParser {
@@ -759,4 +760,72 @@ impl<S: Stage> NoArgsAttributeParser<S> for RustcEffectiveVisibilityParser {
         Allow(Target::Crate),
     ]);
     const CREATE: fn(Span) -> AttributeKind = |_| AttributeKind::RustcEffectiveVisibility;
+}
+
+pub(crate) struct RustcSymbolName;
+
+impl<S: Stage> SingleAttributeParser<S> for RustcSymbolName {
+    const ALLOWED_TARGETS: AllowedTargets = AllowedTargets::AllowList(&[
+        Allow(Target::Fn),
+        Allow(Target::Method(MethodKind::TraitImpl)),
+        Allow(Target::Method(MethodKind::Inherent)),
+        Allow(Target::Method(MethodKind::Trait { body: true })),
+        Allow(Target::ForeignFn),
+        Allow(Target::ForeignStatic),
+        Allow(Target::Impl { of_trait: false }),
+    ]);
+    const ON_DUPLICATE: OnDuplicate<S> = OnDuplicate::Error;
+    const PATH: &[Symbol] = &[sym::rustc_symbol_name];
+    const ATTRIBUTE_ORDER: AttributeOrder = AttributeOrder::KeepInnermost;
+    const TEMPLATE: AttributeTemplate = template!(Word);
+    fn convert(cx: &mut AcceptContext<'_, '_, S>, args: &ArgParser) -> Option<AttributeKind> {
+        if let Err(span) = args.no_args() {
+            cx.expected_no_args(span);
+            return None;
+        }
+        Some(AttributeKind::RustcSymbolName(cx.attr_span))
+    }
+}
+
+pub(crate) struct RustcDefPath;
+
+impl<S: Stage> SingleAttributeParser<S> for RustcDefPath {
+    const ALLOWED_TARGETS: AllowedTargets = AllowedTargets::AllowList(&[
+        Allow(Target::Fn),
+        Allow(Target::Method(MethodKind::TraitImpl)),
+        Allow(Target::Method(MethodKind::Inherent)),
+        Allow(Target::Method(MethodKind::Trait { body: true })),
+        Allow(Target::ForeignFn),
+        Allow(Target::ForeignStatic),
+        Allow(Target::Impl { of_trait: false }),
+    ]);
+    const ON_DUPLICATE: OnDuplicate<S> = OnDuplicate::Error;
+    const PATH: &[Symbol] = &[sym::rustc_def_path];
+    const ATTRIBUTE_ORDER: AttributeOrder = AttributeOrder::KeepInnermost;
+    const TEMPLATE: AttributeTemplate = template!(Word);
+    fn convert(cx: &mut AcceptContext<'_, '_, S>, args: &ArgParser) -> Option<AttributeKind> {
+        if let Err(span) = args.no_args() {
+            cx.expected_no_args(span);
+            return None;
+        }
+        Some(AttributeKind::RustcDefPath(cx.attr_span))
+    }
+}
+
+pub(crate) struct RustcIntrinsicParser;
+
+impl<S: Stage> NoArgsAttributeParser<S> for RustcIntrinsicParser {
+    const PATH: &[Symbol] = &[sym::rustc_intrinsic];
+    const ON_DUPLICATE: OnDuplicate<S> = OnDuplicate::Error;
+    const ALLOWED_TARGETS: AllowedTargets = AllowedTargets::AllowList(&[Allow(Target::Fn)]);
+    const CREATE: fn(Span) -> AttributeKind = |_| AttributeKind::RustcIntrinsic;
+}
+
+pub(crate) struct RustcIntrinsicConstStableIndirectParser;
+
+impl<S: Stage> NoArgsAttributeParser<S> for RustcIntrinsicConstStableIndirectParser {
+    const PATH: &'static [Symbol] = &[sym::rustc_intrinsic_const_stable_indirect];
+    const ON_DUPLICATE: OnDuplicate<S> = OnDuplicate::Error;
+    const ALLOWED_TARGETS: AllowedTargets = AllowedTargets::AllowList(&[Allow(Target::Fn)]);
+    const CREATE: fn(Span) -> AttributeKind = |_| AttributeKind::RustcIntrinsicConstStableIndirect;
 }
