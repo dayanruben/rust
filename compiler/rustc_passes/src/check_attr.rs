@@ -315,6 +315,7 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                     | AttributeKind::RustcHasIncoherentInherentImpls
                     | AttributeKind::RustcHiddenTypeOfOpaques
                     | AttributeKind::RustcIfThisChanged(..)
+                    | AttributeKind::RustcInsignificantDtor
                     | AttributeKind::RustcIntrinsic
                     | AttributeKind::RustcIntrinsicConstStableIndirect
                     | AttributeKind::RustcLayout(..)
@@ -329,6 +330,7 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                     | AttributeKind::RustcMir(_)
                     | AttributeKind::RustcNeverReturnsNullPointer
                     | AttributeKind::RustcNoImplicitAutorefs
+                    | AttributeKind::RustcNoImplicitBounds
                     | AttributeKind::RustcNonConstTraitMethod
                     | AttributeKind::RustcNounwind
                     | AttributeKind::RustcObjcClass { .. }
@@ -341,12 +343,14 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                     | AttributeKind::RustcPreserveUbChecks
                     | AttributeKind::RustcReallocator
                     | AttributeKind::RustcRegions
+                    | AttributeKind::RustcReservationImpl(..)
                     | AttributeKind::RustcScalableVector { .. }
                     | AttributeKind::RustcShouldNotBeCalledOnConstItems(..)
                     | AttributeKind::RustcSimdMonomorphizeLaneLimit(..)
                     | AttributeKind::RustcSkipDuringMethodDispatch { .. }
                     | AttributeKind::RustcSpecializationTrait(..)
                     | AttributeKind::RustcStdInternalSymbol (..)
+                    | AttributeKind::RustcStrictCoherence(..)
                     | AttributeKind::RustcSymbolName(..)
                     | AttributeKind::RustcThenThisWouldNeed(..)
                     | AttributeKind::RustcUnsafeSpecializationMarker(..)
@@ -389,13 +393,11 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                             | sym::default_lib_allocator
                             | sym::rustc_diagnostic_item
                             | sym::rustc_no_mir_inline
-                            | sym::rustc_insignificant_dtor
                             | sym::rustc_nonnull_optimization_guaranteed
                             | sym::rustc_inherit_overflow_checks
                             | sym::rustc_trivial_field_reads
                             | sym::rustc_on_unimplemented
                             | sym::rustc_do_not_const_check
-                            | sym::rustc_reservation_impl
                             | sym::rustc_doc_primitive
                             | sym::rustc_conversion_suggestion
                             | sym::rustc_deprecated_safe_2024
@@ -405,7 +407,6 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                             | sym::rustc_never_type_options
                             | sym::rustc_autodiff
                             | sym::rustc_capture_analysis
-                            | sym::rustc_strict_coherence
                             | sym::rustc_mir
                             | sym::rustc_partition_reused
                             | sym::rustc_partition_codegened
@@ -413,7 +414,6 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                             // crate-level attrs, are checked below
                             | sym::feature
                             | sym::register_tool
-                            | sym::rustc_no_implicit_bounds
                             | sym::test_runner,
                             ..
                         ] => {}

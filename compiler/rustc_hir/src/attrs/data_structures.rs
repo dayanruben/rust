@@ -1126,6 +1126,9 @@ pub enum AttributeKind {
     /// Represents `#[rustc_if_this_changed]`
     RustcIfThisChanged(Span, Option<Symbol>),
 
+    /// Represents `#[rustc_insignificant_dtor]`
+    RustcInsignificantDtor,
+
     /// Represents `#[rustc_intrinsic]`
     RustcIntrinsic,
 
@@ -1174,6 +1177,9 @@ pub enum AttributeKind {
     /// Represents `#[rustc_no_implicit_autorefs]`
     RustcNoImplicitAutorefs,
 
+    /// Represents `#[rustc_no_implicit_bounds]`
+    RustcNoImplicitBounds,
+
     /// Represents `#[rustc_non_const_trait_method]`.
     RustcNonConstTraitMethod,
 
@@ -1216,6 +1222,9 @@ pub enum AttributeKind {
     /// Represents `#[rustc_regions]`
     RustcRegions,
 
+    /// Represents `#[rustc_reservation_impl]`
+    RustcReservationImpl(Span, Symbol),
+
     /// Represents `#[rustc_scalable_vector(N)]`
     RustcScalableVector {
         /// The base multiple of lanes that are in a scalable vector, if provided. `element_count`
@@ -1238,6 +1247,9 @@ pub enum AttributeKind {
 
     /// Represents `#[rustc_std_internal_symbol]`.
     RustcStdInternalSymbol(Span),
+
+    /// Represents `#[rustc_strict_coherence]`.
+    RustcStrictCoherence(Span),
 
     /// Represents `#[rustc_symbol_name]`
     RustcSymbolName(Span),
@@ -1275,6 +1287,7 @@ pub enum AttributeKind {
         /// Span of the attribute.
         span: Span,
     },
+
     /// Represents `#[target_feature(enable = "...")]` and
     /// `#[unsafe(force_target_feature(enable = "...")]`.
     TargetFeature { features: ThinVec<(Symbol, Span)>, attr_span: Span, was_forced: bool },
