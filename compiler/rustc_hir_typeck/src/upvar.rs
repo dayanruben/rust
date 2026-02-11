@@ -368,6 +368,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     // the projections.
                     origin.1.projections.clear()
                 }
+                self.try_structurally_resolve_place_ty(origin.0, &mut origin.1);
 
                 self.typeck_results
                     .borrow_mut()
@@ -1127,6 +1128,19 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         }
     }
 
+    fn try_structurally_resolve_place_ty(&self, span: Span, place: &mut Place<'tcx>) {
+        place.base_ty = self.try_structurally_resolve_type(span, place.base_ty);
+        for proj in &mut place.projections {
+            proj.ty = self.try_structurally_resolve_type(span, proj.ty);
+        }
+    }
+
+    fn place_to_string_for_migration(&self, capture: &ty::CapturedPlace<'tcx>) -> String {
+        let mut place = capture.place.clone();
+        self.try_structurally_resolve_place_ty(capture.get_path_span(self.tcx), &mut place);
+        ty::place_to_string_for_capture(self.tcx, &place)
+    }
+
     /// Combines all the reasons for 2229 migrations
     fn compute_2229_migrations_reasons(
         &self,
@@ -1229,7 +1243,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 problematic_captures.insert(
                     UpvarMigrationInfo::CapturingPrecise {
                         source_expr: capture.info.path_expr_id,
-                        var_name: capture.to_string(self.tcx),
+                        var_name: self.place_to_string_for_migration(capture),
                     },
                     capture_problems,
                 );
@@ -1312,7 +1326,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     projections_list.push(captured_place.place.projections.as_slice());
                     diagnostics_info.insert(UpvarMigrationInfo::CapturingPrecise {
                         source_expr: captured_place.info.path_expr_id,
-                        var_name: captured_place.to_string(self.tcx),
+                        var_name: self.place_to_string_for_migration(captured_place),
                     });
                 }
                 ty::UpvarCapture::ByRef(..) => {}
