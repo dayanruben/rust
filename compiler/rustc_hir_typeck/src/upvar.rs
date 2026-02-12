@@ -51,7 +51,7 @@ use rustc_middle::{bug, span_bug};
 use rustc_session::lint;
 use rustc_span::{BytePos, Pos, Span, Symbol, sym};
 use rustc_trait_selection::infer::InferCtxtExt;
-use rustc_trait_selection::solve;
+use rustc_trait_selection::traits::ObligationCtxt;
 use tracing::{debug, instrument};
 
 use super::FnCtxt;
@@ -1130,26 +1130,19 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
     }
 
     fn try_structurally_resolve_place_ty(&self, span: Span, place: &mut Place<'tcx>) {
-        place.base_ty = self.try_structurally_resolve_type(span, place.base_ty);
-        for proj in &mut place.projections {
-            proj.ty = self.try_structurally_resolve_type(span, proj.ty);
-        }
-
-        if self.next_trait_solver() {
-            let cause = self.misc(span);
-            let at = self.at(&cause, self.param_env);
-            let deeply_normalize = |ty| match solve::deeply_normalize(at, ty) {
-                Ok(ty) => ty,
-                Err(errors) => {
-                    let guar = self.err_ctxt().report_fulfillment_errors(errors);
-                    Ty::new_error(self.tcx, guar)
-                }
-            };
-
-            place.base_ty = deeply_normalize(place.base_ty);
-            for proj in &mut place.projections {
-                proj.ty = deeply_normalize(proj.ty);
+        let cause = self.misc(span);
+        let ocx = ObligationCtxt::new_with_diagnostics(&self.infcx);
+        let deeply_normalize = |ty| match ocx.deeply_normalize(&cause, self.param_env, ty) {
+            Ok(ty) => ty,
+            Err(errors) => {
+                let guar = self.err_ctxt().report_fulfillment_errors(errors);
+                Ty::new_error(self.tcx, guar)
             }
+        };
+
+        place.base_ty = deeply_normalize(place.base_ty);
+        for proj in &mut place.projections {
+            proj.ty = deeply_normalize(proj.ty);
         }
     }
 
