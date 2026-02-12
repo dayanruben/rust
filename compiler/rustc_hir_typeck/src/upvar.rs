@@ -51,6 +51,7 @@ use rustc_middle::{bug, span_bug};
 use rustc_session::lint;
 use rustc_span::{BytePos, Pos, Span, Symbol, sym};
 use rustc_trait_selection::infer::InferCtxtExt;
+use rustc_trait_selection::solve;
 use tracing::{debug, instrument};
 
 use super::FnCtxt;
@@ -1132,6 +1133,23 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         place.base_ty = self.try_structurally_resolve_type(span, place.base_ty);
         for proj in &mut place.projections {
             proj.ty = self.try_structurally_resolve_type(span, proj.ty);
+        }
+
+        if self.next_trait_solver() {
+            let cause = self.misc(span);
+            let at = self.at(&cause, self.param_env);
+            let deeply_normalize = |ty| match solve::deeply_normalize(at, ty) {
+                Ok(ty) => ty,
+                Err(errors) => {
+                    let guar = self.err_ctxt().report_fulfillment_errors(errors);
+                    Ty::new_error(self.tcx, guar)
+                }
+            };
+
+            place.base_ty = deeply_normalize(place.base_ty);
+            for proj in &mut place.projections {
+                proj.ty = deeply_normalize(proj.ty);
+            }
         }
     }
 
