@@ -50,6 +50,7 @@ use rustc_middle::ty::{
 use rustc_middle::{bug, span_bug};
 use rustc_session::lint;
 use rustc_span::{BytePos, Pos, Span, Symbol, sym};
+use rustc_trait_selection::error_reporting::InferCtxtErrorExt as _;
 use rustc_trait_selection::infer::InferCtxtExt;
 use rustc_trait_selection::traits::ObligationCtxt;
 use tracing::{debug, instrument};
@@ -780,6 +781,9 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             typeck_results.closure_min_captures.remove(&closure_def_id).unwrap_or_default();
 
         for (mut place, capture_info) in capture_information.into_iter() {
+            let span = capture_info.path_expr_id.map_or(closure_span, |e| self.tcx.hir_span(e));
+            self.try_structurally_resolve_place_ty(span, &mut place);
+
             let var_hir_id = match place.base {
                 PlaceBase::Upvar(upvar_id) => upvar_id.var_path.hir_id,
                 base => bug!("Expected upvar, found={:?}", base),
@@ -1132,11 +1136,14 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
     fn try_structurally_resolve_place_ty(&self, span: Span, place: &mut Place<'tcx>) {
         let cause = self.misc(span);
         let ocx = ObligationCtxt::new_with_diagnostics(&self.infcx);
-        let deeply_normalize = |ty| match ocx.deeply_normalize(&cause, self.param_env, ty) {
-            Ok(ty) => ty,
-            Err(errors) => {
-                let guar = self.err_ctxt().report_fulfillment_errors(errors);
-                Ty::new_error(self.tcx, guar)
+        let deeply_normalize = |ty| {
+            let ty = self.resolve_vars_if_possible(ty);
+            match ocx.deeply_normalize(&cause, self.param_env, ty) {
+                Ok(ty) => ty,
+                Err(errors) => {
+                    let guar = self.infcx.err_ctxt().report_fulfillment_errors(errors);
+                    Ty::new_error(self.tcx, guar)
+                }
             }
         };
 
@@ -1144,12 +1151,6 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         for proj in &mut place.projections {
             proj.ty = deeply_normalize(proj.ty);
         }
-    }
-
-    fn place_to_string_for_migration(&self, capture: &ty::CapturedPlace<'tcx>) -> String {
-        let mut place = capture.place.clone();
-        self.try_structurally_resolve_place_ty(capture.get_path_span(self.tcx), &mut place);
-        ty::place_to_string_for_capture(self.tcx, &place)
     }
 
     /// Combines all the reasons for 2229 migrations
@@ -1254,7 +1255,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 problematic_captures.insert(
                     UpvarMigrationInfo::CapturingPrecise {
                         source_expr: capture.info.path_expr_id,
-                        var_name: self.place_to_string_for_migration(capture),
+                        var_name: capture.to_string(self.tcx),
                     },
                     capture_problems,
                 );
@@ -1337,7 +1338,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     projections_list.push(captured_place.place.projections.as_slice());
                     diagnostics_info.insert(UpvarMigrationInfo::CapturingPrecise {
                         source_expr: captured_place.info.path_expr_id,
-                        var_name: self.place_to_string_for_migration(captured_place),
+                        var_name: captured_place.to_string(self.tcx),
                     });
                 }
                 ty::UpvarCapture::ByRef(..) => {}
