@@ -370,7 +370,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     // the projections.
                     origin.1.projections.clear()
                 }
-                self.try_structurally_resolve_place_ty(origin.0, &mut origin.1);
+                self.deeply_normalize_place(origin.0, &mut origin.1);
 
                 self.typeck_results
                     .borrow_mut()
@@ -782,7 +782,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
 
         for (mut place, capture_info) in capture_information.into_iter() {
             let span = capture_info.path_expr_id.map_or(closure_span, |e| self.tcx.hir_span(e));
-            self.try_structurally_resolve_place_ty(span, &mut place);
+            self.deeply_normalize_place(span, &mut place);
 
             let var_hir_id = match place.base {
                 PlaceBase::Upvar(upvar_id) => upvar_id.var_path.hir_id,
@@ -1132,24 +1132,19 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             );
         }
     }
-
-    fn try_structurally_resolve_place_ty(&self, span: Span, place: &mut Place<'tcx>) {
+    fn deeply_normalize_place(&self, span: Span, place: &mut Place<'tcx>) {
         let cause = self.misc(span);
         let ocx = ObligationCtxt::new_with_diagnostics(&self.infcx);
-        let deeply_normalize = |ty| {
-            let ty = self.resolve_vars_if_possible(ty);
-            match ocx.deeply_normalize(&cause, self.param_env, ty) {
-                Ok(ty) => ty,
-                Err(errors) => {
-                    let guar = self.infcx.err_ctxt().report_fulfillment_errors(errors);
-                    Ty::new_error(self.tcx, guar)
+        let resolved_place = self.resolve_vars_if_possible(place.clone());
+        match ocx.deeply_normalize(&cause, self.param_env, resolved_place) {
+            Ok(normalized) => *place = normalized,
+            Err(errors) => {
+                let guar = self.infcx.err_ctxt().report_fulfillment_errors(errors);
+                place.base_ty = Ty::new_error(self.tcx, guar);
+                for proj in &mut place.projections {
+                    proj.ty = Ty::new_error(self.tcx, guar);
                 }
             }
-        };
-
-        place.base_ty = deeply_normalize(place.base_ty);
-        for proj in &mut place.projections {
-            proj.ty = deeply_normalize(proj.ty);
         }
     }
 
