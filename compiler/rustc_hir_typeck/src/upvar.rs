@@ -52,7 +52,7 @@ use rustc_session::lint;
 use rustc_span::{BytePos, Pos, Span, Symbol, sym};
 use rustc_trait_selection::error_reporting::InferCtxtErrorExt as _;
 use rustc_trait_selection::infer::InferCtxtExt;
-use rustc_trait_selection::traits::ObligationCtxt;
+use rustc_trait_selection::solve;
 use tracing::{debug, instrument};
 
 use super::FnCtxt;
@@ -199,17 +199,18 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         let closure_def_id = closure_def_id.expect_local();
 
         assert_eq!(self.tcx.hir_body_owner_def_id(body.id()), closure_def_id);
+
+        // Used by `ExprUseVisitor` when collecting closure capture information.
+        let closure_fcx = FnCtxt::new(self, self.tcx.param_env(closure_def_id), closure_def_id);
+
         let mut delegate = InferBorrowKind {
+            fcx: &closure_fcx,
             closure_def_id,
             capture_information: Default::default(),
             fake_reads: Default::default(),
         };
 
-        let _ = euv::ExprUseVisitor::new(
-            &FnCtxt::new(self, self.tcx.param_env(closure_def_id), closure_def_id),
-            &mut delegate,
-        )
-        .consume_body(body);
+        let _ = euv::ExprUseVisitor::new(&closure_fcx, &mut delegate).consume_body(body);
 
         // There are several curious situations with coroutine-closures where
         // analysis is too aggressive with borrows when the coroutine-closure is
@@ -289,7 +290,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 let hir::def::Res::Local(local_id) = path.res else {
                     bug!();
                 };
-                let place = self.place_for_root_variable(closure_def_id, local_id);
+                let place = closure_fcx.place_for_root_variable(closure_def_id, local_id);
                 delegate.capture_information.push((
                     place,
                     ty::CaptureInfo {
@@ -328,7 +329,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
 
             if let Some(upvars) = self.tcx.upvars_mentioned(closure_def_id) {
                 for var_hir_id in upvars.keys() {
-                    let place = self.place_for_root_variable(closure_def_id, *var_hir_id);
+                    let place = closure_fcx.place_for_root_variable(closure_def_id, *var_hir_id);
 
                     debug!("seed place {:?}", place);
 
@@ -370,7 +371,6 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     // the projections.
                     origin.1.projections.clear()
                 }
-                self.deeply_normalize_place(origin.0, &mut origin.1);
 
                 self.typeck_results
                     .borrow_mut()
@@ -563,17 +563,17 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             bug!();
         };
 
+        let coroutine_fcx =
+            FnCtxt::new(self, self.tcx.param_env(coroutine_def_id), coroutine_def_id);
+
         let mut delegate = InferBorrowKind {
+            fcx: &coroutine_fcx,
             closure_def_id: coroutine_def_id,
             capture_information: Default::default(),
             fake_reads: Default::default(),
         };
 
-        let _ = euv::ExprUseVisitor::new(
-            &FnCtxt::new(self, self.tcx.param_env(coroutine_def_id), coroutine_def_id),
-            &mut delegate,
-        )
-        .consume_expr(body);
+        let _ = euv::ExprUseVisitor::new(&coroutine_fcx, &mut delegate).consume_expr(body);
 
         let (_, kind, _) = self.process_collected_capture_information(
             hir::CaptureBy::Ref,
@@ -781,9 +781,6 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             typeck_results.closure_min_captures.remove(&closure_def_id).unwrap_or_default();
 
         for (mut place, capture_info) in capture_information.into_iter() {
-            let span = capture_info.path_expr_id.map_or(closure_span, |e| self.tcx.hir_span(e));
-            self.deeply_normalize_place(span, &mut place);
-
             let var_hir_id = match place.base {
                 PlaceBase::Upvar(upvar_id) => upvar_id.var_path.hir_id,
                 base => bug!("Expected upvar, found={:?}", base),
@@ -1132,19 +1129,42 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             );
         }
     }
-    fn deeply_normalize_place(&self, span: Span, place: &mut Place<'tcx>) {
-        let cause = self.misc(span);
-        let ocx = ObligationCtxt::new_with_diagnostics(&self.infcx);
-        let resolved_place = self.resolve_vars_if_possible(place.clone());
-        match ocx.deeply_normalize(&cause, self.param_env, resolved_place) {
-            Ok(normalized) => *place = normalized,
-            Err(errors) => {
-                let guar = self.infcx.err_ctxt().report_fulfillment_errors(errors);
-                place.base_ty = Ty::new_error(self.tcx, guar);
-                for proj in &mut place.projections {
-                    proj.ty = Ty::new_error(self.tcx, guar);
+    fn normalize_capture_place(&self, span: Span, place: &mut Place<'tcx>) {
+        *place = self.resolve_vars_if_possible(place.clone());
+
+        // In the new solver, types in HIR `Place`s can contain unnormalized aliases,
+        // which can ICE later (e.g. when projecting fields for diagnostics).
+        if self.next_trait_solver() {
+            let cause = self.misc(span);
+            let at = self.at(&cause, self.param_env);
+            match solve::deeply_normalize_with_skipped_universes_and_ambiguous_coroutine_goals(
+                at,
+                place.clone(),
+                vec![],
+            ) {
+                Ok((normalized, goals)) => {
+                    *place = normalized;
+                    if !goals.is_empty() {
+                        let mut typeck_results = self.typeck_results.borrow_mut();
+                        typeck_results.coroutine_stalled_predicates.extend(
+                            goals
+                                .into_iter()
+                                // FIXME: throwing away the param-env :(
+                                .map(|goal| (goal.predicate, self.misc(span))),
+                        );
+                    }
+                }
+                Err(errors) => {
+                    let guar = self.infcx.err_ctxt().report_fulfillment_errors(errors);
+                    place.base_ty = Ty::new_error(self.tcx, guar);
+                    for proj in &mut place.projections {
+                        proj.ty = Ty::new_error(self.tcx, guar);
+                    }
                 }
             }
+        } else {
+            // For the old solver we can rely on `normalize` to eagerly normalize aliases.
+            *place = self.normalize(span, place.clone());
         }
     }
 
@@ -1756,11 +1776,16 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
     ) -> Place<'tcx> {
         let upvar_id = ty::UpvarId::new(var_hir_id, closure_def_id);
 
-        Place {
+        let mut place = Place {
             base_ty: self.node_ty(var_hir_id),
             base: PlaceBase::Upvar(upvar_id),
             projections: Default::default(),
-        }
+        };
+
+        // Normalize eagerly when inserting into `capture_information`, so all downstream
+        // capture analysis can assume a normalized `Place`.
+        self.normalize_capture_place(self.tcx.hir_span(var_hir_id), &mut place);
+        place
     }
 
     fn should_log_capture_analysis(&self, closure_def_id: LocalDefId) -> bool {
@@ -2020,7 +2045,8 @@ fn drop_location_span(tcx: TyCtxt<'_>, hir_id: HirId) -> Span {
     tcx.sess.source_map().end_point(owner_span)
 }
 
-struct InferBorrowKind<'tcx> {
+struct InferBorrowKind<'fcx, 'a, 'tcx> {
+    fcx: &'fcx FnCtxt<'a, 'tcx>,
     // The def-id of the closure whose kind and upvar accesses are being inferred.
     closure_def_id: LocalDefId,
 
@@ -2054,7 +2080,7 @@ struct InferBorrowKind<'tcx> {
     fake_reads: Vec<(Place<'tcx>, FakeReadCause, HirId)>,
 }
 
-impl<'tcx> euv::Delegate<'tcx> for InferBorrowKind<'tcx> {
+impl<'fcx, 'a, 'tcx> euv::Delegate<'tcx> for InferBorrowKind<'fcx, 'a, 'tcx> {
     #[instrument(skip(self), level = "debug")]
     fn fake_read(
         &mut self,
@@ -2068,8 +2094,11 @@ impl<'tcx> euv::Delegate<'tcx> for InferBorrowKind<'tcx> {
         // such as deref of a raw pointer.
         let dummy_capture_kind = ty::UpvarCapture::ByRef(ty::BorrowKind::Immutable);
 
-        let (place, _) =
-            restrict_capture_precision(place_with_id.place.clone(), dummy_capture_kind);
+        let span = self.fcx.tcx.hir_span(diag_expr_id);
+        let mut place = place_with_id.place.clone();
+        self.fcx.normalize_capture_place(span, &mut place);
+
+        let (place, _) = restrict_capture_precision(place, dummy_capture_kind);
 
         let (place, _) = restrict_repr_packed_field_ref_capture(place, dummy_capture_kind);
         self.fake_reads.push((place, cause, diag_expr_id));
@@ -2080,8 +2109,12 @@ impl<'tcx> euv::Delegate<'tcx> for InferBorrowKind<'tcx> {
         let PlaceBase::Upvar(upvar_id) = place_with_id.place.base else { return };
         assert_eq!(self.closure_def_id, upvar_id.closure_expr_id);
 
+        let span = self.fcx.tcx.hir_span(diag_expr_id);
+        let mut place = place_with_id.place.clone();
+        self.fcx.normalize_capture_place(span, &mut place);
+
         self.capture_information.push((
-            place_with_id.place.clone(),
+            place,
             ty::CaptureInfo {
                 capture_kind_expr_id: Some(diag_expr_id),
                 path_expr_id: Some(diag_expr_id),
@@ -2095,8 +2128,12 @@ impl<'tcx> euv::Delegate<'tcx> for InferBorrowKind<'tcx> {
         let PlaceBase::Upvar(upvar_id) = place_with_id.place.base else { return };
         assert_eq!(self.closure_def_id, upvar_id.closure_expr_id);
 
+        let span = self.fcx.tcx.hir_span(diag_expr_id);
+        let mut place = place_with_id.place.clone();
+        self.fcx.normalize_capture_place(span, &mut place);
+
         self.capture_information.push((
-            place_with_id.place.clone(),
+            place,
             ty::CaptureInfo {
                 capture_kind_expr_id: Some(diag_expr_id),
                 path_expr_id: Some(diag_expr_id),
@@ -2118,14 +2155,17 @@ impl<'tcx> euv::Delegate<'tcx> for InferBorrowKind<'tcx> {
         // The region here will get discarded/ignored
         let capture_kind = ty::UpvarCapture::ByRef(bk);
 
+        let span = self.fcx.tcx.hir_span(diag_expr_id);
+        let mut place = place_with_id.place.clone();
+        self.fcx.normalize_capture_place(span, &mut place);
+
         // We only want repr packed restriction to be applied to reading references into a packed
         // struct, and not when the data is being moved. Therefore we call this method here instead
         // of in `restrict_capture_precision`.
-        let (place, mut capture_kind) =
-            restrict_repr_packed_field_ref_capture(place_with_id.place.clone(), capture_kind);
+        let (place, mut capture_kind) = restrict_repr_packed_field_ref_capture(place, capture_kind);
 
         // Raw pointers don't inherit mutability
-        if place_with_id.place.deref_tys().any(Ty::is_raw_ptr) {
+        if place.deref_tys().any(Ty::is_raw_ptr) {
             capture_kind = ty::UpvarCapture::ByRef(ty::BorrowKind::Immutable);
         }
 
