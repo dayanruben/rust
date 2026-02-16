@@ -200,7 +200,6 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
 
         assert_eq!(self.tcx.hir_body_owner_def_id(body.id()), closure_def_id);
 
-        // Used by `ExprUseVisitor` when collecting closure capture information.
         let closure_fcx = FnCtxt::new(self, self.tcx.param_env(closure_def_id), closure_def_id);
 
         let mut delegate = InferBorrowKind {
