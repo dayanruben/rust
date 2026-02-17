@@ -1128,8 +1128,8 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             );
         }
     }
-    fn normalize_capture_place(&self, span: Span, place: &mut Place<'tcx>) {
-        *place = self.resolve_vars_if_possible(place.clone());
+    fn normalize_capture_place(&self, span: Span, place: Place<'tcx>) -> Place<'tcx> {
+        let mut place = self.resolve_vars_if_possible(place);
 
         // In the new solver, types in HIR `Place`s can contain unnormalized aliases,
         // which can ICE later (e.g. when projecting fields for diagnostics).
@@ -1142,7 +1142,6 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 vec![],
             ) {
                 Ok((normalized, goals)) => {
-                    *place = normalized;
                     if !goals.is_empty() {
                         let mut typeck_results = self.typeck_results.borrow_mut();
                         typeck_results.coroutine_stalled_predicates.extend(
@@ -1152,6 +1151,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                                 .map(|goal| (goal.predicate, self.misc(span))),
                         );
                     }
+                    normalized
                 }
                 Err(errors) => {
                     let guar = self.infcx.err_ctxt().report_fulfillment_errors(errors);
@@ -1159,11 +1159,12 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     for proj in &mut place.projections {
                         proj.ty = Ty::new_error(self.tcx, guar);
                     }
+                    place
                 }
             }
         } else {
             // For the old solver we can rely on `normalize` to eagerly normalize aliases.
-            *place = self.normalize(span, place.clone());
+            self.normalize(span, place)
         }
     }
 
@@ -1775,7 +1776,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
     ) -> Place<'tcx> {
         let upvar_id = ty::UpvarId::new(var_hir_id, closure_def_id);
 
-        let mut place = Place {
+        let place = Place {
             base_ty: self.node_ty(var_hir_id),
             base: PlaceBase::Upvar(upvar_id),
             projections: Default::default(),
@@ -1783,8 +1784,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
 
         // Normalize eagerly when inserting into `capture_information`, so all downstream
         // capture analysis can assume a normalized `Place`.
-        self.normalize_capture_place(self.tcx.hir_span(var_hir_id), &mut place);
-        place
+        self.normalize_capture_place(self.tcx.hir_span(var_hir_id), place)
     }
 
     fn should_log_capture_analysis(&self, closure_def_id: LocalDefId) -> bool {
@@ -2094,8 +2094,7 @@ impl<'fcx, 'a, 'tcx> euv::Delegate<'tcx> for InferBorrowKind<'fcx, 'a, 'tcx> {
         let dummy_capture_kind = ty::UpvarCapture::ByRef(ty::BorrowKind::Immutable);
 
         let span = self.fcx.tcx.hir_span(diag_expr_id);
-        let mut place = place_with_id.place.clone();
-        self.fcx.normalize_capture_place(span, &mut place);
+        let place = self.fcx.normalize_capture_place(span, place_with_id.place.clone());
 
         let (place, _) = restrict_capture_precision(place, dummy_capture_kind);
 
@@ -2109,8 +2108,7 @@ impl<'fcx, 'a, 'tcx> euv::Delegate<'tcx> for InferBorrowKind<'fcx, 'a, 'tcx> {
         assert_eq!(self.closure_def_id, upvar_id.closure_expr_id);
 
         let span = self.fcx.tcx.hir_span(diag_expr_id);
-        let mut place = place_with_id.place.clone();
-        self.fcx.normalize_capture_place(span, &mut place);
+        let place = self.fcx.normalize_capture_place(span, place_with_id.place.clone());
 
         self.capture_information.push((
             place,
@@ -2128,8 +2126,7 @@ impl<'fcx, 'a, 'tcx> euv::Delegate<'tcx> for InferBorrowKind<'fcx, 'a, 'tcx> {
         assert_eq!(self.closure_def_id, upvar_id.closure_expr_id);
 
         let span = self.fcx.tcx.hir_span(diag_expr_id);
-        let mut place = place_with_id.place.clone();
-        self.fcx.normalize_capture_place(span, &mut place);
+        let place = self.fcx.normalize_capture_place(span, place_with_id.place.clone());
 
         self.capture_information.push((
             place,
@@ -2155,8 +2152,7 @@ impl<'fcx, 'a, 'tcx> euv::Delegate<'tcx> for InferBorrowKind<'fcx, 'a, 'tcx> {
         let capture_kind = ty::UpvarCapture::ByRef(bk);
 
         let span = self.fcx.tcx.hir_span(diag_expr_id);
-        let mut place = place_with_id.place.clone();
-        self.fcx.normalize_capture_place(span, &mut place);
+        let place = self.fcx.normalize_capture_place(span, place_with_id.place.clone());
 
         // We only want repr packed restriction to be applied to reading references into a packed
         // struct, and not when the data is being moved. Therefore we call this method here instead
