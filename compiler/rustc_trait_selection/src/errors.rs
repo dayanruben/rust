@@ -12,7 +12,7 @@ use rustc_hir::{self as hir, AmbigArg, FnRetTy, GenericParamKind, Node};
 use rustc_macros::{Diagnostic, Subdiagnostic};
 use rustc_middle::ty::print::{PrintTraitRefExt as _, TraitRefPrintOnlyTraitPath};
 use rustc_middle::ty::{self, Binder, ClosureKind, FnSig, GenericArg, Region, Ty, TyCtxt};
-use rustc_span::{BytePos, Ident, Span, Symbol, kw};
+use rustc_span::{BytePos, Ident, Span, Symbol, kw, sym};
 
 use crate::error_reporting::infer::ObligationCauseAsDiagArg;
 use crate::error_reporting::infer::need_type_info::UnderspecifiedArgKind;
@@ -2062,9 +2062,9 @@ pub fn impl_trait_overcapture_suggestion<'tcx>(
     }
 
     let mut next_fresh_param = || {
-        ["T", "U", "V", "W", "X", "Y", "A", "B", "C"]
+        ['T', 'U', 'V', 'W', 'X', 'Y', 'A', 'B', 'C']
             .into_iter()
-            .map(Symbol::intern)
+            .map(sym::character)
             .chain((0..).map(|i| Symbol::intern(&format!("T{i}"))))
             .find(|s| captured_non_lifetimes.insert(*s))
             .unwrap()
