@@ -3,7 +3,7 @@ use rustc_middle::dep_graph::{DepKindVTable, DepNodeKey, KeyFingerprintStyle};
 use rustc_middle::query::QueryCache;
 
 use crate::GetQueryVTable;
-use crate::plumbing::{force_from_dep_node_inner, try_load_from_on_disk_cache_inner};
+use crate::plumbing::{force_from_dep_node_inner, promote_from_disk_inner};
 
 /// [`DepKindVTable`] constructors for special dep kinds that aren't queries.
 #[expect(non_snake_case, reason = "use non-snake case to avoid collision with query names")]
@@ -16,10 +16,10 @@ mod non_query {
             is_anon: false,
             is_eval_always: false,
             key_fingerprint_style: KeyFingerprintStyle::Unit,
-            force_from_dep_node: Some(|_, dep_node, _| {
+            force_from_dep_node_fn: Some(|_, dep_node, _| {
                 bug!("force_from_dep_node: encountered {dep_node:?}")
             }),
-            try_load_from_on_disk_cache: None,
+            promote_from_disk_fn: None,
         }
     }
 
@@ -29,10 +29,10 @@ mod non_query {
             is_anon: false,
             is_eval_always: false,
             key_fingerprint_style: KeyFingerprintStyle::Unit,
-            force_from_dep_node: Some(|_, dep_node, _| {
+            force_from_dep_node_fn: Some(|_, dep_node, _| {
                 bug!("force_from_dep_node: encountered {dep_node:?}")
             }),
-            try_load_from_on_disk_cache: None,
+            promote_from_disk_fn: None,
         }
     }
 
@@ -41,11 +41,11 @@ mod non_query {
             is_anon: false,
             is_eval_always: false,
             key_fingerprint_style: KeyFingerprintStyle::Unit,
-            force_from_dep_node: Some(|tcx, _, prev_index| {
+            force_from_dep_node_fn: Some(|tcx, _, prev_index| {
                 tcx.dep_graph.force_diagnostic_node(tcx, prev_index);
                 true
             }),
-            try_load_from_on_disk_cache: None,
+            promote_from_disk_fn: None,
         }
     }
 
@@ -54,8 +54,8 @@ mod non_query {
             is_anon: true,
             is_eval_always: false,
             key_fingerprint_style: KeyFingerprintStyle::Opaque,
-            force_from_dep_node: Some(|_, _, _| bug!("cannot force an anon node")),
-            try_load_from_on_disk_cache: None,
+            force_from_dep_node_fn: Some(|_, _, _| bug!("cannot force an anon node")),
+            promote_from_disk_fn: None,
         }
     }
 
@@ -64,8 +64,8 @@ mod non_query {
             is_anon: true,
             is_eval_always: false,
             key_fingerprint_style: KeyFingerprintStyle::Unit,
-            force_from_dep_node: None,
-            try_load_from_on_disk_cache: None,
+            force_from_dep_node_fn: None,
+            promote_from_disk_fn: None,
         }
     }
 
@@ -74,8 +74,8 @@ mod non_query {
             is_anon: false,
             is_eval_always: false,
             key_fingerprint_style: KeyFingerprintStyle::Opaque,
-            force_from_dep_node: None,
-            try_load_from_on_disk_cache: None,
+            force_from_dep_node_fn: None,
+            promote_from_disk_fn: None,
         }
     }
 
@@ -84,8 +84,8 @@ mod non_query {
             is_anon: false,
             is_eval_always: false,
             key_fingerprint_style: KeyFingerprintStyle::Opaque,
-            force_from_dep_node: None,
-            try_load_from_on_disk_cache: None,
+            force_from_dep_node_fn: None,
+            promote_from_disk_fn: None,
         }
     }
 
@@ -94,8 +94,8 @@ mod non_query {
             is_anon: false,
             is_eval_always: false,
             key_fingerprint_style: KeyFingerprintStyle::Unit,
-            force_from_dep_node: None,
-            try_load_from_on_disk_cache: None,
+            force_from_dep_node_fn: None,
+            promote_from_disk_fn: None,
         }
     }
 }
@@ -120,8 +120,8 @@ where
             is_anon,
             is_eval_always,
             key_fingerprint_style,
-            force_from_dep_node: None,
-            try_load_from_on_disk_cache: None,
+            force_from_dep_node_fn: None,
+            promote_from_disk_fn: None,
         };
     }
 
@@ -129,11 +129,11 @@ where
         is_anon,
         is_eval_always,
         key_fingerprint_style,
-        force_from_dep_node: Some(|tcx, dep_node, _| {
+        force_from_dep_node_fn: Some(|tcx, dep_node, _| {
             force_from_dep_node_inner(Q::query_vtable(tcx), tcx, dep_node)
         }),
-        try_load_from_on_disk_cache: Some(|tcx, dep_node| {
-            try_load_from_on_disk_cache_inner(Q::query_vtable(tcx), tcx, dep_node)
+        promote_from_disk_fn: Some(|tcx, dep_node| {
+            promote_from_disk_inner(Q::query_vtable(tcx), tcx, dep_node)
         }),
     }
 }

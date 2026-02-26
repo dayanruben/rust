@@ -332,8 +332,8 @@ pub(crate) fn query_key_hash_verify<'tcx, C: QueryCache>(
     });
 }
 
-/// Implementation of [`DepKindVTable::try_load_from_on_disk_cache`] for queries.
-pub(crate) fn try_load_from_on_disk_cache_inner<'tcx, C: QueryCache>(
+/// Implementation of [`DepKindVTable::promote_from_disk_fn`] for queries.
+pub(crate) fn promote_from_disk_inner<'tcx, C: QueryCache>(
     query: &'tcx QueryVTable<'tcx, C>,
     tcx: TyCtxt<'tcx>,
     dep_node: DepNode,
@@ -385,7 +385,7 @@ where
     value
 }
 
-/// Implementation of [`DepKindVTable::force_from_dep_node`] for queries.
+/// Implementation of [`DepKindVTable::force_from_dep_node_fn`] for queries.
 pub(crate) fn force_from_dep_node_inner<'tcx, C: QueryCache>(
     query: &'tcx QueryVTable<'tcx, C>,
     tcx: TyCtxt<'tcx>,
