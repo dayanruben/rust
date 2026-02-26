@@ -2701,7 +2701,7 @@ fn add_without_unwanted_attributes<'hir>(
             }
             hir::Attribute::Parsed(AttributeKind::Doc(box d)) => {
                 // Remove attributes from `normal` that should not be inherited by `use` re-export.
-                let DocAttribute { hidden, inline, cfg, .. } = d;
+                let DocAttribute { hidden, inline, cfg, aliases, .. } = d;
                 let mut attr = DocAttribute::default();
                 if is_inline {
                     attr.cfg = cfg.clone();
@@ -2709,6 +2709,7 @@ fn add_without_unwanted_attributes<'hir>(
                     attr.inline = inline.clone();
                     attr.hidden = hidden.clone();
                 }
+                attr.aliases = aliases.clone();
                 attrs.push((
                     Cow::Owned(hir::Attribute::Parsed(AttributeKind::Doc(Box::new(attr)))),
                     import_parent,
