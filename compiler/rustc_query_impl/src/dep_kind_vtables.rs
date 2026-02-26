@@ -129,12 +129,8 @@ where
         is_anon,
         is_eval_always,
         key_fingerprint_style,
-        force_from_dep_node_fn: Some(|tcx, dep_node, _| {
-            force_from_dep_node_inner(Q::query_vtable(tcx), tcx, dep_node)
-        }),
-        promote_from_disk_fn: Some(|tcx, dep_node| {
-            promote_from_disk_inner(Q::query_vtable(tcx), tcx, dep_node)
-        }),
+        force_from_dep_node_fn: Some(force_from_dep_node_inner::<Q>),
+        promote_from_disk_fn: Some(promote_from_disk_inner::<Q>),
     }
 }
 
