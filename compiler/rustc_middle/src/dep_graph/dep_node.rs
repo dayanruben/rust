@@ -121,7 +121,7 @@ impl DepNode {
 
         #[cfg(debug_assertions)]
         {
-            if !tcx.key_fingerprint_style(kind).reconstructible()
+            if !tcx.key_fingerprint_style(kind).is_maybe_recoverable()
                 && (tcx.sess.opts.unstable_opts.incremental_info
                     || tcx.sess.opts.unstable_opts.query_dep_graph)
             {

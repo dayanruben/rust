@@ -42,8 +42,12 @@ pub enum KeyFingerprintStyle {
 }
 
 impl KeyFingerprintStyle {
+    /// True if a key can _potentially_ be recovered from a key fingerprint
+    /// with this style.
+    ///
+    /// For some key types, recovery is possible but not guaranteed.
     #[inline]
-    pub const fn reconstructible(self) -> bool {
+    pub const fn is_maybe_recoverable(self) -> bool {
         match self {
             KeyFingerprintStyle::DefPathHash
             | KeyFingerprintStyle::Unit

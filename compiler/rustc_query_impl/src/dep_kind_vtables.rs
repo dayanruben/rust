@@ -115,22 +115,19 @@ where
         <Q::Cache as QueryCache>::Key::key_fingerprint_style()
     };
 
-    if is_anon || !key_fingerprint_style.reconstructible() {
-        return DepKindVTable {
-            is_anon,
-            is_eval_always,
-            key_fingerprint_style,
-            force_from_dep_node_fn: None,
-            promote_from_disk_fn: None,
-        };
+    // A query dep-node can only be forced or promoted if it can recover a key
+    // from its key fingerprint.
+    let can_recover = key_fingerprint_style.is_maybe_recoverable();
+    if is_anon {
+        assert!(!can_recover);
     }
 
     DepKindVTable {
         is_anon,
         is_eval_always,
         key_fingerprint_style,
-        force_from_dep_node_fn: Some(force_from_dep_node_inner::<Q>),
-        promote_from_disk_fn: Some(promote_from_disk_inner::<Q>),
+        force_from_dep_node_fn: can_recover.then_some(force_from_dep_node_inner::<Q>),
+        promote_from_disk_fn: can_recover.then_some(promote_from_disk_inner::<Q>),
     }
 }
 

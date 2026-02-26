@@ -572,7 +572,7 @@ fn load_from_disk_or_invoke_provider_green<'tcx, C: QueryCache>(
     // can be forced from `DepNode`.
     debug_assert!(
         !query.will_cache_on_disk_for_key(tcx, key)
-            || !tcx.key_fingerprint_style(dep_node.kind).reconstructible(),
+            || !tcx.key_fingerprint_style(dep_node.kind).is_maybe_recoverable(),
         "missing on-disk cache entry for {dep_node:?}"
     );
 
