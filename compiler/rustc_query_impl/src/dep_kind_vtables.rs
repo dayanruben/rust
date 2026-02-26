@@ -104,6 +104,7 @@ mod non_query {
 /// Called from macro-generated code for each query.
 pub(crate) fn make_dep_kind_vtable_for_query<'tcx, Q>(
     is_anon: bool,
+    is_cache_on_disk: bool,
     is_eval_always: bool,
 ) -> DepKindVTable<'tcx>
 where
@@ -127,7 +128,8 @@ where
         is_eval_always,
         key_fingerprint_style,
         force_from_dep_node_fn: can_recover.then_some(force_from_dep_node_inner::<Q>),
-        promote_from_disk_fn: can_recover.then_some(promote_from_disk_inner::<Q>),
+        promote_from_disk_fn: (can_recover && is_cache_on_disk)
+            .then_some(promote_from_disk_inner::<Q>),
     }
 }
 

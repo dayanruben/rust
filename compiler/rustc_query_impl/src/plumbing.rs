@@ -697,6 +697,7 @@ macro_rules! define_queries {
                     use $crate::query_impl::$name::VTableGetter;
                     make_dep_kind_vtable_for_query::<VTableGetter>(
                         is_anon!([$($modifiers)*]),
+                        if_cache_on_disk!([$($modifiers)*] true false),
                         is_eval_always!([$($modifiers)*]),
                     )
                 }
