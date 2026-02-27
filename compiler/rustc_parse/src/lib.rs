@@ -120,14 +120,7 @@ pub fn new_parser_from_file<'a>(
         if let Ok(contents) = std::fs::read(path)
             && let Err(utf8err) = std::str::from_utf8(&contents)
         {
-            utf8_error(
-                sm,
-                &path.display().to_string(),
-                sp,
-                &mut err,
-                utf8err,
-                &contents,
-            );
+            utf8_error(sm, &path.display().to_string(), sp, &mut err, utf8err, &contents);
         }
         if let Some(sp) = sp {
             err.span(sp);
