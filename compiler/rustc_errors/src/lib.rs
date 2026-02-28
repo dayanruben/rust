@@ -1434,7 +1434,7 @@ impl DiagCtxtInner {
         message: DiagMessage,
         args: impl Iterator<Item = DiagArg<'a>>,
     ) -> String {
-        let args = crate::translation::to_fluent_args(args);
+        let args = args.map(|(name, val)| (name.clone(), val.clone())).collect();
         format_diag_message(&message, &args).to_string()
     }
 
