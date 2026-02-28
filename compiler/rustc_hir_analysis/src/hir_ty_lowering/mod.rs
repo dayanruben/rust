@@ -266,10 +266,11 @@ impl LowerTypeRelativePathMode {
         }
     }
 
-    fn def_kind(self) -> DefKind {
+    ///NOTE: use `assoc_tag` for any important logic
+    fn def_kind_for_diagnostics(self) -> DefKind {
         match self {
             Self::Type(_) => DefKind::AssocTy,
-            Self::Const => DefKind::AssocConst,
+            Self::Const => DefKind::AssocConst { is_type_const: false },
         }
     }
 
@@ -1552,7 +1553,7 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
                 };
 
                 could_refer_to(DefKind::Variant, variant_def_id, "");
-                could_refer_to(mode.def_kind(), item_def_id, " also");
+                could_refer_to(mode.def_kind_for_diagnostics(), item_def_id, " also");
 
                 lint.span_suggestion(
                     span,
@@ -2085,12 +2086,12 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
             }
 
             // Case 3. Reference to a top-level value.
-            DefKind::Fn | DefKind::Const | DefKind::ConstParam | DefKind::Static { .. } => {
+            DefKind::Fn | DefKind::Const { .. } | DefKind::ConstParam | DefKind::Static { .. } => {
                 generic_segments.push(GenericPathSegment(def_id, last));
             }
 
             // Case 4. Reference to a method or associated const.
-            DefKind::AssocFn | DefKind::AssocConst => {
+            DefKind::AssocFn | DefKind::AssocConst { .. } => {
                 if segments.len() >= 2 {
                     let generics = tcx.generics_of(def_id);
                     generic_segments.push(GenericPathSegment(generics.parent.unwrap(), last - 1));
@@ -2663,7 +2664,7 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
                 );
                 self.lower_const_param(def_id, hir_id)
             }
-            Res::Def(DefKind::Const, did) => {
+            Res::Def(DefKind::Const { .. }, did) => {
                 if let Err(guar) = self.require_type_const_attribute(did, span) {
                     return Const::new_error(self.tcx(), guar);
                 }
@@ -2704,7 +2705,7 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
                 let args = self.lower_generic_args_of_path_segment(span, generics_did, segment);
                 ty::Const::zero_sized(tcx, Ty::new_fn_def(tcx, did, args))
             }
-            Res::Def(DefKind::AssocConst, did) => {
+            Res::Def(DefKind::AssocConst { .. }, did) => {
                 let trait_segment = if let [modules @ .., trait_, _item] = path.segments {
                     let _ = self.prohibit_generic_args(modules.iter(), GenericsArgsErrExtend::None);
                     Some(trait_)

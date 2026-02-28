@@ -560,7 +560,9 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                     DefKind::Static { .. } => {
                         Some(errs::GenericParamsFromOuterItemStaticOrConst::Static)
                     }
-                    DefKind::Const => Some(errs::GenericParamsFromOuterItemStaticOrConst::Const),
+                    DefKind::Const { .. } => {
+                        Some(errs::GenericParamsFromOuterItemStaticOrConst::Const)
+                    }
                     _ => None,
                 };
                 let is_self =
@@ -723,8 +725,8 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                                 Res::Def(
                                     DefKind::Ctor(CtorOf::Variant, CtorKind::Const)
                                         | DefKind::Ctor(CtorOf::Struct, CtorKind::Const)
-                                        | DefKind::Const
-                                        | DefKind::AssocConst,
+                                        | DefKind::Const { .. }
+                                        | DefKind::AssocConst { .. },
                                     _,
                                 )
                             )
@@ -732,11 +734,11 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                     );
 
                     if import_suggestions.is_empty() && !suggested_typo {
-                        let kinds = [
-                            DefKind::Ctor(CtorOf::Variant, CtorKind::Const),
-                            DefKind::Ctor(CtorOf::Struct, CtorKind::Const),
-                            DefKind::Const,
-                            DefKind::AssocConst,
+                        let kind_matches: [fn(DefKind) -> bool; 4] = [
+                            |kind| matches!(kind, DefKind::Ctor(CtorOf::Variant, CtorKind::Const)),
+                            |kind| matches!(kind, DefKind::Ctor(CtorOf::Struct, CtorKind::Const)),
+                            |kind| matches!(kind, DefKind::Const { .. }),
+                            |kind| matches!(kind, DefKind::AssocConst { .. }),
                         ];
                         let mut local_names = vec![];
                         self.add_module_candidates(
@@ -755,13 +757,13 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
 
                         let mut local_suggestions = vec![];
                         let mut suggestions = vec![];
-                        for kind in kinds {
+                        for matches_kind in kind_matches {
                             if let Some(suggestion) = self.early_lookup_typo_candidate(
                                 ScopeSet::All(Namespace::ValueNS),
                                 &parent_scope,
                                 name,
                                 &|res: Res| match res {
-                                    Res::Def(k, _) => k == kind,
+                                    Res::Def(k, _) => matches_kind(k),
                                     _ => false,
                                 },
                             ) && let Res::Def(kind, mut def_id) = suggestion.res
