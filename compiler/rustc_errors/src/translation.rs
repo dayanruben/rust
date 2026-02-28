@@ -31,12 +31,7 @@ pub fn format_diag_messages(
     messages: &[(DiagMessage, Style)],
     args: &FluentArgs<'_>,
 ) -> Cow<'static, str> {
-    Cow::Owned(
-        messages
-            .iter()
-            .map(|(m, _)| format_diag_message(m, args).map_err(Report::new).unwrap())
-            .collect::<String>(),
-    )
+    Cow::Owned(messages.iter().map(|(m, _)| format_diag_message(m, args)).collect::<String>())
 }
 
 /// Convert a `DiagMessage` to a string
