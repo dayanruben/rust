@@ -121,7 +121,7 @@ impl DepNode {
 
         #[cfg(debug_assertions)]
         {
-            if !tcx.key_fingerprint_style(kind).reconstructible()
+            if !tcx.key_fingerprint_style(kind).is_maybe_recoverable()
                 && (tcx.sess.opts.unstable_opts.incremental_info
                     || tcx.sess.opts.unstable_opts.query_dep_graph)
             {
@@ -225,12 +225,12 @@ pub struct DepKindVTable<'tcx> {
     /// with kind `mir_promoted`, we know that the key fingerprint of the `DepNode`
     /// is actually a `DefPathHash`, and can therefore just look up the corresponding
     /// `DefId` in `tcx.def_path_hash_to_def_id`.
-    pub force_from_dep_node: Option<
+    pub force_from_dep_node_fn: Option<
         fn(tcx: TyCtxt<'tcx>, dep_node: DepNode, prev_index: SerializedDepNodeIndex) -> bool,
     >,
 
     /// Invoke a query to put the on-disk cached value in memory.
-    pub try_load_from_on_disk_cache: Option<fn(TyCtxt<'tcx>, DepNode)>,
+    pub promote_from_disk_fn: Option<fn(TyCtxt<'tcx>, DepNode)>,
 }
 
 /// A "work product" corresponds to a `.o` (or other) file that we

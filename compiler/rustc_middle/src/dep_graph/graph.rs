@@ -1064,7 +1064,11 @@ impl DepGraph {
             match data.colors.get(prev_index) {
                 DepNodeColor::Green(_) => {
                     let dep_node = data.previous.index_to_node(prev_index);
-                    tcx.try_load_from_on_disk_cache(dep_node);
+                    if let Some(promote_fn) =
+                        tcx.dep_kind_vtable(dep_node.kind).promote_from_disk_fn
+                    {
+                        promote_fn(tcx, *dep_node)
+                    };
                 }
                 DepNodeColor::Unknown | DepNodeColor::Red => {
                     // We can skip red nodes because a node can only be marked
