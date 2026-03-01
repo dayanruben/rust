@@ -311,6 +311,8 @@ pub enum DiagArgValue {
     StrListSepByAnd(Vec<Cow<'static, str>>),
 }
 
+/// A mapping from diagnostic argument names to their values.
+/// This contains all the arguments necessary to format a diagnostic message.
 pub type DiagArgMap = FxIndexMap<DiagArgName, DiagArgValue>;
 
 /// Converts a value of a type into a `DiagArg` (typically a field of an `Diag` struct).
