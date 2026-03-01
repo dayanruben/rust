@@ -165,19 +165,13 @@ macro_rules! is_feedable {
     };
 }
 
-macro_rules! hash_result {
-    ([][$V:ty]) => {{
-        Some(|hcx, result| {
-            let result = rustc_middle::query::erase::restore_val::<$V>(*result);
-            rustc_middle::dep_graph::hash_result(hcx, &result)
-        })
-    }};
-    ([(no_hash) $($rest:tt)*][$V:ty]) => {{
-        None
-    }};
-    ([$other:tt $($modifiers:tt)*][$($args:tt)*]) => {
-        hash_result!([$($modifiers)*][$($args)*])
-    };
+/// Expands to `$yes` if the `no_hash` modifier is present, or `$no` otherwise.
+macro_rules! if_no_hash {
+    ([] $yes:tt $no:tt) => { $no };
+    ([(no_hash) $($modifiers:tt)*] $yes:tt $no:tt) => { $yes };
+    ([$other:tt $($modifiers:tt)*] $yes:tt $no:tt) => {
+        if_no_hash!([$($modifiers)*] $yes $no)
+    }
 }
 
 macro_rules! call_provider {
@@ -560,7 +554,16 @@ macro_rules! define_queries {
                         let result: queries::$name::Value<'tcx> = Value::from_cycle_error(tcx, cycle, guar);
                         erase::erase_val(result)
                     },
-                    hash_result: hash_result!([$($modifiers)*][queries::$name::Value<'tcx>]),
+                    hash_value_fn: if_no_hash!(
+                        [$($modifiers)*]
+                        None
+                        {
+                            Some(|hcx, erased_value: &erase::Erased<queries::$name::Value<'tcx>>| {
+                                let value = erase::restore_val(*erased_value);
+                                rustc_middle::dep_graph::hash_result(hcx, &value)
+                            })
+                        }
+                    ),
                     format_value: |value| format!("{:?}", erase::restore_val::<queries::$name::Value<'tcx>>(*value)),
                     description_fn: $crate::queries::_description_fns::$name,
                     execute_query_fn: if incremental {
