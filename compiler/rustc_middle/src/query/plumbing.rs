@@ -74,8 +74,6 @@ pub type TryLoadFromDiskFn<'tcx, Key, Value> = fn(
 pub type IsLoadableFromDiskFn<'tcx, Key> =
     fn(tcx: TyCtxt<'tcx>, key: &Key, index: SerializedDepNodeIndex) -> bool;
 
-pub type HashResult<V> = Option<fn(&mut StableHashingContext<'_>, &V) -> Fingerprint>;
-
 #[derive(Clone, Debug)]
 pub struct CycleError<I = QueryStackFrameExtra> {
     /// The query and related span that uses the cycle.
@@ -146,7 +144,12 @@ pub struct QueryVTable<'tcx, C: QueryCache> {
 
     pub try_load_from_disk_fn: Option<TryLoadFromDiskFn<'tcx, C::Key, C::Value>>,
     pub is_loadable_from_disk_fn: Option<IsLoadableFromDiskFn<'tcx, C::Key>>,
-    pub hash_result: HashResult<C::Value>,
+
+    /// Function pointer that hashes this query's result values.
+    ///
+    /// For `no_hash` queries, this function pointer is None.
+    pub hash_value_fn: Option<fn(&mut StableHashingContext<'_>, &C::Value) -> Fingerprint>,
+
     pub value_from_cycle_error:
         fn(tcx: TyCtxt<'tcx>, cycle_error: &CycleError, guar: ErrorGuaranteed) -> C::Value,
     pub format_value: fn(&C::Value) -> String,

@@ -372,7 +372,7 @@ fn execute_job<'tcx, C: QueryCache, const INCR: bool>(
     debug_assert_eq!(tcx.dep_graph.is_fully_enabled(), INCR);
 
     // Delegate to another function to actually execute the query job.
-    let (result, dep_node_index) = if INCR {
+    let (value, dep_node_index) = if INCR {
         execute_job_incr(query, tcx, key, dep_node, id)
     } else {
         execute_job_non_incr(query, tcx, key, id)
@@ -384,18 +384,18 @@ fn execute_job<'tcx, C: QueryCache, const INCR: bool>(
         // This can't happen, as query feeding adds the very dependencies to the fed query
         // as its feeding query had. So if the fed query is red, so is its feeder, which will
         // get evaluated first, and re-feed the query.
-        if let Some((cached_result, _)) = cache.lookup(&key) {
-            let Some(hasher) = query.hash_result else {
+        if let Some((cached_value, _)) = cache.lookup(&key) {
+            let Some(hash_value_fn) = query.hash_value_fn else {
                 panic!(
                     "no_hash fed query later has its value computed.\n\
                     Remove `no_hash` modifier to allow recomputation.\n\
                     The already cached value: {}",
-                    (query.format_value)(&cached_result)
+                    (query.format_value)(&cached_value)
                 );
             };
 
             let (old_hash, new_hash) = tcx.with_stable_hashing_context(|mut hcx| {
-                (hasher(&mut hcx, &cached_result), hasher(&mut hcx, &result))
+                (hash_value_fn(&mut hcx, &cached_value), hash_value_fn(&mut hcx, &value))
             });
             let formatter = query.format_value;
             if old_hash != new_hash {
@@ -407,17 +407,17 @@ fn execute_job<'tcx, C: QueryCache, const INCR: bool>(
                         computed={:#?}\nfed={:#?}",
                     query.dep_kind,
                     key,
-                    formatter(&result),
-                    formatter(&cached_result),
+                    formatter(&value),
+                    formatter(&cached_value),
                 );
             }
         }
     }
 
     // Tell the guard to perform completion bookkeeping, and also to not poison the query.
-    job_guard.complete(cache, result, dep_node_index);
+    job_guard.complete(cache, value, dep_node_index);
 
-    (result, Some(dep_node_index))
+    (value, Some(dep_node_index))
 }
 
 // Fast path for when incr. comp. is off.
@@ -438,7 +438,7 @@ fn execute_job_non_incr<'tcx, C: QueryCache>(
 
     let prof_timer = tcx.prof.query_provider();
     // Call the query provider.
-    let result =
+    let value =
         start_query(tcx, job_id, query.depth_limit, || (query.invoke_provider_fn)(tcx, key));
     let dep_node_index = tcx.dep_graph.next_virtual_depnode_index();
     prof_timer.finish_with_query_invocation_id(dep_node_index.into());
@@ -446,14 +446,14 @@ fn execute_job_non_incr<'tcx, C: QueryCache>(
     // Similarly, fingerprint the result to assert that
     // it doesn't have anything not considered hashable.
     if cfg!(debug_assertions)
-        && let Some(hash_result) = query.hash_result
+        && let Some(hash_value_fn) = query.hash_value_fn
     {
         tcx.with_stable_hashing_context(|mut hcx| {
-            hash_result(&mut hcx, &result);
+            hash_value_fn(&mut hcx, &value);
         });
     }
 
-    (result, dep_node_index)
+    (value, dep_node_index)
 }
 
 #[inline(always)]
@@ -509,7 +509,7 @@ fn execute_job_incr<'tcx, C: QueryCache>(
             tcx,
             (query, key),
             |tcx, (query, key)| (query.invoke_provider_fn)(tcx, key),
-            query.hash_result,
+            query.hash_value_fn,
         )
     });
 
@@ -560,7 +560,7 @@ fn load_from_disk_or_invoke_provider_green<'tcx, C: QueryCache>(
                 dep_graph_data,
                 &value,
                 prev_index,
-                query.hash_result,
+                query.hash_value_fn,
                 query.format_value,
             );
         }
@@ -607,7 +607,7 @@ fn load_from_disk_or_invoke_provider_green<'tcx, C: QueryCache>(
         dep_graph_data,
         &value,
         prev_index,
-        query.hash_result,
+        query.hash_value_fn,
         query.format_value,
     );
 
