@@ -23,7 +23,7 @@ use rustc_feature::{
 use rustc_hir::attrs::diagnostic::Directive;
 use rustc_hir::attrs::{
     AttributeKind, DocAttribute, DocInline, EiiDecl, EiiImpl, EiiImplResolution, InlineAttr,
-    MirDialect, MirPhase, ReprAttr, SanitizerSet,
+    ReprAttr, SanitizerSet,
 };
 use rustc_hir::def::DefKind;
 use rustc_hir::def_id::LocalModDefId;
@@ -73,6 +73,10 @@ struct DiagnosticOnConstOnlyForNonConstTraitImpls {
     #[label("this is a const trait impl")]
     item_span: Span,
 }
+
+#[derive(Diagnostic)]
+#[diag("`#[diagnostic::on_move]` can only be applied to enums, structs or unions")]
+struct DiagnosticOnMoveOnlyForAdt;
 
 fn target_from_impl_item<'tcx>(tcx: TyCtxt<'tcx>, impl_item: &hir::ImplItem<'_>) -> Target {
     match impl_item.kind {
@@ -208,9 +212,6 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                 Attribute::Parsed(AttributeKind::MayDangle(attr_span)) => {
                     self.check_may_dangle(hir_id, *attr_span)
                 }
-                &Attribute::Parsed(AttributeKind::CustomMir(dialect, phase, attr_span)) => {
-                    self.check_custom_mir(dialect, phase, attr_span)
-                }
                 &Attribute::Parsed(AttributeKind::Sanitize { on_set, off_set, rtsan: _, span: attr_span}) => {
                     self.check_sanitize(attr_span, on_set | off_set, span, target);
                 },
@@ -233,6 +234,9 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                 Attribute::Parsed(AttributeKind::DoNotRecommend{attr_span}) => {self.check_do_not_recommend(*attr_span, hir_id, target, item)},
                 Attribute::Parsed(AttributeKind::OnUnimplemented{span, directive}) => {self.check_diagnostic_on_unimplemented(*span, hir_id, target,directive.as_deref())},
                 Attribute::Parsed(AttributeKind::OnConst{span, ..}) => {self.check_diagnostic_on_const(*span, hir_id, target, item)}
+                Attribute::Parsed(AttributeKind::OnMove { span, directive }) => {
+                    self.check_diagnostic_on_move(*span, hir_id, target, directive.as_deref())
+                },
                 Attribute::Parsed(
                     // tidy-alphabetical-start
                     AttributeKind::RustcAllowIncoherentImpl(..)
@@ -247,6 +251,7 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                     | AttributeKind::Coverage (..)
                     | AttributeKind::CrateName { .. }
                     | AttributeKind::CrateType(..)
+                    | AttributeKind::CustomMir(..)
                     | AttributeKind::DebuggerVisualizer(..)
                     | AttributeKind::DefaultLibAllocator
                     // `#[doc]` is actually a lot more than just doc comments, so is checked below
@@ -682,6 +687,56 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
 
         // We don't check the validity of generic args here...whose generics would that be, anyway?
         // The traits' or the impls'?
+    }
+
+    /// Checks if `#[diagnostic::on_move]` is applied to an ADT definition
+    fn check_diagnostic_on_move(
+        &self,
+        attr_span: Span,
+        hir_id: HirId,
+        target: Target,
+        directive: Option<&Directive>,
+    ) {
+        if !matches!(target, Target::Enum | Target::Struct | Target::Union) {
+            self.tcx.emit_node_span_lint(
+                MISPLACED_DIAGNOSTIC_ATTRIBUTES,
+                hir_id,
+                attr_span,
+                DiagnosticOnMoveOnlyForAdt,
+            );
+        }
+
+        if let Some(directive) = directive {
+            if let Node::Item(Item {
+                kind:
+                    ItemKind::Struct(_, generics, _)
+                    | ItemKind::Enum(_, generics, _)
+                    | ItemKind::Union(_, generics, _),
+                ..
+            }) = self.tcx.hir_node(hir_id)
+            {
+                directive.visit_params(&mut |argument_name, span| {
+                    let has_generic = generics.params.iter().any(|p| {
+                        if !matches!(p.kind, GenericParamKind::Lifetime { .. })
+                            && let ParamName::Plain(name) = p.name
+                            && name.name == argument_name
+                        {
+                            true
+                        } else {
+                            false
+                        }
+                    });
+                    if !has_generic {
+                        self.tcx.emit_node_span_lint(
+                            MALFORMED_DIAGNOSTIC_FORMAT_LITERALS,
+                            hir_id,
+                            span,
+                            errors::OnMoveMalformedFormatLiterals { name: argument_name },
+                        )
+                    }
+                });
+            }
+        }
     }
 
     /// Checks if an `#[inline]` is applied to a function or a closure.
@@ -1855,48 +1910,6 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
         if !matches!(self.tcx.hir_expect_expr(hir_id).kind, hir::ExprKind::Break(..)) {
             self.dcx().emit_err(errors::ConstContinueAttr { attr_span, node_span });
         };
-    }
-
-    fn check_custom_mir(
-        &self,
-        dialect: Option<(MirDialect, Span)>,
-        phase: Option<(MirPhase, Span)>,
-        attr_span: Span,
-    ) {
-        let Some((dialect, dialect_span)) = dialect else {
-            if let Some((_, phase_span)) = phase {
-                self.dcx()
-                    .emit_err(errors::CustomMirPhaseRequiresDialect { attr_span, phase_span });
-            }
-            return;
-        };
-
-        match dialect {
-            MirDialect::Analysis => {
-                if let Some((MirPhase::Optimized, phase_span)) = phase {
-                    self.dcx().emit_err(errors::CustomMirIncompatibleDialectAndPhase {
-                        dialect,
-                        phase: MirPhase::Optimized,
-                        attr_span,
-                        dialect_span,
-                        phase_span,
-                    });
-                }
-            }
-
-            MirDialect::Built => {
-                if let Some((phase, phase_span)) = phase {
-                    self.dcx().emit_err(errors::CustomMirIncompatibleDialectAndPhase {
-                        dialect,
-                        phase,
-                        attr_span,
-                        dialect_span,
-                        phase_span,
-                    });
-                }
-            }
-            MirDialect::Runtime => {}
-        }
     }
 }
 
