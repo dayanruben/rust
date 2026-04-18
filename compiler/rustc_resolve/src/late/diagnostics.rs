@@ -26,7 +26,7 @@ use rustc_middle::ty;
 use rustc_session::{Session, lint};
 use rustc_span::edit_distance::{edit_distance, find_best_match_for_name};
 use rustc_span::edition::Edition;
-use rustc_span::{DUMMY_SP, Ident, Span, Symbol, kw, sym};
+use rustc_span::{DUMMY_SP, DesugaringKind, Ident, Span, Symbol, kw, sym};
 use thin_vec::ThinVec;
 use tracing::debug;
 
@@ -978,12 +978,15 @@ impl<'ast, 'ra, 'tcx> LateResolutionVisitor<'_, 'ast, 'ra, 'tcx> {
                     AssocSuggestion::Field(field_span) => {
                         if self_is_available {
                             let source_map = self.r.tcx.sess.source_map();
-                            // check if the field is used in a format string, such as `"{x}"`
-                            let field_is_format_named_arg = source_map
+                            let field_is_format_named_arg = matches!(
+                                span.desugaring_kind(),
+                                Some(DesugaringKind::FormatLiteral { .. })
+                            ) && source_map
                                 .span_to_source(span, |s, start, _| {
-                                    Ok(s.get(start - 1..start) == Some("{"))
-                                });
-                            if let Ok(true) = field_is_format_named_arg {
+                                    Ok(s.get(start.saturating_sub(1)..start) == Some("{"))
+                                })
+                                .unwrap_or(false);
+                            if field_is_format_named_arg {
                                 err.help(
                                     format!("you might have meant to use the available field in a format string: `\"{{}}\", self.{}`", segment.ident.name),
                                 );
@@ -1130,7 +1133,7 @@ impl<'ast, 'ra, 'tcx> LateResolutionVisitor<'_, 'ast, 'ra, 'tcx> {
             for rib in self.ribs[ns].iter().rev() {
                 let item = path[0].ident;
                 if let RibKind::Module(module) | RibKind::Block(Some(module)) = rib.kind
-                    && let Some(did) = find_doc_alias_name(self.r, module, item.name)
+                    && let Some(did) = find_doc_alias_name(self.r, module.to_module(), item.name)
                 {
                     return Some((did, item));
                 }
@@ -2861,10 +2864,16 @@ impl<'ast, 'ra, 'tcx> LateResolutionVisitor<'_, 'ast, 'ra, 'tcx> {
                 }
 
                 if let RibKind::Block(Some(module)) = rib.kind {
-                    self.r.add_module_candidates(module, &mut names, &filter_fn, Some(ctxt));
+                    self.r.add_module_candidates(
+                        module.to_module(),
+                        &mut names,
+                        &filter_fn,
+                        Some(ctxt),
+                    );
                 } else if let RibKind::Module(module) = rib.kind {
                     // Encountered a module item, abandon ribs and look into that module and preludes.
-                    let parent_scope = &ParentScope { module, ..self.parent_scope };
+                    let parent_scope =
+                        &ParentScope { module: module.to_module(), ..self.parent_scope };
                     self.r.add_scope_set_candidates(
                         &mut names,
                         ScopeSet::All(ns),
@@ -3007,7 +3016,7 @@ impl<'ast, 'ra, 'tcx> LateResolutionVisitor<'_, 'ast, 'ra, 'tcx> {
         let mut seen_modules = FxHashSet::default();
         let root_did = self.r.graph_root.def_id();
         let mut worklist = vec![(
-            self.r.graph_root,
+            self.r.graph_root.to_module(),
             ThinVec::new(),
             root_did.is_local() || !self.r.tcx.is_doc_hidden(root_did),
         )];
