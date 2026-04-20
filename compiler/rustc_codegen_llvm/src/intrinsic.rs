@@ -3,7 +3,7 @@ use std::ffi::c_uint;
 use std::{assert_matches, iter, ptr};
 
 use rustc_abi::{
-    Align, BackendRepr, ExternAbi, Float, HasDataLayout, NumScalableVectors, Primitive, Size,
+    Align, BackendRepr, Float, HasDataLayout, Integer, NumScalableVectors, Primitive, Size,
     WrappingRange,
 };
 use rustc_codegen_ssa::base::{compare_simd_types, wants_msvc_seh, wants_wasm_eh};
@@ -18,7 +18,9 @@ use rustc_hir::find_attr;
 use rustc_middle::mir::BinOp;
 use rustc_middle::ty::layout::{FnAbiOf, HasTyCtxt, HasTypingEnv, LayoutOf};
 use rustc_middle::ty::offload_meta::OffloadMetadata;
-use rustc_middle::ty::{self, GenericArgsRef, Instance, SimdAlign, Ty, TyCtxt, TypingEnv};
+use rustc_middle::ty::{
+    self, GenericArgsRef, Instance, SimdAlign, Ty, TyCtxt, TypingEnv, Unnormalized,
+};
 use rustc_middle::{bug, span_bug};
 use rustc_session::config::CrateType;
 use rustc_session::lint::builtin::DEPRECATED_LLVM_INTRINSIC;
@@ -289,10 +291,17 @@ impl<'ll, 'tcx> IntrinsicCallBuilderMethods<'tcx> for Builder<'_, 'll, 'tcx> {
                     bug!("the va_arg intrinsic does not support non-scalar types")
                 };
 
+                // We reject types that would never be passed as varargs in C because
+                // they get promoted to a larger type, specifically integers smaller than
+                // c_int and float type smaller than c_double.
                 match scalar.primitive() {
                     Primitive::Pointer(_) => {
                         // Pointers are always OK.
-                        emit_va_arg(self, args[0], result.layout.ty)
+                    }
+                    Primitive::Int(Integer::I128, _) => {
+                        // FIXME: maybe we should support these? At least on 32-bit powerpc
+                        // the logic in LLVM does not handle i128 correctly though.
+                        bug!("the va_arg intrinsic does not support `i128`/`u128`")
                     }
                     Primitive::Int(..) => {
                         let int_width = self.cx().size_of(result.layout.ty).bits();
@@ -306,27 +315,26 @@ impl<'ll, 'tcx> IntrinsicCallBuilderMethods<'tcx> for Builder<'_, 'll, 'tcx> {
                                 target_c_int_width
                             );
                         }
-                        emit_va_arg(self, args[0], result.layout.ty)
                     }
                     Primitive::Float(Float::F16) => {
                         bug!("the va_arg intrinsic does not support `f16`")
                     }
                     Primitive::Float(Float::F32) => {
-                        if self.cx().sess().target.arch == Arch::Avr {
-                            // c_double is actually f32 on avr.
-                            emit_va_arg(self, args[0], result.layout.ty)
-                        } else {
+                        // c_double is actually f32 on avr.
+                        if self.cx().sess().target.arch != Arch::Avr {
                             bug!("the va_arg intrinsic does not support `f32` on this target")
                         }
                     }
                     Primitive::Float(Float::F64) => {
                         // 64-bit floats are always OK.
-                        emit_va_arg(self, args[0], result.layout.ty)
                     }
                     Primitive::Float(Float::F128) => {
+                        // FIXME(f128) figure out whether we should support this.
                         bug!("the va_arg intrinsic does not support `f128`")
                     }
                 }
+
+                emit_va_arg(self, args[0], result.layout.ty)
             }
 
             sym::volatile_load | sym::unaligned_volatile_load => {
@@ -815,12 +823,12 @@ impl<'ll, 'tcx> IntrinsicCallBuilderMethods<'tcx> for Builder<'_, 'll, 'tcx> {
 
         let fn_ty = instance.ty(tcx, self.typing_env());
         let fn_sig = match *fn_ty.kind() {
-            ty::FnDef(def_id, args) => {
-                tcx.instantiate_bound_regions_with_erased(tcx.fn_sig(def_id).instantiate(tcx, args))
-            }
+            ty::FnDef(def_id, args) => tcx.instantiate_bound_regions_with_erased(
+                tcx.fn_sig(def_id).instantiate(tcx, args).skip_norm_wip(),
+            ),
             _ => unreachable!(),
         };
-        assert!(!fn_sig.c_variadic);
+        assert!(!fn_sig.c_variadic());
 
         let ret_layout = self.layout_of(fn_sig.output());
         let llreturn_ty = if ret_layout.is_zst() {
@@ -1640,32 +1648,18 @@ fn get_rust_try_fn<'a, 'll, 'tcx>(
     // `unsafe fn(*mut i8) -> ()`
     let try_fn_ty = Ty::new_fn_ptr(
         tcx,
-        ty::Binder::dummy(tcx.mk_fn_sig(
-            [i8p],
-            tcx.types.unit,
-            false,
-            hir::Safety::Unsafe,
-            ExternAbi::Rust,
-        )),
+        ty::Binder::dummy(tcx.mk_fn_sig_rust_abi([i8p], tcx.types.unit, hir::Safety::Unsafe)),
     );
     // `unsafe fn(*mut i8, *mut i8) -> ()`
     let catch_fn_ty = Ty::new_fn_ptr(
         tcx,
-        ty::Binder::dummy(tcx.mk_fn_sig(
-            [i8p, i8p],
-            tcx.types.unit,
-            false,
-            hir::Safety::Unsafe,
-            ExternAbi::Rust,
-        )),
+        ty::Binder::dummy(tcx.mk_fn_sig_rust_abi([i8p, i8p], tcx.types.unit, hir::Safety::Unsafe)),
     );
     // `unsafe fn(unsafe fn(*mut i8) -> (), *mut i8, unsafe fn(*mut i8, *mut i8) -> ()) -> i32`
-    let rust_fn_sig = ty::Binder::dummy(cx.tcx.mk_fn_sig(
+    let rust_fn_sig = ty::Binder::dummy(cx.tcx.mk_fn_sig_rust_abi(
         [try_fn_ty, i8p, catch_fn_ty],
         tcx.types.i32,
-        false,
         hir::Safety::Unsafe,
-        ExternAbi::Rust,
     ));
     let rust_try = gen_fn(cx, "__rust_try", rust_fn_sig, codegen);
     cx.rust_try_fn.set(Some(rust_try));
@@ -2948,7 +2942,7 @@ fn generic_simd_intrinsic<'ll, 'tcx>(
         match in_elem.kind() {
             ty::RawPtr(p_ty, _) => {
                 let metadata = p_ty.ptr_metadata_ty(bx.tcx, |ty| {
-                    bx.tcx.normalize_erasing_regions(bx.typing_env(), ty)
+                    bx.tcx.normalize_erasing_regions(bx.typing_env(), Unnormalized::new_wip(ty))
                 });
                 require!(
                     metadata.is_unit(),
@@ -2962,7 +2956,7 @@ fn generic_simd_intrinsic<'ll, 'tcx>(
         match out_elem.kind() {
             ty::RawPtr(p_ty, _) => {
                 let metadata = p_ty.ptr_metadata_ty(bx.tcx, |ty| {
-                    bx.tcx.normalize_erasing_regions(bx.typing_env(), ty)
+                    bx.tcx.normalize_erasing_regions(bx.typing_env(), Unnormalized::new_wip(ty))
                 });
                 require!(
                     metadata.is_unit(),
