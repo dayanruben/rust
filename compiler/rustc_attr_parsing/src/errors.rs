@@ -1,4 +1,4 @@
-use rustc_errors::{DiagArgValue, MultiSpan};
+use rustc_errors::{Applicability, DiagArgValue, MultiSpan};
 use rustc_macros::{Diagnostic, Subdiagnostic};
 use rustc_span::{Span, Symbol};
 
@@ -177,3 +177,78 @@ pub(crate) struct DocAliasDuplicated {
 #[derive(Diagnostic)]
 #[diag("only `hide` or `show` are allowed in `#[doc(auto_cfg(...))]`")]
 pub(crate) struct DocAutoCfgExpectsHideOrShow;
+
+#[derive(Diagnostic)]
+#[diag("there exists a built-in attribute with the same name")]
+pub(crate) struct AmbiguousDeriveHelpers;
+
+#[derive(Diagnostic)]
+#[diag("`#![doc(auto_cfg({$attr_name}(...)))]` only accepts identifiers or key/value items")]
+pub(crate) struct DocAutoCfgHideShowUnexpectedItem {
+    pub attr_name: Symbol,
+}
+
+#[derive(Diagnostic)]
+#[diag("`#![doc(auto_cfg({$attr_name}(...)))]` expects a list of items")]
+pub(crate) struct DocAutoCfgHideShowExpectsList {
+    pub attr_name: Symbol,
+}
+
+#[derive(Diagnostic)]
+#[diag("unknown `doc` attribute `include`")]
+pub(crate) struct DocUnknownInclude {
+    pub inner: &'static str,
+    pub value: Symbol,
+    #[suggestion(
+        "use `doc = include_str!` instead",
+        code = "#{inner}[doc = include_str!(\"{value}\")]"
+    )]
+    pub sugg: (Span, Applicability),
+}
+
+#[derive(Diagnostic)]
+#[diag("unknown `doc` attribute `spotlight`")]
+#[note("`doc(spotlight)` was renamed to `doc(notable_trait)`")]
+#[note("`doc(spotlight)` is now a no-op")]
+pub(crate) struct DocUnknownSpotlight {
+    #[suggestion(
+        "use `notable_trait` instead",
+        style = "short",
+        applicability = "machine-applicable",
+        code = "notable_trait"
+    )]
+    pub sugg_span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag("unknown `doc` attribute `{$name}`")]
+#[note(
+    "`doc` attribute `{$name}` no longer functions; see issue #44136 <https://github.com/rust-lang/rust/issues/44136>"
+)]
+#[note("`doc({$name})` is now a no-op")]
+pub(crate) struct DocUnknownPasses {
+    pub name: Symbol,
+    #[label("no longer functions")]
+    pub note_span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag("unknown `doc` attribute `plugins`")]
+#[note(
+    "`doc` attribute `plugins` no longer functions; see issue #44136 <https://github.com/rust-lang/rust/issues/44136> and CVE-2018-1000622 <https://nvd.nist.gov/vuln/detail/CVE-2018-1000622>"
+)]
+#[note("`doc(plugins)` is now a no-op")]
+pub(crate) struct DocUnknownPlugins {
+    #[label("no longer functions")]
+    pub label_span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag("unknown `doc` attribute `{$name}`")]
+pub(crate) struct DocUnknownAny {
+    pub name: Symbol,
+}
+
+#[derive(Diagnostic)]
+#[diag("expected boolean for `#[doc(auto_cfg = ...)]`")]
+pub(crate) struct DocAutoCfgWrongLiteral;
