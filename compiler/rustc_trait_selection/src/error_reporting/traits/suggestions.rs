@@ -246,6 +246,15 @@ pub fn suggest_restriction<'tcx, G: EmissionGuarantee>(
     }
 }
 
+/// A single layer of `&` peeled from an expression, used by
+/// [`TypeErrCtxt::peel_expr_refs`].
+struct PeeledRef<'tcx> {
+    /// The span covering the `&` (and any whitespace/mutability keyword) to remove.
+    span: Span,
+    /// The type after peeling this layer (and all prior layers).
+    peeled_ty: Ty<'tcx>,
+}
+
 impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
     pub fn note_field_shadowed_by_private_candidate_in_cause(
         &self,
@@ -1034,17 +1043,25 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
             && let ty::Tuple(inputs) = *sig.tupled_inputs_ty.kind()
             && inputs.is_empty()
             && self.tcx.is_lang_item(trait_pred.def_id(), LangItem::Future)
+            && let ObligationCauseCode::FunctionArg { arg_hir_id, .. } = obligation.cause.code()
+            && let hir::Node::Expr(hir::Expr { kind: hir::ExprKind::Closure(..), .. }) =
+                self.tcx.hir_node(*arg_hir_id)
             && let Some(hir::Node::Expr(hir::Expr {
-                kind:
-                    hir::ExprKind::Closure(hir::Closure {
-                        kind: hir::ClosureKind::CoroutineClosure(CoroutineDesugaring::Async),
-                        fn_arg_span: Some(arg_span),
-                        ..
-                    }),
-                ..
+                kind: hir::ExprKind::Closure(closure), ..
             })) = self.tcx.hir_get_if_local(def_id)
-            && obligation.cause.span.contains(*arg_span)
+            && let hir::ClosureKind::CoroutineClosure(CoroutineDesugaring::Async) = closure.kind
+            && let Some(arg_span) = closure.fn_arg_span
+            && obligation.cause.span.contains(arg_span)
         {
+            let mut body = self.tcx.hir_body(closure.body).value;
+            let peeled = body.peel_blocks().peel_drop_temps();
+            if let hir::ExprKind::Closure(inner) = peeled.kind {
+                body = self.tcx.hir_body(inner.body).value;
+            }
+            if !matches!(body.peel_blocks().peel_drop_temps().kind, hir::ExprKind::Block(..)) {
+                return false;
+            }
+
             let sm = self.tcx.sess.source_map();
             let removal_span = if let Ok(snippet) =
                 sm.span_to_snippet(arg_span.with_hi(arg_span.hi() + rustc_span::BytePos(1)))
@@ -1053,7 +1070,7 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
                 // There's a space after `||`, include it in the removal
                 arg_span.with_hi(arg_span.hi() + rustc_span::BytePos(1))
             } else {
-                *arg_span
+                arg_span
             };
             err.span_suggestion_verbose(
                 removal_span,
@@ -1093,23 +1110,63 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
             .collect::<Vec<_>>()
             .join(", ");
 
-        if matches!(obligation.cause.code(), ObligationCauseCode::FunctionArg { .. })
+        if let ObligationCauseCode::FunctionArg { arg_hir_id, .. } = obligation.cause.code()
             && obligation.cause.span.can_be_used_for_suggestions()
         {
-            let (span, sugg) = if let Some(snippet) =
-                self.tcx.sess.source_map().span_to_snippet(obligation.cause.span).ok()
-                && snippet.starts_with("|")
-            {
-                (obligation.cause.span, format!("({snippet})({args})"))
-            } else {
-                (obligation.cause.span.shrink_to_hi(), format!("({args})"))
+            let span = obligation.cause.span;
+
+            let arg_expr = match self.tcx.hir_node(*arg_hir_id) {
+                hir::Node::Expr(expr) => Some(expr),
+                _ => None,
             };
 
-            // When the obligation error has been ensured to have been caused by
-            // an argument, the `obligation.cause.span` points at the expression
-            // of the argument, so we can provide a suggestion. Otherwise, we give
-            // a more general note.
-            err.span_suggestion_verbose(span, msg, sugg, Applicability::HasPlaceholders);
+            let is_closure_expr =
+                arg_expr.is_some_and(|expr| matches!(expr.kind, hir::ExprKind::Closure(..)));
+
+            // If the user wrote `|| {}()`, suggesting to call the closure would produce `(|| {}())()`,
+            // which doesn't help and is often outright wrong.
+            if args.is_empty()
+                && let Some(expr) = arg_expr
+                && let hir::ExprKind::Closure(closure) = expr.kind
+            {
+                let mut body = self.tcx.hir_body(closure.body).value;
+
+                // Async closures desugar to a closure returning a coroutine
+                if let hir::ClosureKind::CoroutineClosure(hir::CoroutineDesugaring::Async) =
+                    closure.kind
+                {
+                    let peeled = body.peel_blocks().peel_drop_temps();
+                    if let hir::ExprKind::Closure(inner) = peeled.kind {
+                        body = self.tcx.hir_body(inner.body).value;
+                    }
+                }
+
+                let peeled_body = body.peel_blocks().peel_drop_temps();
+                if let hir::ExprKind::Call(callee, call_args) = peeled_body.kind
+                    && call_args.is_empty()
+                    && let hir::ExprKind::Block(..) = callee.peel_blocks().peel_drop_temps().kind
+                {
+                    return false;
+                }
+            }
+
+            if is_closure_expr {
+                err.multipart_suggestions(
+                    msg,
+                    vec![vec![
+                        (span.shrink_to_lo(), "(".to_string()),
+                        (span.shrink_to_hi(), format!(")({args})")),
+                    ]],
+                    Applicability::HasPlaceholders,
+                );
+            } else {
+                err.span_suggestion_verbose(
+                    span.shrink_to_hi(),
+                    msg,
+                    format!("({args})"),
+                    Applicability::HasPlaceholders,
+                );
+            }
         } else if let DefIdOrName::DefId(def_id) = def_id_or_name {
             let name = match self.tcx.hir_get_if_local(def_id) {
                 Some(hir::Node::Expr(hir::Expr {
@@ -1882,6 +1939,85 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
         );
     }
 
+    /// Peel `&`-borrows from an expression, following through untyped let-bindings.
+    /// Returns a list of removable `&` layers (each with the span to remove and the
+    /// resulting type), plus an optional terminal [`hir::Param`] when the chain ends
+    /// at a function parameter (including async-fn desugared parameters).
+    fn peel_expr_refs(
+        &self,
+        mut expr: &'tcx hir::Expr<'tcx>,
+        mut ty: Ty<'tcx>,
+    ) -> (Vec<PeeledRef<'tcx>>, Option<&'tcx hir::Param<'tcx>>) {
+        let mut refs = Vec::new();
+        'outer: loop {
+            while let hir::ExprKind::AddrOf(_, _, borrowed) = expr.kind {
+                let span =
+                    if let Some(borrowed_span) = borrowed.span.find_ancestor_inside(expr.span) {
+                        expr.span.until(borrowed_span)
+                    } else {
+                        break 'outer;
+                    };
+
+                // Double check that the span actually corresponds to a borrow,
+                // rather than some macro garbage.
+                // The span may include leading parens from parenthesized expressions
+                // (e.g., `(&expr)` where HIR removes the Paren but keeps the span).
+                // In that case, trim the span to start at the `&`.
+                let span = match self.tcx.sess.source_map().span_to_snippet(span) {
+                    Ok(ref snippet) if snippet.starts_with("&") => span,
+                    Ok(ref snippet) if let Some(amp) = snippet.find('&') => {
+                        span.with_lo(span.lo() + BytePos(amp as u32))
+                    }
+                    _ => break 'outer,
+                };
+
+                let ty::Ref(_, inner_ty, _) = ty.kind() else {
+                    break 'outer;
+                };
+                ty = *inner_ty;
+                refs.push(PeeledRef { span, peeled_ty: ty });
+                expr = borrowed;
+            }
+            if let hir::ExprKind::Path(hir::QPath::Resolved(None, path)) = expr.kind
+                && let Res::Local(hir_id) = path.res
+                && let hir::Node::Pat(binding) = self.tcx.hir_node(hir_id)
+            {
+                match self.tcx.parent_hir_node(binding.hir_id) {
+                    // Untyped let-binding: follow to its initializer.
+                    hir::Node::LetStmt(local)
+                        if local.ty.is_none()
+                            && let Some(init) = local.init =>
+                    {
+                        expr = init;
+                        continue;
+                    }
+                    // Async fn desugared parameter: `let x = __arg0;` with AsyncFn source.
+                    // Follow to the original parameter.
+                    hir::Node::LetStmt(local)
+                        if matches!(local.source, hir::LocalSource::AsyncFn)
+                            && let Some(init) = local.init
+                            && let hir::ExprKind::Path(hir::QPath::Resolved(None, arg_path)) =
+                                init.kind
+                            && let Res::Local(arg_hir_id) = arg_path.res
+                            && let hir::Node::Pat(arg_binding) = self.tcx.hir_node(arg_hir_id)
+                            && let hir::Node::Param(param) =
+                                self.tcx.parent_hir_node(arg_binding.hir_id) =>
+                    {
+                        return (refs, Some(param));
+                    }
+                    // Direct parameter reference.
+                    hir::Node::Param(param) => {
+                        return (refs, Some(param));
+                    }
+                    _ => break 'outer,
+                }
+            } else {
+                break 'outer;
+            }
+        }
+        (refs, None)
+    }
+
     /// Whenever references are used by mistake, like `for (i, e) in &vec.iter().enumerate()`,
     /// suggest removing these references until we reach a type that implements the trait.
     pub(super) fn suggest_remove_reference(
@@ -1958,53 +2094,40 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
         }
 
         // Maybe suggest removal of borrows from expressions, like in `for i in &&&foo {}`.
-        let Some(mut expr) = expr_finder.result else {
+        let Some(expr) = expr_finder.result else {
             return false;
         };
-        let mut count = 0;
-        let mut suggestions = vec![];
         // Skipping binder here, remapping below
-        let mut suggested_ty = trait_pred.self_ty().skip_binder();
-        'outer: loop {
-            while let hir::ExprKind::AddrOf(_, _, borrowed) = expr.kind {
-                count += 1;
-                let span =
-                    if let Some(borrowed_span) = borrowed.span.find_ancestor_inside(expr.span) {
-                        expr.span.until(borrowed_span)
-                    } else {
-                        break 'outer;
-                    };
+        let suggested_ty = trait_pred.self_ty().skip_binder();
+        let (peeled_refs, _) = self.peel_expr_refs(expr, suggested_ty);
+        for (i, peeled) in peeled_refs.iter().enumerate() {
+            let suggestions: Vec<_> =
+                peeled_refs[..=i].iter().map(|r| (r.span, String::new())).collect();
+            if maybe_suggest(peeled.peeled_ty, i + 1, suggestions) {
+                return true;
+            }
+        }
+        false
+    }
 
-                // Double check that the span we extracted actually corresponds to a borrow,
-                // rather than some macro garbage.
-                match self.tcx.sess.source_map().span_to_snippet(span) {
-                    Ok(snippet) if snippet.starts_with("&") => {}
-                    _ => break 'outer,
-                }
-
-                suggestions.push((span, String::new()));
-
-                let ty::Ref(_, inner_ty, _) = suggested_ty.kind() else {
-                    break 'outer;
-                };
-                suggested_ty = *inner_ty;
-
-                expr = borrowed;
-
-                if maybe_suggest(suggested_ty, count, suggestions.clone()) {
+    /// Suggest removing `&` from a function parameter type like `&impl Future`.
+    fn suggest_remove_ref_from_param(&self, param: &hir::Param<'_>, err: &mut Diag<'_>) -> bool {
+        if let Some(decl) = self.tcx.parent_hir_node(param.hir_id).fn_decl()
+            && let Some(input_ty) = decl.inputs.iter().find(|t| param.ty_span.contains(t.span))
+            && let hir::TyKind::Ref(_, mut_ty) = input_ty.kind
+        {
+            let ref_span = input_ty.span.until(mut_ty.ty.span);
+            match self.tcx.sess.source_map().span_to_snippet(ref_span) {
+                Ok(snippet) if snippet.starts_with("&") => {
+                    err.span_suggestion_verbose(
+                        ref_span,
+                        "consider removing the `&` from the parameter type",
+                        "",
+                        Applicability::MaybeIncorrect,
+                    );
                     return true;
                 }
-            }
-            if let hir::ExprKind::Path(hir::QPath::Resolved(None, path)) = expr.kind
-                && let Res::Local(hir_id) = path.res
-                && let hir::Node::Pat(binding) = self.tcx.hir_node(hir_id)
-                && let hir::Node::LetStmt(local) = self.tcx.parent_hir_node(binding.hir_id)
-                && let None = local.ty
-                && let Some(binding_expr) = local.init
-            {
-                expr = binding_expr;
-            } else {
-                break 'outer;
+                _ => {}
             }
         }
         false
@@ -2022,6 +2145,89 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
             // and if not maybe suggest doing something else? If we kept the expression around we
             // could also check if it is an fn call (very likely) and suggest changing *that*, if
             // it is from the local crate.
+
+            // If the type is `&..&T` where `T: Future`, suggest removing `&`
+            // instead of removing `.await`.
+            if let ty::PredicateKind::Clause(ty::ClauseKind::Trait(pred)) =
+                obligation.predicate.kind().skip_binder()
+            {
+                let self_ty = pred.self_ty();
+                let future_trait =
+                    self.tcx.require_lang_item(LangItem::Future, obligation.cause.span);
+
+                // Peel through references to check if there's a Future underneath.
+                let has_future = {
+                    let mut ty = self_ty;
+                    loop {
+                        match *ty.kind() {
+                            ty::Ref(_, inner_ty, _)
+                                if !matches!(inner_ty.kind(), ty::Dynamic(..)) =>
+                            {
+                                if self
+                                    .type_implements_trait(
+                                        future_trait,
+                                        [inner_ty],
+                                        obligation.param_env,
+                                    )
+                                    .must_apply_modulo_regions()
+                                {
+                                    break true;
+                                }
+                                ty = inner_ty;
+                            }
+                            _ => break false,
+                        }
+                    }
+                };
+
+                if has_future {
+                    let (peeled_refs, terminal_param) = self.peel_expr_refs(expr, self_ty);
+
+                    // Try removing `&`s from the expression.
+                    for (i, peeled) in peeled_refs.iter().enumerate() {
+                        if self
+                            .type_implements_trait(
+                                future_trait,
+                                [peeled.peeled_ty],
+                                obligation.param_env,
+                            )
+                            .must_apply_modulo_regions()
+                        {
+                            let count = i + 1;
+                            let msg = if count == 1 {
+                                "consider removing the leading `&`-reference".to_string()
+                            } else {
+                                format!("consider removing {count} leading `&`-references")
+                            };
+                            let suggestions: Vec<_> =
+                                peeled_refs[..=i].iter().map(|r| (r.span, String::new())).collect();
+                            err.multipart_suggestion(
+                                msg,
+                                suggestions,
+                                Applicability::MachineApplicable,
+                            );
+                            return;
+                        }
+                    }
+
+                    // Try removing `&` from the parameter type, but only when there's
+                    // no `&` in the expression itself (otherwise removing from the param
+                    // alone wouldn't fix the error).
+                    if peeled_refs.is_empty()
+                        && let Some(param) = terminal_param
+                        && self.suggest_remove_ref_from_param(param, err)
+                    {
+                        return;
+                    }
+
+                    // Fallback: emit a help message when we can't provide a specific span.
+                    err.help(
+                        "a reference to a future is not a future; \
+                     consider removing the leading `&`-reference",
+                    );
+                    return;
+                }
+            }
 
             // use nth(1) to skip one layer of desugaring from `IntoIter::into_iter`
             if let Some((_, hir::Node::Expr(await_expr))) = self.tcx.hir_parent_iter(*hir_id).nth(1)
