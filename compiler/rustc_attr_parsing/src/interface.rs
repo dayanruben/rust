@@ -7,7 +7,6 @@ use rustc_data_structures::sync::{DynSend, DynSync};
 use rustc_errors::{Diag, DiagCtxtHandle, Level, MultiSpan};
 use rustc_feature::{AttributeTemplate, Features};
 use rustc_hir::attrs::AttributeKind;
-use rustc_hir::lints::AttributeLintKind;
 use rustc_hir::{AttrArgs, AttrItem, AttrPath, Attribute, HashIgnoredAttrId, Target};
 use rustc_session::Session;
 use rustc_session::lint::LintId;
@@ -20,14 +19,14 @@ use crate::parser::{AllowExprMetavar, ArgParser, PathParser, RefPathParser};
 use crate::session_diagnostics::ParsedDescription;
 use crate::{Early, Late, OmitDoc, ShouldEmit};
 
-pub enum EmitAttribute {
-    Static(AttributeLintKind),
-    Dynamic(
-        Box<
-            dyn for<'a> Fn(DiagCtxtHandle<'a>, Level) -> Diag<'a, ()> + DynSend + DynSync + 'static,
-        >,
-    ),
-}
+pub struct EmitAttribute(
+    pub  Box<
+        dyn for<'a> Fn(DiagCtxtHandle<'a>, Level, &Session) -> Diag<'a, ()>
+            + DynSend
+            + DynSync
+            + 'static,
+    >,
+);
 
 /// Context created once, for example as part of the ast lowering
 /// context, through which all attributes can be lowered.
@@ -127,13 +126,8 @@ impl<'sess> AttributeParser<'sess, Early> {
             target,
             OmitDoc::Skip,
             std::convert::identity,
-            |lint_id, span, kind| match kind {
-                EmitAttribute::Static(kind) => {
-                    sess.psess.buffer_lint(lint_id.lint, span, target_node_id, kind)
-                }
-                EmitAttribute::Dynamic(callback) => {
-                    sess.psess.dyn_buffer_lint(lint_id.lint, span, target_node_id, callback)
-                }
+            |lint_id, span, kind| {
+                sess.psess.dyn_buffer_lint_sess(lint_id.lint, span, target_node_id, kind.0)
             },
         )
     }
@@ -214,13 +208,8 @@ impl<'sess> AttributeParser<'sess, Early> {
             sess,
             stage: Early { emit_errors },
         };
-        let mut emit_lint = |lint_id: LintId, span: MultiSpan, kind: EmitAttribute| match kind {
-            EmitAttribute::Static(kind) => {
-                sess.psess.buffer_lint(lint_id.lint, span, target_node_id, kind)
-            }
-            EmitAttribute::Dynamic(callback) => {
-                sess.psess.dyn_buffer_lint(lint_id.lint, span, target_node_id, callback)
-            }
+        let mut emit_lint = |lint_id: LintId, span: MultiSpan, kind: EmitAttribute| {
+            sess.psess.dyn_buffer_lint_sess(lint_id.lint, span, target_node_id, kind.0)
         };
         if let Some(safety) = attr_safety {
             parser.check_attribute_safety(
@@ -297,7 +286,7 @@ impl<'sess, S: Stage> AttributeParser<'sess, S> {
         let mut attr_paths: Vec<RefPathParser<'_>> = Vec::new();
         let mut early_parsed_state = EarlyParsedState::default();
 
-        let mut finalizers: Vec<&FinalizeFn<S>> = Vec::with_capacity(attrs.len());
+        let mut finalizers: Vec<FinalizeFn<S>> = Vec::with_capacity(attrs.len());
 
         for attr in attrs {
             // If we're only looking for a single attribute, skip all the ones we don't care about.
@@ -413,7 +402,7 @@ impl<'sess, S: Stage> AttributeParser<'sess, S> {
                         };
 
                         (accept.accept_fn)(&mut cx, &args);
-                        finalizers.push(&accept.finalizer);
+                        finalizers.push(accept.finalizer);
 
                         if !matches!(cx.stage.should_emit(), ShouldEmit::Nothing) {
                             Self::check_target(&accept.allowed_targets, target, &mut cx);
