@@ -20,7 +20,7 @@ use thin_vec::ThinVec;
 
 use crate::attributes::AttributeSafety;
 use crate::attributes::diagnostic::check_cfg;
-use crate::context::{AcceptContext, ShouldEmit, Stage};
+use crate::context::{AcceptContext, ShouldEmit};
 use crate::parser::{
     AllowExprMetavar, ArgParser, MetaItemListParser, MetaItemOrLitParser, NameValueParser,
 };
@@ -40,10 +40,7 @@ const CFG_ATTR_TEMPLATE: AttributeTemplate = template!(
     "https://doc.rust-lang.org/reference/conditional-compilation.html#the-cfg_attr-attribute"
 );
 
-pub fn parse_cfg<S: Stage>(
-    cx: &mut AcceptContext<'_, '_, S>,
-    args: &ArgParser,
-) -> Option<CfgEntry> {
+pub fn parse_cfg(cx: &mut AcceptContext<'_, '_>, args: &ArgParser) -> Option<CfgEntry> {
     let list = cx.expect_list(args, cx.attr_span)?;
 
     let Some(single) = list.as_single() else {
@@ -81,8 +78,8 @@ pub fn parse_cfg<S: Stage>(
     parse_cfg_entry(cx, single).ok()
 }
 
-pub fn parse_cfg_entry<S: Stage>(
-    cx: &mut AcceptContext<'_, '_, S>,
+pub fn parse_cfg_entry(
+    cx: &mut AcceptContext<'_, '_>,
     item: &MetaItemOrLitParser,
 ) -> Result<CfgEntry, ErrorGuaranteed> {
     Ok(match item {
@@ -126,8 +123,8 @@ pub fn parse_cfg_entry<S: Stage>(
     })
 }
 
-fn parse_cfg_entry_version<S: Stage>(
-    cx: &mut AcceptContext<'_, '_, S>,
+fn parse_cfg_entry_version(
+    cx: &mut AcceptContext<'_, '_>,
     list: &MetaItemListParser,
     meta_span: Span,
 ) -> Result<CfgEntry, ErrorGuaranteed> {
@@ -158,8 +155,8 @@ fn parse_cfg_entry_version<S: Stage>(
     Ok(CfgEntry::Version(min_version, list.span))
 }
 
-fn parse_cfg_entry_target<S: Stage>(
-    cx: &mut AcceptContext<'_, '_, S>,
+fn parse_cfg_entry_target(
+    cx: &mut AcceptContext<'_, '_>,
     list: &MetaItemListParser,
     meta_span: Span,
 ) -> Result<CfgEntry, ErrorGuaranteed> {
@@ -201,12 +198,12 @@ fn parse_cfg_entry_target<S: Stage>(
     Ok(CfgEntry::All(result, list.span))
 }
 
-pub(crate) fn parse_name_value<S: Stage>(
+pub(crate) fn parse_name_value(
     name: Symbol,
     name_span: Span,
     value: Option<&NameValueParser>,
     span: Span,
-    cx: &mut AcceptContext<'_, '_, S>,
+    cx: &mut AcceptContext<'_, '_>,
 ) -> Result<CfgEntry, ErrorGuaranteed> {
     try_gate_cfg(name, span, cx.sess(), cx.features_option());
 
@@ -222,7 +219,7 @@ pub(crate) fn parse_name_value<S: Stage>(
         }
     };
 
-    match cx.sess.psess.check_config.expecteds.get(&name) {
+    match cx.sess.check_config.expecteds.get(&name) {
         Some(ExpectedValues::Some(values)) if !values.contains(&value.map(|(v, _)| v)) => cx
             .emit_lint_with_sess(
                 UNEXPECTED_CFGS,
@@ -232,7 +229,7 @@ pub(crate) fn parse_name_value<S: Stage>(
                 },
                 span,
             ),
-        None if cx.sess.psess.check_config.exhaustive_names => cx.emit_lint_with_sess(
+        None if cx.sess.check_config.exhaustive_names => cx.emit_lint_with_sess(
             UNEXPECTED_CFGS,
             move |dcx, level, sess| {
                 check_cfg::unexpected_cfg_name(sess, (name, name_span), value).into_diag(dcx, level)
@@ -280,7 +277,7 @@ pub fn eval_config_entry(sess: &Session, cfg_entry: &CfgEntry) -> EvalConfigResu
             }
         }
         CfgEntry::NameValue { name, value, span } => {
-            if sess.psess.config.contains(&(*name, *value)) {
+            if sess.config.contains(&(*name, *value)) {
                 EvalConfigResult::True
             } else {
                 EvalConfigResult::False { reason: cfg_entry.clone(), reason_span: *span }
@@ -294,7 +291,7 @@ pub fn eval_config_entry(sess: &Session, cfg_entry: &CfgEntry) -> EvalConfigResu
                 };
             };
             // See https://github.com/rust-lang/rust/issues/64796#issuecomment-640851454 for details
-            let min_version_ok = if sess.psess.assume_incomplete_release {
+            let min_version_ok = if sess.opts.unstable_opts.assume_incomplete_release {
                 RustcVersion::current_overridable() > *min_version
             } else {
                 RustcVersion::current_overridable() >= *min_version
