@@ -1,8 +1,6 @@
 use std::borrow::Cow;
 use std::fmt::Display;
 
-use rustc_ast::AttrId;
-use rustc_ast::attr::AttributeExt;
 use rustc_data_structures::fx::FxIndexSet;
 use rustc_data_structures::stable_hasher::{
     HashStable, HashStableContext, StableCompare, StableHasher, ToStableHashKey,
@@ -12,7 +10,7 @@ use rustc_hir_id::{HirId, ItemLocalId};
 use rustc_macros::{Decodable, Encodable, HashStable};
 use rustc_span::def_id::DefPathHash;
 pub use rustc_span::edition::Edition;
-use rustc_span::{Ident, Symbol, sym};
+use rustc_span::{AttrId, Ident, Symbol, sym};
 use serde::{Deserialize, Serialize};
 
 pub use self::Level::*;
@@ -238,8 +236,11 @@ impl Level {
     }
 
     /// Converts an `Attribute` to a level.
-    pub fn from_attr(attr: &impl AttributeExt) -> Option<(Self, Option<LintExpectationId>)> {
-        attr.name().and_then(|name| Self::from_symbol(name, || Some(attr.id())))
+    pub fn from_attr(
+        attr_name: Option<Symbol>,
+        attr_id: impl Fn() -> AttrId,
+    ) -> Option<(Self, Option<LintExpectationId>)> {
+        attr_name.and_then(|name| Self::from_symbol(name, || Some(attr_id())))
     }
 
     /// Converts a `Symbol` to a level.
@@ -342,6 +343,9 @@ pub struct Lint {
     /// `true` if this lint should not be filtered out under any circustamces
     /// (e.g. the unknown_attributes lint)
     pub eval_always: bool,
+
+    /// `true` if this lint is unaffected by `-D warnings`
+    pub ignore_deny_warnings: bool,
 }
 
 /// Extra information for a future incompatibility lint.
@@ -557,6 +561,7 @@ impl Lint {
             feature_gate: None,
             crate_level_only: false,
             eval_always: false,
+            ignore_deny_warnings: false,
         }
     }
 
