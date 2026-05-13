@@ -9,11 +9,11 @@
 // tidy-alphabetical-start
 #![allow(internal_features)]
 #![feature(arbitrary_self_types)]
-#![feature(box_patterns)]
 #![feature(const_default)]
 #![feature(const_trait_impl)]
 #![feature(control_flow_into_value)]
 #![feature(default_field_values)]
+#![feature(deref_patterns)]
 #![feature(iter_intersperse)]
 #![feature(rustc_attrs)]
 #![feature(trim_prefix_suffix)]
@@ -353,8 +353,7 @@ enum VisResolutionError {
 struct Segment {
     ident: Ident,
     id: Option<NodeId>,
-    /// Signals whether this `PathSegment` has generic arguments. Used to avoid providing
-    /// nonsensical suggestions.
+    /// Signals whether this `PathSegment` has generic arguments.
     has_generic_args: bool,
     /// Signals whether this `PathSegment` has lifetime arguments.
     has_lifetime_args: bool,

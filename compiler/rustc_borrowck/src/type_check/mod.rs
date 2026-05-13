@@ -173,6 +173,25 @@ pub(crate) fn type_check<'tcx>(
 
     let polonius_context = typeck.polonius_context;
 
+    if infcx.tcx.assumptions_on_binders() {
+        let mut converter = constraint_conversion::ConstraintConversion::new(
+            typeck.infcx,
+            typeck.universal_regions,
+            typeck.region_bound_pairs,
+            typeck.known_type_outlives_obligations,
+            Locations::All(rustc_span::DUMMY_SP),
+            rustc_span::DUMMY_SP,
+            ConstraintCategory::Boring,
+            typeck.constraints,
+        );
+        typeck.infcx.destructure_solver_region_constraints_for_borrowck(
+            &mut converter,
+            typeck.known_type_outlives_obligations,
+            universal_region_relations.outlives.clone(),
+            infcx.tcx.def_span(infcx.root_def_id),
+        );
+    }
+
     // In case type check encountered an error region, we suppress unhelpful extra
     // errors in by clearing out all outlives bounds that we may end up checking.
     if let Some(guar) = universal_region_relations.universal_regions.encountered_re_error() {
@@ -581,7 +600,7 @@ impl<'a, 'tcx> Visitor<'tcx> for TypeChecker<'a, 'tcx> {
         self.super_statement(stmt, location);
         let tcx = self.tcx();
         match &stmt.kind {
-            StatementKind::Assign(box (place, rv)) => {
+            StatementKind::Assign((place, rv)) => {
                 // Assignments to temporaries are not "interesting";
                 // they are not caused by the user, but rather artifacts
                 // of lowering. Assignments to other sorts of places *are* interesting
@@ -672,7 +691,7 @@ impl<'a, 'tcx> Visitor<'tcx> for TypeChecker<'a, 'tcx> {
                     );
                 }
             }
-            StatementKind::AscribeUserType(box (place, projection), variance) => {
+            StatementKind::AscribeUserType((place, projection), variance) => {
                 let place_ty = place.ty(self.body, tcx).ty;
                 if let Err(terr) = self.relate_type_and_user_type(
                     place_ty,
@@ -693,7 +712,7 @@ impl<'a, 'tcx> Visitor<'tcx> for TypeChecker<'a, 'tcx> {
                     );
                 }
             }
-            StatementKind::Intrinsic(box NonDivergingIntrinsic::Assume(..))
+            StatementKind::Intrinsic(NonDivergingIntrinsic::Assume(..))
             | StatementKind::FakeRead(..)
             | StatementKind::StorageLive(..)
             | StatementKind::StorageDead(..)
@@ -702,7 +721,7 @@ impl<'a, 'tcx> Visitor<'tcx> for TypeChecker<'a, 'tcx> {
             | StatementKind::PlaceMention(..)
             | StatementKind::BackwardIncompatibleDropHint { .. }
             | StatementKind::Nop => {}
-            StatementKind::Intrinsic(box NonDivergingIntrinsic::CopyNonOverlapping(..))
+            StatementKind::Intrinsic(NonDivergingIntrinsic::CopyNonOverlapping(..))
             | StatementKind::SetDiscriminant { .. } => {
                 bug!("Statement not allowed in this MIR phase")
             }
@@ -1591,7 +1610,7 @@ impl<'a, 'tcx> Visitor<'tcx> for TypeChecker<'a, 'tcx> {
 
             Rvalue::BinaryOp(
                 BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge,
-                box (left, right),
+                (left, right),
             ) => {
                 let ty_left = left.ty(self.body, tcx);
                 match ty_left.kind() {
