@@ -361,6 +361,13 @@ pub(crate) fn allowed_targets_applied(
         Target::Method(MethodKind::Trait { body: true }),
         Target::Method(MethodKind::TraitImpl),
     ];
+    const FUNCTION_WITH_BODY_LIKE: &[Target] = &[
+        Target::Fn,
+        Target::Closure,
+        Target::Method(MethodKind::Inherent),
+        Target::Method(MethodKind::Trait { body: true }),
+        Target::Method(MethodKind::TraitImpl),
+    ];
     const METHOD_LIKE: &[Target] = &[
         Target::Method(MethodKind::Inherent),
         Target::Method(MethodKind::Trait { body: false }),
@@ -376,6 +383,13 @@ pub(crate) fn allowed_targets_applied(
         &mut allowed_targets,
         FUNCTION_LIKE,
         "functions",
+        target,
+        &mut added_fake_targets,
+    );
+    filter_targets(
+        &mut allowed_targets,
+        FUNCTION_WITH_BODY_LIKE,
+        "functions with a body",
         target,
         &mut added_fake_targets,
     );
@@ -422,11 +436,15 @@ impl<'f, 'sess> AcceptContext<'f, 'sess> {
         attribute_args: &'static str,
         allowed_targets: &AllowedTargets,
     ) {
+        self.ignore_target_checks();
+        AttributeParser::check_target(allowed_targets, attribute_args, self);
+    }
+
+    pub(crate) fn ignore_target_checks(&mut self) {
         #[cfg(debug_assertions)]
         {
             self.has_target_been_checked = true;
         }
-        AttributeParser::check_target(allowed_targets, attribute_args, self);
     }
 }
 

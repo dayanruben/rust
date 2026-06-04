@@ -18,7 +18,7 @@ use rustc_feature::BUILTIN_ATTRIBUTE_MAP;
 use rustc_hir::attrs::diagnostic::Directive;
 use rustc_hir::attrs::{
     AttributeKind, DocAttribute, DocInline, EiiDecl, EiiImpl, EiiImplResolution, InlineAttr,
-    ReprAttr, SanitizerSet,
+    ReprAttr,
 };
 use rustc_hir::def::DefKind;
 use rustc_hir::def_id::LocalModDefId;
@@ -227,10 +227,7 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
             }
             &AttributeKind::FfiPure(attr_span) => self.check_ffi_pure(attr_span, attrs),
             AttributeKind::MayDangle(attr_span) => self.check_may_dangle(hir_id, *attr_span),
-            &AttributeKind::Sanitize { on_set, off_set, rtsan: _, span: attr_span } => {
-                self.check_sanitize(attr_span, on_set | off_set, span, target);
-            }
-            AttributeKind::Link(_, attr_span) => self.check_link(hir_id, *attr_span, span, target),
+            AttributeKind::Link(_, attr_span) => self.check_link(hir_id, *attr_span, target),
             AttributeKind::MacroExport { span, .. } => {
                 self.check_macro_export(hir_id, *span, target)
             }
@@ -401,6 +398,7 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
             AttributeKind::RustcThenThisWouldNeed(..) => (),
             AttributeKind::RustcTrivialFieldReads => (),
             AttributeKind::RustcUnsafeSpecializationMarker => (),
+            AttributeKind::Sanitize { .. } => {}
             AttributeKind::ShouldPanic { .. } => (),
             AttributeKind::Stability { .. } => (),
             AttributeKind::TestRunner(..) => (),
@@ -625,52 +623,6 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
             }
             _ => {}
         }
-    }
-
-    /// Checks that the `#[sanitize(..)]` attribute is applied to a
-    /// function/closure/method, or to an impl block or module.
-    fn check_sanitize(
-        &self,
-        attr_span: Span,
-        set: SanitizerSet,
-        target_span: Span,
-        target: Target,
-    ) {
-        let mut not_fn_impl_mod = None;
-        let mut no_body = None;
-
-        match target {
-            Target::Fn
-            | Target::Closure
-            | Target::Method(MethodKind::Trait { body: true } | MethodKind::Inherent)
-            | Target::Impl { .. }
-            | Target::Mod => return,
-            Target::Static
-                // if we mask out the address bits, i.e. *only* address was set,
-                // we allow it
-                if set & !(SanitizerSet::ADDRESS | SanitizerSet::KERNELADDRESS)
-                    == SanitizerSet::empty() =>
-            {
-                return;
-            }
-
-            // These are "functions", but they aren't allowed because they don't
-            // have a body, so the usual explanation would be confusing.
-            Target::Method(MethodKind::Trait { body: false }) | Target::ForeignFn => {
-                no_body = Some(target_span);
-            }
-
-            _ => {
-                not_fn_impl_mod = Some(target_span);
-            }
-        }
-
-        self.dcx().emit_err(errors::SanitizeAttributeNotAllowed {
-            attr_span,
-            not_fn_impl_mod,
-            no_body,
-            help: (),
-        });
     }
 
     /// Checks if `#[naked]` is applied to a function definition.
@@ -1126,21 +1078,19 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
     }
 
     /// Checks if `#[link]` is applied to an item other than a foreign module.
-    fn check_link(&self, hir_id: HirId, attr_span: Span, span: Span, target: Target) {
-        if target == Target::ForeignMod
-            && let hir::Node::Item(item) = self.tcx.hir_node(hir_id)
+    fn check_link(&self, hir_id: HirId, attr_span: Span, target: Target) {
+        if target != Target::ForeignMod {
+            return; // Checked by attribute parser
+        }
+
+        if let hir::Node::Item(item) = self.tcx.hir_node(hir_id)
             && let Item { kind: ItemKind::ForeignMod { abi, .. }, .. } = item
             && !matches!(abi, ExternAbi::Rust)
         {
             return;
         }
 
-        self.tcx.emit_node_span_lint(
-            UNUSED_ATTRIBUTES,
-            hir_id,
-            attr_span,
-            errors::Link { span: (target != Target::ForeignMod).then_some(span) },
-        );
+        self.tcx.emit_node_span_lint(UNUSED_ATTRIBUTES, hir_id, attr_span, errors::Link);
     }
 
     /// Checks if `#[rustc_legacy_const_generics]` is applied to a function and has a valid argument.

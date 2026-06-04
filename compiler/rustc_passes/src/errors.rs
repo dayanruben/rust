@@ -183,10 +183,7 @@ pub(crate) struct BothFfiConstAndPure {
 #[warning(
     "this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!"
 )]
-pub(crate) struct Link {
-    #[label("not an `extern` block")]
-    pub span: Option<Span>,
-}
+pub(crate) struct Link;
 
 #[derive(Diagnostic)]
 #[diag("#[rustc_legacy_const_generics] functions must only have const generics")]
@@ -1051,19 +1048,6 @@ pub(crate) struct UnnecessaryPartialStableFeature {
 #[diag("an `#[unstable]` annotation here has no effect")]
 #[note("see issue #55436 <https://github.com/rust-lang/rust/issues/55436> for more information")]
 pub(crate) struct IneffectiveUnstableImpl;
-
-#[derive(Diagnostic)]
-#[diag("sanitize attribute not allowed here")]
-pub(crate) struct SanitizeAttributeNotAllowed {
-    #[primary_span]
-    pub attr_span: Span,
-    #[label("not a function, impl block, or module")]
-    pub not_fn_impl_mod: Option<Span>,
-    #[label("function has no body")]
-    pub no_body: Option<Span>,
-    #[help("sanitize attribute can be applied to a function (with body), impl block, or module")]
-    pub help: (),
-}
 
 // FIXME(jdonszelmann): move back to rustc_attr
 #[derive(Diagnostic)]
