@@ -1627,7 +1627,7 @@ rustc_queries! {
     /// Like `param_env`, but returns the `ParamEnv` after all opaque types have been
     /// replaced with their hidden type. This is used in the old trait solver
     /// when in `PostAnalysis` mode and should not be called directly.
-    query typing_env_normalized_for_post_analysis(def_id: DefId) -> ty::TypingEnv<'tcx> {
+    query param_env_normalized_for_post_analysis(def_id: DefId) -> ty::ParamEnv<'tcx> {
         desc { "computing revealed normalized predicates of `{}`", tcx.def_path_str(def_id) }
     }
 
@@ -2067,6 +2067,12 @@ rustc_queries! {
 
     query delegation_user_specified_args(def_id: LocalDefId) -> (&'tcx [GenericArg<'tcx>], &'tcx [GenericArg<'tcx>]) {
         desc { "getting delegation user-specified args" }
+    }
+
+    query delegations_resolutions(_: ()) -> &'tcx FxIndexMap<LocalDefId, Result<DefId, ErrorGuaranteed>> {
+        arena_cache
+        eval_always
+        desc { "getting delegations resolutions" }
     }
 
     /// Does lifetime resolution on items. Importantly, we can't resolve
