@@ -1032,3 +1032,25 @@ pub(crate) struct SanitizeInvalidStatic {
     pub span: Span,
     pub field: &'static str,
 }
+
+#[derive(Diagnostic)]
+#[diag("attribute items not separated with `,`")]
+pub(crate) struct ExpectedComma {
+    #[primary_span]
+    #[suggestion(
+        "try adding `,` here",
+        code = ",",
+        applicability = "maybe-incorrect",
+        style = "short"
+    )]
+    pub span: Span,
+    #[subdiagnostic]
+    pub additional: Vec<AdditionalCommaSuggestion>,
+}
+
+#[derive(Subdiagnostic)]
+#[suggestion("try adding `,` here", code = ",", applicability = "maybe-incorrect", style = "short")]
+pub(crate) struct AdditionalCommaSuggestion {
+    #[primary_span]
+    pub span: Span,
+}
