@@ -50,7 +50,7 @@ use rustc_trait_selection::traits::{self, FulfillmentError};
 use tracing::{debug, instrument};
 
 use crate::check::check_abi;
-use crate::errors::{BadReturnTypeNotation, NoFieldOnType};
+use crate::diagnostics::{BadReturnTypeNotation, NoFieldOnType};
 use crate::hir_ty_lowering::errors::{GenericsArgsErrExtend, prohibit_assoc_item_constraint};
 use crate::hir_ty_lowering::generics::{check_generic_arg_count, lower_generic_args};
 use crate::middle::resolve_bound_vars as rbv;
@@ -409,7 +409,7 @@ impl<'tcx> ForbidParamUsesFolder<'tcx> {
             }
             ForbidParamContext::ConstArgument => {
                 if self.tcx.features().generic_const_args() {
-                    "generic parameters in const blocks are only allowed as the direct value of a `type const`"
+                    "generic parameters in const blocks are not allowed; use a named `const` item instead"
                 } else {
                     "generic parameters may not be used in const operations"
                 }
@@ -535,9 +535,7 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
                     None
                 }
             }
-            ty::AnonConstKind::GCE
-            | ty::AnonConstKind::GCA
-            | ty::AnonConstKind::RepeatExprCount => None,
+            ty::AnonConstKind::GCE | ty::AnonConstKind::RepeatExprCount => None,
         }
     }
 
@@ -1080,7 +1078,7 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
                     }
                     (None, _) | (_, false) => (Some(tcx.def_span(trait_def_id)), None, ""),
                 };
-            self.dcx().emit_err(crate::errors::ConstBoundForNonConstTrait {
+            self.dcx().emit_err(crate::diagnostics::ConstBoundForNonConstTrait {
                 span,
                 modifier: constness.as_str(),
                 def_span,
@@ -1357,9 +1355,11 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
             LowerTypeRelativePathMode::Type(permit_variants),
         )? {
             TypeRelativePath::AssocItem(alias_term) => {
-                let ty = alias_term.expect_ty().to_ty(tcx);
+                let alias_ty = alias_term.expect_ty();
+                let def_id = alias_ty.kind.def_id();
+                let ty = alias_ty.to_ty(tcx);
                 let ty = self.check_param_uses_if_mcg(ty, span, false);
-                Ok((ty, tcx.def_kind(alias_term.def_id()), alias_term.def_id()))
+                Ok((ty, tcx.def_kind(def_id), def_id))
             }
             TypeRelativePath::Variant { adt, variant_did } => {
                 let adt = self.check_param_uses_if_mcg(adt, span, false);
@@ -1392,8 +1392,11 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
             LowerTypeRelativePathMode::Const,
         )? {
             TypeRelativePath::AssocItem(alias_term) => {
-                self.require_type_const_attribute(alias_term.def_id(), span)?;
-                let ct = Const::new_unevaluated(tcx, alias_term.expect_ct());
+                let alias_ct = alias_term.expect_ct();
+                if let Some(def_id) = alias_ct.kind.opt_def_id() {
+                    self.require_type_const_attribute(def_id, span)?;
+                }
+                let ct = Const::new_unevaluated(tcx, alias_ct);
                 let ct = self.check_param_uses_if_mcg(ct, span, false);
                 Ok(ct)
             }
@@ -1747,7 +1750,7 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
         let tcx = self.tcx();
 
         if !tcx.visibility(item_def_id).is_accessible_from(scope, tcx) {
-            self.dcx().emit_err(crate::errors::AssocItemIsPrivate {
+            self.dcx().emit_err(crate::diagnostics::AssocItemIsPrivate {
                 span,
                 kind: tcx.def_descr(item_def_id),
                 name: ident,
