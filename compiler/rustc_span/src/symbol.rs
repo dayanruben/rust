@@ -878,6 +878,8 @@ symbols! {
         //   to be detected if it accidentally does get used.
         empty: "",
         empty_braces: "{}",
+        empty_brackets: "[]",
+        empty_parens: "()",
         enable,
         end,
         entry_nops,
@@ -1122,6 +1124,7 @@ symbols! {
         inout,
         inputs,
         instruction_set,
+        instrument_fn,
         integer_: "integer", // underscore to avoid clashing with the function `sym::integer` below
         integral,
         internal,
@@ -1697,6 +1700,7 @@ symbols! {
         return_address,
         return_position_impl_trait_in_trait,
         return_type_notation,
+        right_arrow: "->",
         riscv32,
         riscv64,
         riscv_target_feature,
