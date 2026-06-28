@@ -76,9 +76,9 @@ pub use self::closure::{
     place_to_string_for_capture,
 };
 pub use self::consts::{
-    AtomicOrdering, Const, ConstInt, ConstKind, ConstToValTreeResult, Expr, ExprKind,
-    LitToConstInput, ScalarInt, SimdAlign, UnevaluatedConst, UnevaluatedConstKind, ValTree,
-    ValTreeKindExt, Value, const_lit_matches_ty,
+    AliasConst, AliasConstKind, AtomicOrdering, Const, ConstInt, ConstKind, ConstToValTreeResult,
+    Expr, ExprKind, LitToConstInput, ScalarInt, SimdAlign, ValTree, ValTreeKindExt, Value,
+    const_lit_matches_ty,
 };
 pub use self::context::{
     CtxtInterners, CurrentGcx, FreeRegionInfo, GlobalCtxt, Lift, TyCtxt, TyCtxtFeed, tls,
@@ -113,7 +113,8 @@ pub use self::sty::{
 pub use self::trait_def::TraitDef;
 pub use self::typeck_results::{
     CanonicalUserType, CanonicalUserTypeAnnotation, CanonicalUserTypeAnnotations, IsIdentity,
-    Rust2024IncompatiblePatInfo, TypeckResults, UserType, UserTypeAnnotationIndex, UserTypeKind,
+    Rust2024IncompatiblePatInfo, SplattedDef, TypeckResults, UserType, UserTypeAnnotationIndex,
+    UserTypeKind,
 };
 use crate::error::{OpaqueHiddenTypeMismatch, TypeMismatchReason};
 use crate::metadata::{AmbigModChild, ModChild};
@@ -692,7 +693,7 @@ impl<'tcx> Term<'tcx> {
                 _ => None,
             },
             TermKind::Const(ct) => match ct.kind() {
-                ConstKind::Unevaluated(_, uv) => Some(uv.into()),
+                ConstKind::Alias(_, alias_const) => Some(alias_const.into()),
                 _ => None,
             },
         }
@@ -705,7 +706,7 @@ impl<'tcx> Term<'tcx> {
                 _ => false,
             },
             ty::TermKind::Const(ct) => match ct.kind() {
-                ty::ConstKind::Unevaluated(ty::IsRigid::No, _) => true,
+                ty::ConstKind::Alias(ty::IsRigid::No, _) => true,
                 _ => false,
             },
         }
