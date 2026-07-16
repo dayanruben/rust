@@ -601,8 +601,6 @@ pub(crate) struct BuiltinDerefNullptr {
     pub label: Span,
 }
 
-// FIXME: migrate fluent::lint::builtin_asm_labels
-
 #[derive(Diagnostic)]
 pub(crate) enum BuiltinSpecialModuleNameUsed {
     #[diag("found module declaration for lib.rs")]
@@ -2728,7 +2726,7 @@ pub(crate) enum MutRefSugg {
 
 #[derive(Subdiagnostic)]
 #[suggestion(
-    "this type already provides \"interior mutability\", so its binding doesn't need to be declared as mutable",
+    "this type already provides \"interior mutability\", so its binding doesn't need to be declared as mutable when borrowed with a shared reference",
     style = "verbose",
     applicability = "maybe-incorrect",
     code = ""

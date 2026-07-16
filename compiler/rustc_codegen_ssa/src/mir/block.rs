@@ -686,7 +686,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
             }
             _ => (
                 false,
-                bx.get_fn_addr(drop_fn, Some(PacMetadata::default())),
+                bx.get_fn_addr(drop_fn, bx.sess().pointer_authentication_functions()),
                 bx.fn_abi_of_instance(drop_fn, ty::List::empty()),
                 drop_fn,
             ),
@@ -1102,7 +1102,13 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                         )
                         .unwrap();
 
-                        (None, Some(bx.get_fn_addr(instance, Some(PacMetadata::default()))))
+                        (
+                            None,
+                            Some(bx.get_fn_addr(
+                                instance,
+                                bx.sess().pointer_authentication_functions(),
+                            )),
+                        )
                     }
                     _ => (Some(instance), None),
                 }
@@ -1112,8 +1118,8 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
         };
 
         if let Some(instance) = instance
+            && let ty::InstanceKind::LlvmIntrinsic(_) = instance.def
             && let Some(name) = bx.tcx().codegen_fn_attrs(instance.def_id()).symbol_name
-            && name.as_str().starts_with("llvm.")
             // This is the only LLVM intrinsic we use that unwinds
             // FIXME either add unwind support to codegen_llvm_intrinsic_call or replace usage of
             // this intrinsic with something else
@@ -1415,7 +1421,9 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
         }
 
         let fn_ptr = match (instance, llfn) {
-            (Some(instance), None) => bx.get_fn_addr(instance, Some(PacMetadata::default())),
+            (Some(instance), None) => {
+                bx.get_fn_addr(instance, bx.sess().pointer_authentication_functions())
+            }
             (_, Some(llfn)) => llfn,
             _ => span_bug!(fn_span, "no instance or llfn for call"),
         };

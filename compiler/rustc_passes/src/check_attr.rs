@@ -21,7 +21,7 @@ use rustc_hir::attrs::{
     OptimizeAttr, ReprAttr,
 };
 use rustc_hir::def::DefKind;
-use rustc_hir::def_id::LocalModDefId;
+use rustc_hir::def_id::LocalModId;
 use rustc_hir::intravisit::{self, Visitor};
 use rustc_hir::{
     self as hir, Attribute, CRATE_HIR_ID, Constness, FnSig, ForeignItem, GenericParam,
@@ -296,6 +296,7 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
             AttributeKind::NoStd { .. } => (),
             AttributeKind::OnUnknown { .. } => (),
             AttributeKind::OnUnmatchedArgs { .. } => (),
+            AttributeKind::Opaque => (),
             AttributeKind::Optimize(..) => (),
             AttributeKind::PanicRuntime => (),
             AttributeKind::PatchableFunctionEntry { .. } => (),
@@ -487,13 +488,30 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                 }
             }
 
-            if let EiiImplResolution::Macro(eii_macro) = resolution
-                && find_attr!(self.tcx, *eii_macro, EiiDeclaration(EiiDecl { impl_unsafe, .. }) if *impl_unsafe)
-                && !impl_marked_unsafe
-            {
+            let needs_unsafe = match resolution {
+                EiiImplResolution::Macro(eii_macro) => {
+                    find_attr!(self.tcx, *eii_macro, EiiDeclaration(EiiDecl { impl_unsafe, .. }) if *impl_unsafe)
+                }
+                EiiImplResolution::Known(foreign_item_did) => {
+                    let foreign_item_did = *foreign_item_did;
+                    self.tcx
+                        .externally_implementable_items(foreign_item_did.krate)
+                        .get(&foreign_item_did)
+                        .map(|(decl, _)| decl.impl_unsafe)
+                        .unwrap_or(false)
+                }
+                EiiImplResolution::Error(_) => false,
+            };
+
+            if needs_unsafe && !impl_marked_unsafe {
+                let name = match resolution {
+                    EiiImplResolution::Macro(eii_macro) => self.tcx.item_name(*eii_macro),
+                    EiiImplResolution::Known(def_id) => self.tcx.item_name(*def_id),
+                    EiiImplResolution::Error(_) => unreachable!(),
+                };
                 self.dcx().emit_err(diagnostics::EiiImplRequiresUnsafe {
                     span: *span,
-                    name: self.tcx.item_name(*eii_macro),
+                    name,
                     suggestion: diagnostics::EiiImplRequiresUnsafeSuggestion {
                         left: inner_span.shrink_to_lo(),
                         right: inner_span.shrink_to_hi(),
@@ -779,7 +797,7 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                     for i in impls {
                         let name = match i.resolution {
                             EiiImplResolution::Macro(def_id) => self.tcx.item_name(def_id),
-                            EiiImplResolution::Known(decl) => decl.name.name,
+                            EiiImplResolution::Known(def_id) => self.tcx.item_name(def_id),
                             EiiImplResolution::Error(_eg) => continue,
                         };
                         self.dcx().emit_err(diagnostics::EiiWithTrackCaller {
@@ -1783,7 +1801,7 @@ fn check_non_exported_macro_for_invalid_attrs(tcx: TyCtxt<'_>, item: &Item<'_>) 
     }
 }
 
-fn check_mod_attrs(tcx: TyCtxt<'_>, module_def_id: LocalModDefId) {
+fn check_mod_attrs(tcx: TyCtxt<'_>, module_def_id: LocalModId) {
     let check_attr_visitor = &mut CheckAttrVisitor { tcx, abort: Cell::new(false) };
     tcx.hir_visit_item_likes_in_module(module_def_id, check_attr_visitor);
     if module_def_id.to_local_def_id().is_top_level_module() {

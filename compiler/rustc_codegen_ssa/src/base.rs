@@ -494,7 +494,7 @@ pub fn maybe_create_entry_wrapper<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
         return None;
     }
 
-    let main_llfn = cx.get_fn_addr(instance, Some(PacMetadata::default()));
+    let main_llfn = cx.get_fn_addr(instance, cx.sess().pointer_authentication_functions());
 
     let entry_fn = create_entry_fn::<Bx>(cx, main_llfn, main_def_id, entry_type);
     return Some(entry_fn);
@@ -555,7 +555,8 @@ pub fn maybe_create_entry_wrapper<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
                 cx.tcx().mk_args(&[main_ret_ty.into()]),
                 DUMMY_SP,
             );
-            let start_fn = cx.get_fn_addr(start_instance, Some(PacMetadata::default()));
+            let start_fn =
+                cx.get_fn_addr(start_instance, cx.sess().pointer_authentication_functions());
 
             let i8_ty = cx.type_i8();
             let arg_sigpipe = bx.const_u8(sigpipe);
@@ -892,12 +893,8 @@ pub fn is_call_from_compiler_builtins_to_upstream_monomorphization<'tcx>(
     tcx: TyCtxt<'tcx>,
     instance: Instance<'tcx>,
 ) -> bool {
-    fn is_llvm_intrinsic(tcx: TyCtxt<'_>, def_id: DefId) -> bool {
-        if let Some(name) = tcx.codegen_fn_attrs(def_id).symbol_name {
-            name.as_str().starts_with("llvm.")
-        } else {
-            false
-        }
+    if let ty::InstanceKind::LlvmIntrinsic(_) = instance.def {
+        return false;
     }
 
     fn is_extern_call_to_local_crate<'tcx>(tcx: TyCtxt<'tcx>, instance: Instance<'tcx>) -> bool {
@@ -910,7 +907,6 @@ pub fn is_call_from_compiler_builtins_to_upstream_monomorphization<'tcx>(
     let def_id = instance.def_id();
     !def_id.is_local()
         && tcx.is_compiler_builtins(LOCAL_CRATE)
-        && !is_llvm_intrinsic(tcx, def_id)
         && !tcx.should_codegen_locally(instance)
         && !is_extern_call_to_local_crate(tcx, instance)
 }
