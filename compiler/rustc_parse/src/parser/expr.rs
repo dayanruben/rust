@@ -1380,12 +1380,22 @@ impl<'a> Parser<'a> {
 
     /// Parse an indexing expression `expr[...]`.
     fn parse_expr_index(&mut self, lo: Span, base: Box<Expr>) -> PResult<'a, Box<Expr>> {
-        let prev_span = self.prev_token.span;
+        let prev_token = self.prev_token;
         let open_delim_span = self.token.span;
         self.bump(); // `[`
         let index = self.parse_expr()?;
-        self.suggest_missing_semicolon_before_array(prev_span, open_delim_span)?;
-        self.expect(exp!(CloseBracket))?;
+        self.suggest_missing_semicolon_before_array(prev_token.span, open_delim_span)?;
+        self.expect(exp!(CloseBracket)).map_err(|mut e| {
+            if let TokenKind::Ident(_, _) = prev_token.kind {
+                e.span_suggestion_verbose(
+                    prev_token.span.shrink_to_hi(),
+                    "you might have meant to call a macro",
+                    "!".to_string(),
+                    Applicability::MaybeIncorrect,
+                );
+            }
+            e
+        })?;
         Ok(self.mk_expr(
             lo.to(self.prev_token.span),
             self.mk_index(base, index, open_delim_span.to(self.prev_token.span)),
@@ -3331,12 +3341,8 @@ impl<'a> Parser<'a> {
             self.restore_snapshot(pre_pat_snapshot);
             match self.parse_stmt_without_recovery(true, ForceCollect::No, false) {
                 // Consume statements for as long as possible.
-                Ok(Some(stmt)) => {
+                Ok(stmt) => {
                     stmts.push(stmt);
-                }
-                Ok(None) => {
-                    self.restore_snapshot(start_snapshot);
-                    break;
                 }
                 // We couldn't parse either yet another statement missing it's
                 // enclosing block nor the next arm's pattern or closing brace.
