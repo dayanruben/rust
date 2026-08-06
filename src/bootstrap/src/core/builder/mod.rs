@@ -393,10 +393,6 @@ pub enum PathSet {
 }
 
 impl PathSet {
-    fn empty() -> PathSet {
-        PathSet::Set(BTreeSet::new())
-    }
-
     fn one<P: Into<PathBuf>>(path: P) -> PathSet {
         let mut set = BTreeSet::new();
         set.insert(TaskPath { path: path.into() });
@@ -416,33 +412,31 @@ impl PathSet {
         p.path.ends_with(needle) || p.path.starts_with(needle)
     }
 
-    /// Return all `TaskPath`s in `Self` that contain any of the `needles`, removing the
-    /// matched needles.
-    ///
-    /// This is used for `StepDescription::krate`, which passes all matching crates at once to
-    /// `Step::make_run`, rather than calling it many times with a single crate.
-    /// See `tests.rs` for examples.
-    fn intersection_removing_matches(&self, needles: &mut [CLIStepPath]) -> PathSet {
-        let mut check = |p| {
+    /// Returns true if self is matched by any of the command-line selectors,
+    /// and mutates those selectors to flag them as will-be-executed.
+    fn match_and_flag_selectors(&self, selectors: &mut [CLIStepPath]) -> bool {
+        let mut check_and_flag = |p| {
             let mut result = false;
-            for n in needles.iter_mut() {
-                let matched = Self::check(p, &n.path);
+            for selector in selectors.iter_mut() {
+                let matched = Self::check(p, &selector.path);
                 if matched {
-                    n.will_be_executed = true;
+                    selector.will_be_executed = true;
                     result = true;
                 }
             }
             result
         };
+
         match self {
-            PathSet::Set(set) => PathSet::Set(set.iter().filter(|&p| check(p)).cloned().collect()),
-            PathSet::Suite(suite) => {
-                if check(suite) {
-                    self.clone()
-                } else {
-                    PathSet::empty()
+            PathSet::Set(set) => {
+                // Flag all matching selectors, not just the first match.
+                let mut matched = false;
+                for p in set {
+                    matched |= check_and_flag(p);
                 }
+                matched
             }
+            PathSet::Suite(suite) => check_and_flag(suite),
         }
     }
 
@@ -530,13 +524,11 @@ pub struct ShouldRun<'a> {
 
     // use a BTreeSet to maintain sort order
     paths: BTreeSet<PathSet>,
-
-    default_to_suites_only: bool,
 }
 
 impl<'a> ShouldRun<'a> {
     fn new(builder: &'a Builder<'_>, kind: Kind) -> ShouldRun<'a> {
-        ShouldRun { builder, kind, paths: BTreeSet::new(), default_to_suites_only: false }
+        ShouldRun { builder, kind, paths: BTreeSet::new() }
     }
 
     /// The corresponding step should run if the bootstrap command-line selects
@@ -607,7 +599,7 @@ impl<'a> ShouldRun<'a> {
     }
 
     /// Multiple on-disk paths that should select the same unit of work.
-    pub fn selectors(mut self, paths: &[&str]) -> Self {
+    pub fn multi_path(mut self, paths: &[&str]) -> Self {
         let mut set = BTreeSet::new();
         for path in paths {
             self.assert_valid_path(path);
@@ -639,37 +631,20 @@ impl<'a> ShouldRun<'a> {
     ///
     /// The reason we return PathSet instead of PathBuf is to allow for aliases that mean the same thing
     /// (for now, just `all_krates` and `paths`, but we may want to add an `aliases` function in the future?)
-    fn pathset_for_paths_removing_matches(&self, paths: &mut [CLIStepPath]) -> Vec<PathSet> {
+    fn pathsets_for_paths_flagging_matches(&self, paths: &mut [CLIStepPath]) -> Vec<PathSet> {
         let mut sets = vec![];
         for pathset in &self.paths {
-            let subset = pathset.intersection_removing_matches(paths);
-            if subset != PathSet::empty() {
-                sets.push(subset);
+            if pathset.match_and_flag_selectors(paths) {
+                sets.push(pathset.clone());
             }
         }
         sets
     }
 
-    /// When generating pathsets for a step that is being run "by default"
-    /// (i.e. when running bootstrap without an explicit command-line path),
-    /// discard any paths that were not registered as test suites.
-    ///
-    /// This is basically a hack to make path-based skipping work properly for
-    /// coverage tests, since otherwise the `coverage-map` and `coverage-run`
-    /// aliases would prevent `./x test --skip=tests` from skipping them.
-    pub(crate) fn default_to_suites_only(mut self) -> Self {
-        self.default_to_suites_only = true;
-        self
-    }
-
     /// When the corresponding step is run "by default" (without explicit command-line paths),
     /// act as though the user had explicitly specified these paths.
     fn default_pathsets(&self) -> Vec<PathSet> {
-        let mut default_pathsets = self.paths.iter().cloned().collect::<Vec<_>>();
-        if self.default_to_suites_only {
-            default_pathsets.retain(|p| matches!(p, PathSet::Suite(_)));
-        }
-        default_pathsets
+        self.paths.iter().cloned().collect::<Vec<_>>()
     }
 }
 
@@ -905,6 +880,7 @@ impl<'a> Builder<'a> {
                 test::Ui,
                 test::Crashes,
                 test::Coverage,
+                test::CoverageModeAlias,
                 test::MirOpt,
                 test::CodegenLlvm,
                 test::CodegenUnits,

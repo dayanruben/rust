@@ -15,12 +15,10 @@ pub mod outlives_bounds;
 pub mod outlives_for_liveness;
 pub mod project;
 pub mod query;
-#[expect(hidden_glob_reexports)]
-mod select;
+pub mod select;
 pub mod specialize;
 mod structural_normalize;
-#[expect(hidden_glob_reexports)]
-mod util;
+pub mod util;
 pub mod vtable;
 pub mod wf;
 
@@ -336,16 +334,16 @@ fn do_normalize_clauses<'tcx>(
     //
     // FIXME: It's very weird that we ignore region obligations but apparently
     // still need to use `resolve_regions` as we need the resolved regions in
-    // the normalized predicates.
+    // the normalized clauses.
     //
     // FIXME(-Zhigher-ranked-assumptions): We're ignoring region errors for now.
     // There're placeholder constraints `leaking` out. This is a hack to work around
     // the fact that we don't support placeholder assumptions right now and is necessary
-    // for `compare_method_predicate_entailment`. We should remove this once we
-    // have proper support for implied bounds on binders.
+    // for `compare_method_clause_entailment`. We should remove this once we have proper
+    // support for implied bounds on binders.
     //
     // This is required by trait-system-refactor-initiative#166. The new solver encounters
-    // this more frequently as we entirely ignore outlives predicates with the old solver.
+    // this more frequently as we entirely ignore outlives clauses with the old solver.
     let _errors = infcx.resolve_regions(cause.body_def_id, elaborated_env, []);
     match infcx.fully_resolve(clauses) {
         Ok(clauses) => Ok(clauses),
