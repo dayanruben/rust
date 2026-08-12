@@ -51,13 +51,13 @@ where
 
     // If any of the stalled goal's generic arguments changed,
     // rerunning might make progress so we should rerun.
-    if stalled_vars.iter().any(|value| delegate.is_changed_arg(*value)) {
+    if stalled_vars.iter().any(|value| delegate.ty_or_const_infer_var_changed(*value)) {
         return MayMakeProgress;
     }
 
     // If some inference took place in any of the sub roots,
     // rerunning might make progress so we should rerun.
-    if sub_roots.iter().any(|&vid| delegate.sub_unification_table_root_var(vid) != vid) {
+    if sub_roots.iter().any(|&vid| !delegate.is_sub_unification_table_root_var(vid)) {
         return MayMakeProgress;
     }
 

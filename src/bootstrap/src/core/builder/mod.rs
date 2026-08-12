@@ -876,6 +876,7 @@ impl<'a> Builder<'a> {
                 check::Clippy,
                 check::Miri,
                 check::CargoMiri,
+                check::Priroda,
                 check::MiroptTestTools,
                 check::Rustfmt,
                 check::RustAnalyzer,
@@ -944,6 +945,7 @@ impl<'a> Builder<'a> {
                 test::Rustfmt,
                 test::Miri,
                 test::CargoMiri,
+                test::Priroda,
                 test::Clippy,
                 test::CompiletestTest,
                 test::StdarchVerify,
@@ -1018,6 +1020,7 @@ impl<'a> Builder<'a> {
                 dist::LlvmBitcodeLinker,
                 dist::RustDev,
                 dist::Enzyme,
+                dist::Offload,
                 dist::Bootstrap,
                 dist::Extended,
                 // It seems that PlainSourceTarball somehow changes how some of the tools
