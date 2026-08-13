@@ -13,12 +13,13 @@
 //! and the `bootstrap.toml` file—merging them, applying defaults, and performing
 //! cross-component validation. The main `parse_inner` function and its supporting
 //! helpers reside here, transforming raw `Toml` data into the structured `Config` type.
+
 use std::cell::Cell;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf, absolute};
 use std::str::FromStr;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::{cmp, env, fs};
 
 use build_helper::ci::CiEnv;
@@ -51,15 +52,13 @@ use crate::core::config::toml::target::{
 use crate::core::config::{
     Allocator, CompilerBuiltins, CompressDebuginfo, DebuggerPath, DebuginfoLevel, DryRun,
     GccCiMode, LlvmLibunwind, Merge, ReplaceOpt, RustcLto, SplitDebuginfo, StringOrBool,
-    threads_from_config,
+    TargetSelection, threads_from_config,
 };
 use crate::core::download::{DownloadContext, download_beta_toolchain, is_download_ci_available};
-use crate::utils::channel;
+use crate::utils::channel::{self, GitInfo};
 use crate::utils::exec::{ExecutionContext, command};
-use crate::utils::helpers::{exe, fail, get_host_target};
-use crate::{
-    CodegenBackendKind, GitInfo, OnceLock, TargetSelection, check_ci_llvm, exit, helpers, t,
-};
+use crate::utils::helpers::{self, exe, fail, get_host_target, t};
+use crate::{CodegenBackendKind, check_ci_llvm, exit};
 
 /// Each path in this list is considered "allowed" in the `download-rustc="if-unchanged"` logic.
 /// This means they can be modified and changes to these paths should never trigger a compiler build
@@ -343,6 +342,8 @@ pub struct Config {
     pub skip_std_check_if_no_download_rustc: bool,
 
     pub exec_ctx: ExecutionContext,
+
+    pub wasm_proc_macros: bool,
 }
 
 impl Config {
@@ -615,6 +616,7 @@ impl Config {
             break_on_ice: rust_break_on_ice,
             rustflags: rust_rustflags,
             stdlib_semver_baseline: rust_stdlib_semver_baseline,
+            wasm_proc_macros,
         } = toml_rust.unwrap_or_default();
 
         let Llvm {
@@ -1611,6 +1613,7 @@ NOTE: Please add `--stage 2` to your command line, or if you're sure you want to
                 .unwrap_or(rust_debug == Some(true)),
             vendor,
             verbose_tests,
+            wasm_proc_macros: wasm_proc_macros.unwrap_or(false),
             windows_rc: build_windows_rc.map(PathBuf::from),
             yarn: build_yarn.map(PathBuf::from),
             // tidy-alphabetical-end
