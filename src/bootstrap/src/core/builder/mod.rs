@@ -1081,7 +1081,7 @@ impl<'a> Builder<'a> {
             Subcommand::Build { .. } => (Kind::Build, &paths[..]),
             Subcommand::Check { .. } => (Kind::Check, &paths[..]),
             Subcommand::Clippy { .. } => (Kind::Clippy, &paths[..]),
-            Subcommand::Fix => (Kind::Fix, &paths[..]),
+            Subcommand::Fix { .. } => (Kind::Fix, &paths[..]),
             Subcommand::Doc { .. } => (Kind::Doc, &paths[..]),
             Subcommand::Test { .. } => (Kind::Test, &paths[..]),
             Subcommand::Miri { .. } => (Kind::Miri, &paths[..]),
@@ -1147,12 +1147,6 @@ impl<'a> Builder<'a> {
 
     fn run_step_descriptions(&self, v: &[CommandLineStepDescription], paths: &[PathBuf]) {
         cli_paths::match_paths_to_steps_and_run(self, v, paths);
-    }
-
-    /// Returns if `std` should be statically linked into `rustc_driver`.
-    /// It's currently not done on `windows-gnu` due to linker bugs.
-    pub fn link_std_into_rustc_driver(&self, target: TargetSelection) -> bool {
-        !target.triple.ends_with("-windows-gnu")
     }
 
     /// Obtain a compiler at a given stage and for a given host (i.e., this is the target that the
