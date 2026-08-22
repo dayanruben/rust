@@ -18,6 +18,7 @@ use std::{fmt, iter, mem};
 use rustc_abi::{ExternAbi, FieldIdx, Layout, LayoutData, TargetDataLayout, VariantIdx};
 use rustc_ast as ast;
 use rustc_crate_store::{CrateStoreDyn, Untracked};
+use rustc_data_structures::defer;
 use rustc_data_structures::fx::FxHashMap;
 use rustc_data_structures::intern::Interned;
 use rustc_data_structures::profiling::SelfProfilerRef;
@@ -27,7 +28,6 @@ use rustc_data_structures::steal::Steal;
 use rustc_data_structures::sync::{
     self, DynSend, DynSync, FreezeReadGuard, Lock, RwLock, WorkerLocal,
 };
-use rustc_data_structures::{Limit, defer};
 use rustc_errors::{Applicability, Diag, DiagCtxtHandle, Diagnostic, MultiSpan};
 use rustc_hir::attrs::lang_items::LangItem;
 use rustc_hir::def::DefKind;
@@ -36,12 +36,13 @@ use rustc_hir::definitions::{DefPathData, Definitions, PerParentDisambiguatorSta
 use rustc_hir::intravisit::VisitorExt;
 use rustc_hir::{self as hir, CRATE_HIR_ID, HirId, Node, TraitCandidate, find_attr};
 use rustc_index::IndexVec;
+use rustc_lint_defs::Lint;
+use rustc_lint_defs::builtin::UNUSED_FEATURES;
 use rustc_macros::Diagnostic;
-use rustc_session::config::CrateType;
-use rustc_session::lint::Lint;
 use rustc_session::{IncrCompSession, Session};
 use rustc_span::def_id::{CRATE_DEF_ID, DefPathHash, StableCrateId};
 use rustc_span::{DUMMY_SP, Ident, Span, Symbol, kw, sym};
+use rustc_structures::{CrateType, Limit};
 use rustc_type_ir::TyKind::*;
 pub use rustc_type_ir::lift::Lift;
 use rustc_type_ir::{CollectAndApply, WithCachedTypeInfo, elaborate, search_graph};
@@ -1636,7 +1637,7 @@ impl<'tcx> TyCtxt<'tcx> {
 
         for (feature, span) in unused_features {
             self.emit_node_span_lint(
-                rustc_session::lint::builtin::UNUSED_FEATURES,
+                UNUSED_FEATURES,
                 CRATE_HIR_ID,
                 span,
                 UnusedFeature { feature },
@@ -2688,7 +2689,7 @@ impl<'tcx> TyCtxt<'tcx> {
     }
 
     pub fn next_trait_solver_globally(self) -> bool {
-        self.sess.opts.unstable_opts.next_solver.globally
+        self.sess.opts.unstable_opts.next_solver.globally && !self.features().generic_const_exprs()
     }
 
     pub fn next_trait_solver_in_coherence(self) -> bool {
