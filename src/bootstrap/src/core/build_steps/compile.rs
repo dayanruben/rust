@@ -777,7 +777,7 @@ impl Step for StdLink {
         };
 
         let is_downloaded_beta_stage0 = builder
-            .build
+            .sess
             .config
             .initial_rustc
             .starts_with(builder.out.join(compiler.host).join("stage0/bin"));
@@ -1147,7 +1147,7 @@ impl CommandLineStep for Rustc {
             cargo.arg("-p").arg(krate);
         }
 
-        if builder.build.config.enable_bolt_settings && build_compiler.stage == 1 {
+        if builder.sess.config.enable_bolt_settings && build_compiler.stage == 1 {
             // Relocations are required for BOLT to work.
             cargo.env("RUSTC_BOLT_LINK_FLAGS", "1");
         }
@@ -1256,7 +1256,7 @@ pub fn rustc_cargo(
     // us a faster startup time. However GNU ld < 2.40 will error if we try to link a shared object
     // with direct references to protected symbols, so for now we only use protected symbols if
     // linking with LLD is enabled.
-    if builder.build.config.bootstrap_override_lld.is_used() {
+    if builder.sess.config.bootstrap_override_lld.is_used() {
         cargo.rustflag("-Zdefault-visibility=protected");
     }
 
@@ -1435,7 +1435,8 @@ fn rustc_llvm_env(builder: &Builder<'_>, cargo: &mut Cargo, target: TargetSelect
         cargo.env("LLVM_OFFLOAD", "1");
     }
 
-    cargo.env("LLVM_CONFIG", &llvm_output.host_llvm_config);
+    // This always has to be the host LLVM config, because it is executed by rustc_llvm
+    cargo.env("LLVM_CONFIG", builder.host_llvm_config());
 
     // Some LLVM linker flags (-L and -l) may be needed to link `rustc_llvm`. Its build script
     // expects these to be passed via the `LLVM_LINKER_FLAGS` env variable, separated by
@@ -2130,7 +2131,8 @@ impl CommandLineStep for Assemble {
             if !builder.config.dry_run() && builder.config.llvm_tools_enabled {
                 trace!("LLVM tools enabled");
 
-                let host_llvm_bin_dir = command(&llvm_output.host_llvm_config)
+                let host_llvm = builder.ensure(llvm::Llvm { target: builder.host_target });
+                let host_llvm_bin_dir = command(host_llvm.llvm_config())
                     .arg("--bindir")
                     .cached()
                     .run_capture_stdout(builder)
@@ -2153,10 +2155,10 @@ impl CommandLineStep for Assemble {
                         // where the LLVM config is located
                         external_llvm_config.parent().unwrap().to_path_buf()
                     } else {
-                        // If we have built LLVM locally, then take the path of the host bindir
+                        // If not, then take the path of the host bindir of the host LLVM,
                         // relative to its output build directory, and then apply it to the target
                         // LLVM output build directory.
-                        let host_llvm_out = builder.llvm_out(builder.host_target);
+                        let host_llvm_out = host_llvm.root_dir();
                         let target_llvm_out = llvm_output.root_dir();
                         if let Ok(relative_path) =
                             Path::new(&host_llvm_bin_dir).strip_prefix(host_llvm_out)
@@ -2285,7 +2287,7 @@ impl CommandLineStep for Assemble {
 
         if builder.config.llvm_offload && !builder.config.dry_run() {
             debug!("`llvm_offload` requested");
-            if let Some(_llvm_config) = builder.llvm_config(builder.config.host_target) {
+            if builder.is_llvm_enabled_for(builder.config.host_target) {
                 let rust_offload =
                     builder.ensure(llvm::RustOffload { target: build_compiler.host });
                 let target_libdir =
