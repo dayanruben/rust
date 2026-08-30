@@ -177,6 +177,7 @@ static ARM_FEATURES: &[(&str, Stability, ImpliedFeatures)] = &[
     ("dsp", Unstable(sym::arm_target_feature), &[]),
     ("fp-armv8", Unstable(sym::arm_target_feature), &["vfp4"]),
     ("fp16", Unstable(sym::arm_target_feature), &["neon"]),
+    ("fp64", Unstable(sym::arm_target_feature), &[]),
     ("fpregs", Unstable(sym::arm_target_feature), &[]),
     ("i8mm", Unstable(sym::arm_target_feature), &["neon"]),
     ("mclass", Unstable(sym::arm_target_feature), &[]),
@@ -206,7 +207,8 @@ static ARM_FEATURES: &[(&str, Stability, ImpliedFeatures)] = &[
     ("v8.1m.main", Unstable(sym::arm_target_feature), &["v8m.main"]),
     ("v8m", Unstable(sym::arm_target_feature), &["v6m"]),
     ("v8m.main", Unstable(sym::arm_target_feature), &["v7"]),
-    ("vfp2", Unstable(sym::arm_target_feature), &[]),
+    ("vfp2", Unstable(sym::arm_target_feature), &["vfp2sp", "fp64"]),
+    ("vfp2sp", Unstable(sym::arm_target_feature), &["fpregs"]),
     ("vfp3", Unstable(sym::arm_target_feature), &["vfp2", "d32"]),
     ("vfp4", Unstable(sym::arm_target_feature), &["vfp3"]),
     ("virtualization", Unstable(sym::arm_target_feature), &[]),
@@ -625,6 +627,8 @@ static POWERPC_FEATURES: &[(&str, Stability, ImpliedFeatures)] = &[
 const MIPS_FEATURES: &[(&str, Stability, ImpliedFeatures)] = &[
     // tidy-alphabetical-start
     ("fp64", Unstable(sym::mips_target_feature), &[]),
+    // FIXME(#150253): msa requires either fp64 or no hard float support at all: LLVM requires fp64
+    // FIXME(#150253): msa requires revision 5 or greater (mips32r5/mips64r5 in LLVM)
     ("msa", Unstable(sym::mips_target_feature), &[]),
     ("virt", Unstable(sym::mips_target_feature), &[]),
     // tidy-alphabetical-end
