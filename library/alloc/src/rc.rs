@@ -1053,8 +1053,6 @@ impl<T, A: Allocator> Rc<T, A> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(smart_pointer_try_map)]
-    ///
     /// use std::rc::Rc;
     ///
     /// let r = Rc::new(7);
@@ -1062,7 +1060,7 @@ impl<T, A: Allocator> Rc<T, A> {
     /// assert_eq!(*new, 14);
     /// ```
     #[cfg(not(no_global_oom_handling))]
-    #[unstable(feature = "smart_pointer_try_map", issue = "144419")]
+    #[stable(feature = "smart_pointer_map", since = "CURRENT_RUSTC_VERSION")]
     pub fn map<U>(this: Self, f: impl FnOnce(&T) -> U) -> Rc<U, A> {
         if size_of::<T>() == size_of::<U>()
             && align_of::<T>() == align_of::<U>()
@@ -2395,9 +2393,9 @@ impl<T: ?Sized, A: Allocator> Rc<T, A> {
 
     #[cfg(not(no_global_oom_handling))]
     fn from_box_in(src: Box<T, A>) -> Rc<T, A> {
+        let value_size = size_of_val(&*src);
         // ignore-tidy-undocumented-unsafe
         unsafe {
-            let value_size = size_of_val(&*src);
             let ptr = Self::allocate_for_ptr_in(&*src, Box::allocator(&src));
 
             // Copy value as bytes
@@ -4326,7 +4324,6 @@ impl<T> UniqueRc<T> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(smart_pointer_try_map)]
     /// #![feature(unique_rc_arc)]
     ///
     /// use std::rc::UniqueRc;
@@ -4336,7 +4333,7 @@ impl<T> UniqueRc<T> {
     /// assert_eq!(*new, 14);
     /// ```
     #[cfg(not(no_global_oom_handling))]
-    #[unstable(feature = "smart_pointer_try_map", issue = "144419")]
+    #[unstable(feature = "unique_rc_arc", issue = "112566")]
     pub fn map<U>(this: Self, f: impl FnOnce(T) -> U) -> UniqueRc<U> {
         if size_of::<T>() == size_of::<U>()
             && align_of::<T>() == align_of::<U>()
