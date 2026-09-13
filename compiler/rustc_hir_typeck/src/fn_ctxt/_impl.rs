@@ -235,7 +235,6 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
     pub(crate) fn write_splatted_call(
         &self,
         hir_id: HirId,
-        span: Span,
         fn_id: SplatLoweringInfo<'tcx>,
         callee_generic_args: Option<GenericArgsRef<'tcx>>,
         first_tupled_arg_index: u16,
@@ -1046,7 +1045,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             Res::Def(DefKind::Ctor(CtorOf::Variant, _), _) => {
                 err_extend = GenericsArgsErrExtend::DefVariant(segments);
             }
-            Res::Def(DefKind::AssocFn | DefKind::AssocConst { .. }, def_id) => {
+            Res::Def(DefKind::AssocFn | DefKind::AssocConst, def_id) => {
                 let assoc_item = tcx.associated_item(def_id);
                 let container = assoc_item.container;
                 let container_id = assoc_item.container_id(tcx);
