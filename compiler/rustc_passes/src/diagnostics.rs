@@ -2,9 +2,7 @@ use std::io::Error;
 use std::path::{Path, PathBuf};
 
 use rustc_errors::codes::*;
-use rustc_errors::{
-    Diag, DiagCtxtHandle, DiagSymbolList, Diagnostic, EmissionGuarantee, Level, MultiSpan, msg,
-};
+use rustc_errors::{Diag, DiagCtxtHandle, DiagSymbolList, Diagnostic, Level, MultiSpan, msg};
 use rustc_macros::{Diagnostic, Subdiagnostic};
 use rustc_middle::middle::resolve::MainDefinition;
 use rustc_middle::ty::Ty;
@@ -414,7 +412,7 @@ pub(crate) struct NoMainErr {
     pub add_teach_note: bool,
 }
 
-impl<'a, G: EmissionGuarantee> Diagnostic<'a, G> for NoMainErr {
+impl<'a, G> Diagnostic<'a, G> for NoMainErr {
     #[track_caller]
     fn into_diag(self, dcx: DiagCtxtHandle<'a>, level: Level) -> Diag<'a, G> {
         let mut diag =
@@ -480,7 +478,7 @@ pub(crate) struct DuplicateLangItem {
     pub(crate) duplicate: Duplicate,
 }
 
-impl<G: EmissionGuarantee> Diagnostic<'_, G> for DuplicateLangItem {
+impl<G> Diagnostic<'_, G> for DuplicateLangItem {
     #[track_caller]
     fn into_diag(self, dcx: DiagCtxtHandle<'_>, level: Level) -> Diag<'_, G> {
         let mut diag = Diag::new(
@@ -949,6 +947,10 @@ pub(crate) struct UnnecessaryPartialStableFeature {
 #[diag("an `#[unstable]` annotation here has no effect")]
 #[note("see issue #55436 <https://github.com/rust-lang/rust/issues/55436> for more information")]
 pub(crate) struct IneffectiveUnstableImpl;
+
+#[derive(Diagnostic)]
+#[diag("`#[unstable]` does not make this re-exported path unstable")]
+pub(crate) struct IneffectiveUnstableReexport;
 
 // FIXME(jdonszelmann): move back to rustc_attr
 #[derive(Diagnostic)]
