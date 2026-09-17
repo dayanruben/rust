@@ -69,11 +69,10 @@ use rustc_middle::middle::resolve::{
     AstOwner, LifetimeRes, PartialRes, PerOwnerResolverData, ResolverAstLowering,
 };
 use rustc_middle::queries::Providers;
-use rustc_middle::span_bug;
 use rustc_middle::ty::TyCtxt;
 use rustc_session::diagnostics::add_feature_diagnostics;
 use rustc_span::symbol::{Ident, Symbol, kw, sym};
-use rustc_span::{DUMMY_SP, DesugaringKind, Span};
+use rustc_span::{DUMMY_SP, DesugaringKind, Span, span_bug};
 use smallvec::{SmallVec, smallvec};
 use thin_vec::ThinVec;
 use tracing::{debug, instrument, trace};
@@ -674,12 +673,13 @@ fn index_ast<'tcx>(
             match tree.kind {
                 UseTreeKind::Glob(_) | UseTreeKind::Simple(_) => {}
                 UseTreeKind::Nested { items: ref nested_vec, span } => {
-                    for &(ref nested, id) in nested_vec {
+                    for nested in nested_vec {
+                        let id = nested.id;
                         self.insert(id, AstOwner::NestedUseTree(parent));
                         items.push(self.make_dummy(id, span, ItemKind::MacCall));
 
                         let def_id = self.owners[&id].def_id;
-                        self.visit_item_id_use_tree(nested, def_id, items);
+                        self.visit_item_id_use_tree(&nested.inner, def_id, items);
                     }
                 }
             }
