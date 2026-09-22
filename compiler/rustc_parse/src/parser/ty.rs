@@ -1,4 +1,4 @@
-use rustc_ast::token::{self, IdentIsRaw, MetaVarKind, Token, TokenKind};
+use rustc_ast::token::{self, IdentKind, MetaVarKind, Token, TokenKind};
 use rustc_ast::util::case::Case;
 use rustc_ast::{
     self as ast, BoundAsyncness, BoundConstness, BoundPolarity, DUMMY_NODE_ID, FnPtrTy, FnRetTy,
@@ -527,7 +527,7 @@ impl<'a> Parser<'a> {
                 err.span_label(lo, "expected type");
                 return Ok(match self.maybe_recover_ref_ty_no_leading_ampersand(lt, lo, err) {
                     Ok(ref_ty) => ref_ty,
-                    Err(err) => TyKind::Err(err.emit()),
+                    Err(err) => TyKind::Err(err.emit_err()),
                 });
             }
 
@@ -791,7 +791,7 @@ impl<'a> Parser<'a> {
             .struct_span_err(span, "`typeof` is a reserved keyword but unimplemented")
             .with_note("consider replacing `typeof(...)` with an actual type")
             .with_code(E0516)
-            .emit();
+            .emit_err();
         Ok(TyKind::Err(guar))
     }
 
@@ -1155,7 +1155,7 @@ impl<'a> Parser<'a> {
             vec![(lo, String::new()), (hi, String::new())],
             Applicability::MachineApplicable,
         );
-        diag.emit()
+        diag.emit_err()
     }
 
     /// Emits an error if any trait bound modifiers were present.
@@ -1628,8 +1628,8 @@ impl<'a> Parser<'a> {
 
     /// Parses a single lifetime `'a` or panics.
     pub(super) fn expect_lifetime(&mut self) -> Lifetime {
-        if let Some((ident, is_raw)) = self.token.lifetime() {
-            if is_raw == IdentIsRaw::No && ident.without_first_quote().is_reserved_lifetime() {
+        if let Some((ident, kind)) = self.token.lifetime() {
+            if kind == IdentKind::Normal && ident.without_first_quote().is_reserved_lifetime() {
                 self.dcx().emit_err(diagnostics::KeywordLifetime { span: ident.span });
             }
 

@@ -796,7 +796,7 @@ impl<'a> Parser<'a> {
                         }
                     }
 
-                    let guar = err.emit();
+                    let guar = err.emit_err();
                     self.recover_stmt_(SemiColonMode::Ignore, BlockMode::Ignore);
                     self.mk_stmt_err(self.token.span, guar)
                 }
@@ -1036,7 +1036,7 @@ impl<'a> Parser<'a> {
                                 && self.look_ahead(1, |t| {
                                     t.is_metavar_block()
                                         || t.kind == token::OpenBrace
-                                        || t.is_non_raw_ident_where(|ident| {
+                                        || t.non_raw_ident().is_some_and(|ident| {
                                             matches!(ident.name, kw::For | kw::Loop | kw::While)
                                         })
                                 })
@@ -1073,7 +1073,7 @@ impl<'a> Parser<'a> {
                             } else {
                                 res.unwrap_or_else(|mut e| {
                                     self.recover_missing_dot(&mut e);
-                                    let guar = e.emit();
+                                    let guar = e.emit_err();
                                     self.recover_stmt();
                                     guar
                                 })

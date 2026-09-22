@@ -4,7 +4,7 @@ use core::mem;
 use core::ops::{Bound, ControlFlow};
 
 use ast::mut_visit::{self, MutVisitor};
-use ast::token::IdentIsRaw;
+use ast::token::IdentKind;
 use ast::{ForLoopKind, MatchKind, Pat, Path, PathSegment, Recovered};
 use rustc_ast::token::{self, Delimiter, InvisibleOrigin, MetaVarKind, Token, TokenKind};
 use rustc_ast::util::case::Case;
@@ -501,7 +501,7 @@ impl<'a> Parser<'a> {
         let token_cannot_continue_expr = |t: &Token| match t.uninterpolate().kind {
             // These tokens can start an expression after `!`, but
             // can't continue an expression after an ident
-            token::Ident(name, is_raw) => token::ident_can_begin_expr(name, t.span, is_raw),
+            token::Ident(name, kind) => token::ident_can_begin_expr(name, t.span, kind),
             token::Literal(..) | token::Pound => true,
             _ => t.is_metavar_expr(),
         };
@@ -741,7 +741,8 @@ impl<'a> Parser<'a> {
         lo: Span,
     ) -> PResult<'a, Box<Expr>> {
         let mut res = loop {
-            let has_question = if self.prev_token == TokenKind::Ident(kw::Return, IdentIsRaw::No) {
+            let has_question = if self.prev_token == TokenKind::Ident(kw::Return, IdentKind::Normal)
+            {
                 // We are using noexpect here because we don't expect a `?` directly after
                 // a `return` which could be suggested otherwise.
                 self.eat_noexpect(&token::Question)
@@ -753,7 +754,7 @@ impl<'a> Parser<'a> {
                 e = self.mk_expr(lo.to(self.prev_token.span), ExprKind::Try(e));
                 continue;
             }
-            let has_dot = if self.prev_token == TokenKind::Ident(kw::Return, IdentIsRaw::No) {
+            let has_dot = if self.prev_token == TokenKind::Ident(kw::Return, IdentKind::Normal) {
                 // We are using noexpect here because we don't expect a `.` directly after
                 // a `return` which could be suggested otherwise.
                 self.eat_noexpect(&token::Dot)
@@ -823,7 +824,7 @@ impl<'a> Parser<'a> {
                         // We end up with the `sym` (`1`) token in `self.prev_token` and a dot in
                         // `self.token`.
                         assert!(suffix.is_none());
-                        self.token = Token::new(token::Ident(sym, IdentIsRaw::No), ident_span);
+                        self.token = Token::new(token::Ident(sym, IdentKind::Normal), ident_span);
                         self.bump_with((Token::new(token::Dot, dot_span), self.token_spacing));
                         self.mk_expr_tuple_field_access(lo, ident_span, base, sym, None)
                     }
@@ -839,7 +840,7 @@ impl<'a> Parser<'a> {
                         // the `sym2` (`2` or `2e3`) token in `self.prev_token` and the following
                         // token in `self.token`.
                         let next_token2 =
-                            Token::new(token::Ident(sym2, IdentIsRaw::No), ident2_span);
+                            Token::new(token::Ident(sym2, IdentKind::Normal), ident2_span);
                         self.bump_with((next_token2, self.token_spacing));
                         self.bump();
                         let base1 =
@@ -1115,7 +1116,7 @@ impl<'a> Parser<'a> {
             Err(err)
                 if self.is_expected_raw_ref_mut() && self.token_cursor.depth() == call_depth =>
             {
-                let guar = err.emit();
+                let guar = err.emit_err();
                 // Preserve the call expression so later passes can still diagnose the callee,
                 // while treating the malformed `&raw <expr>` argument as an error expression.
                 let args = self.recover_raw_ref_call_args(guar);
@@ -1178,25 +1179,23 @@ impl<'a> Parser<'a> {
                         {
                             err.cancel();
                             let type_str = pprust::path_to_string(&path);
-                            self.dcx()
-                                .create_err(crate::diagnostics::ParenthesesWithStructFields {
-                                    span,
-                                    braces_for_struct: crate::diagnostics::BracesForStructLiteral {
-                                        first: open_paren,
-                                        second: close_paren,
-                                        r#type: type_str.clone(),
-                                    },
-                                    no_fields_for_fn: crate::diagnostics::NoFieldsForFnCall {
-                                        r#type: type_str,
-                                        fields: fields
-                                            .into_iter()
-                                            .map(|field| field.span.until(field.expr.span))
-                                            .collect(),
-                                    },
-                                })
-                                .emit()
+                            self.dcx().emit_err(crate::diagnostics::ParenthesesWithStructFields {
+                                span,
+                                braces_for_struct: crate::diagnostics::BracesForStructLiteral {
+                                    first: open_paren,
+                                    second: close_paren,
+                                    r#type: type_str.clone(),
+                                },
+                                no_fields_for_fn: crate::diagnostics::NoFieldsForFnCall {
+                                    r#type: type_str,
+                                    fields: fields
+                                        .into_iter()
+                                        .map(|field| field.span.until(field.expr.span))
+                                        .collect(),
+                                },
+                            })
                         } else {
-                            err.emit()
+                            err.emit_err()
                         };
                         Ok(self.mk_expr_err(span, guar))
                     }
@@ -1717,7 +1716,7 @@ impl<'a> Parser<'a> {
                         "'",
                         Applicability::MaybeIncorrect,
                     )
-                    .emit()
+                    .emit_err()
             });
         let name = ident.without_first_quote().name;
         mk_lit_char(name, ident.span)
@@ -1902,7 +1901,7 @@ impl<'a> Parser<'a> {
         self.bump(); // `builtin`
         self.bump(); // `#`
 
-        let Some((ident, IdentIsRaw::No)) = self.token.ident() else {
+        let Some((ident, IdentKind::Normal)) = self.token.ident() else {
             let err = self
                 .dcx()
                 .create_err(crate::diagnostics::ExpectedBuiltinIdent { span: self.token.span });
@@ -2017,7 +2016,7 @@ impl<'a> Parser<'a> {
         };
         // On an error path, eagerly consider a lifetime to be an unclosed character lit, if that
         // makes sense.
-        if let Some((ident, IdentIsRaw::No)) = self.token.lifetime()
+        if let Some((ident, IdentKind::Normal)) = self.token.lifetime()
             && could_be_unclosed_char_literal(ident)
         {
             let lt = self.expect_lifetime();
@@ -2089,7 +2088,7 @@ impl<'a> Parser<'a> {
             }
         };
         match self.token.uninterpolate().kind {
-            token::Ident(name, IdentIsRaw::No) if name.is_bool_lit() => {
+            token::Ident(name, IdentKind::Normal) if name.is_bool_lit() => {
                 self.bump();
                 Some(token::Lit::new(token::Bool, name, None))
             }
@@ -3002,9 +3001,9 @@ impl<'a> Parser<'a> {
     }
 
     pub(crate) fn eat_label(&mut self) -> Option<Label> {
-        if let Some((ident, is_raw)) = self.token.lifetime() {
+        if let Some((ident, kind)) = self.token.lifetime() {
             // Disallow `'fn`, but with a better error message than `expect_lifetime`.
-            if is_raw == IdentIsRaw::No && ident.without_first_quote().is_reserved() {
+            if kind == IdentKind::Normal && ident.without_first_quote().is_reserved() {
                 self.dcx().emit_err(crate::diagnostics::KeywordLabel { span: ident.span });
             }
 
@@ -3056,7 +3055,7 @@ impl<'a> Parser<'a> {
                 Ok(arm) => arms.push(arm),
                 Err(e) => {
                     // Recover by skipping to the end of the block.
-                    let guar = e.emit();
+                    let guar = e.emit_err();
                     self.recover_stmt();
                     let span = lo.to(self.token.span);
                     if self.token == token::CloseBrace {
@@ -3654,16 +3653,12 @@ impl<'a> Parser<'a> {
             )?;
 
             let guar = if is_underscore_entry_point {
-                self.dcx()
-                    .create_err(crate::diagnostics::StructLiteralPlaceholderPath { span })
-                    .emit()
+                self.dcx().emit_err(crate::diagnostics::StructLiteralPlaceholderPath { span })
             } else {
-                self.dcx()
-                    .create_err(crate::diagnostics::StructLiteralWithoutPathLate {
-                        span: expr.span,
-                        suggestion_span: expr.span.shrink_to_lo(),
-                    })
-                    .emit()
+                self.dcx().emit_err(crate::diagnostics::StructLiteralWithoutPathLate {
+                    span: expr.span,
+                    suggestion_span: expr.span.shrink_to_lo(),
+                })
             };
 
             Ok(Some(self.mk_expr_err(expr.span, guar)))
@@ -3774,7 +3769,7 @@ impl<'a> Parser<'a> {
                         return Err(e);
                     }
 
-                    let guar = e.emit();
+                    let guar = e.emit_err();
                     if pth == kw::Async {
                         recovered_async = Some(guar);
                     }
@@ -3832,7 +3827,7 @@ impl<'a> Parser<'a> {
                     if !recover {
                         return Err(e);
                     }
-                    let guar = e.emit();
+                    let guar = e.emit_err();
                     if pth == kw::Async {
                         recovered_async = Some(guar);
                     } else if let Some(f) = field_ident(self, guar) {

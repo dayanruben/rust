@@ -156,7 +156,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         actual: Ty<'tcx>,
         ti: &TopInfo<'tcx>,
     ) -> Result<(), ErrorGuaranteed> {
-        self.demand_eqtype_pat_diag(cause_span, expected, actual, ti).map_err(|err| err.emit())
+        self.demand_eqtype_pat_diag(cause_span, expected, actual, ti).map_err(|err| err.emit_err())
     }
 }
 
@@ -1039,13 +1039,14 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 Some((fail, ty, expr.span))
             }
         };
+        let endpoints = [lhs, rhs];
         let mut lhs = calc_side(lhs);
         let mut rhs = calc_side(rhs);
 
         if let (Some((true, ..)), _) | (_, Some((true, ..))) = (lhs, rhs) {
             // There exists a side that didn't meet our criteria that the end-point
             // be of a numeric or char type, as checked in `calc_side` above.
-            let guar = self.emit_err_pat_range(span, lhs, rhs);
+            let guar = self.emit_err_pat_range(span, lhs, rhs, endpoints);
             return Ty::new_error(self.tcx, guar);
         }
 
@@ -1081,7 +1082,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             if let Some((ref mut fail, _, _)) = rhs {
                 *fail = true;
             }
-            let guar = self.emit_err_pat_range(span, lhs, rhs);
+            let guar = self.emit_err_pat_range(span, lhs, rhs, endpoints);
             return Ty::new_error(self.tcx, guar);
         }
         ty
@@ -1098,7 +1099,24 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         span: Span,
         lhs: Option<(bool, Ty<'tcx>, Span)>,
         rhs: Option<(bool, Ty<'tcx>, Span)>,
+        endpoints: [Option<&hir::PatExpr<'tcx>>; 2],
     ) -> ErrorGuaranteed {
+        if !(lhs, rhs).references_error() {
+            // Range endpoints must resolve to constants, not local variables.
+            // Label both runtime endpoints before the type error.
+            let mut spans = Vec::new();
+            for expr in endpoints.into_iter().flatten() {
+                if let hir::PatExprKind::Path(hir::QPath::Resolved(_, path)) = expr.kind
+                    && matches!(path.res, Res::Local(_))
+                {
+                    spans.push(expr.span);
+                }
+            }
+            if !spans.is_empty() {
+                return self.dcx().emit_err(diagnostics::NonConstPathInPattern { spans });
+            }
+        }
+
         let span = match (lhs, rhs) {
             (Some((true, ..)), Some((true, ..))) => span,
             (Some((true, _, sp)), _) => sp,
@@ -1143,7 +1161,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     type between two end-points, you can use a guard.",
             );
         }
-        err.emit()
+        err.emit_err()
     }
 
     fn check_pat_ident(
@@ -1230,7 +1248,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             );
 
             if let Some(span) = and_pat_span {
-                err.span_suggestion(
+                err.span_suggestion_short(
                     span,
                     "replace this `&` with `&mut`",
                     "&mut ",
@@ -1462,7 +1480,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     }
                 }
                 _ if let Some((sp, msg, sugg)) = mut_var_suggestion => {
-                    err.span_suggestion(sp, msg, sugg, Applicability::MachineApplicable);
+                    err.span_suggestion_verbose(sp, msg, sugg, Applicability::MachineApplicable);
                 }
                 _ => {} // don't provide suggestions in other cases #55175
             }
@@ -1493,7 +1511,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             if self.tcx.sess.teach(err.code.unwrap()) {
                 err.note(CANNOT_IMPLICITLY_DEREF_POINTER_TRAIT_OBJ);
             }
-            return Err(err.emit());
+            return Err(err.emit_err());
         }
         Ok(())
     }
@@ -2028,7 +2046,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             }
         }
 
-        err.emit()
+        err.emit_err()
     }
 
     fn check_pat_tuple(
@@ -2198,7 +2216,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     Err(e)
                 } else {
                     i.emit();
-                    Err(u.emit())
+                    Err(u.emit_err())
                 }
             }
             (None, Some(u)) => {
@@ -2206,10 +2224,10 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     u.delay_as_bug();
                     Err(e)
                 } else {
-                    Err(u.emit())
+                    Err(u.emit_err())
                 }
             }
-            (Some(err), None) => Err(err.emit()),
+            (Some(err), None) => Err(err.emit_err()),
             (None, None) => {
                 self.error_tuple_variant_index_shorthand(variant, pat, fields)?;
                 result
@@ -2244,7 +2262,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     format!("({})", self.get_suggested_tuple_struct_pattern(fields, variant)),
                     Applicability::MaybeIncorrect,
                 );
-                return Err(err.emit());
+                return Err(err.emit_err());
             }
         }
         Ok(())
@@ -2287,7 +2305,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         )
         .with_span_label(span, format!("multiple uses of `{ident}` in pattern"))
         .with_span_label(other_field, format!("first use of `{ident}`"))
-        .emit()
+        .emit_err()
     }
 
     fn error_inexistent_fields(
@@ -2441,7 +2459,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 format!("({sugg})"),
                 appl,
             );
-            return Err(err.emit());
+            return Err(err.emit_err());
         }
         Ok(())
     }
@@ -2550,8 +2568,8 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             ty: Ty<'tcx>,
         }
 
-        impl<'a, 'b, 'c, 'tcx> Diagnostic<'a, ()> for FieldsNotListed<'b, 'c, 'tcx> {
-            fn into_diag(self, dcx: DiagCtxtHandle<'a>, level: Level) -> Diag<'a, ()> {
+        impl<'a, 'b, 'c, 'tcx> Diagnostic<'a> for FieldsNotListed<'b, 'c, 'tcx> {
+            fn into_diag(self, dcx: DiagCtxtHandle<'a>, level: Level) -> Diag<'a> {
                 let Self { pat_span, unmentioned_fields, joined_patterns, ty } = self;
                 Diag::new(dcx, level, "some fields are not explicitly listed")
                     .with_span_label(pat_span, format!("field{} {} not listed", rustc_errors::pluralize!(unmentioned_fields.len()), joined_patterns))
@@ -2649,7 +2667,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 }
             }
         };
-        err.span_suggestion(
+        err.span_suggestion_verbose(
             sp,
             format!(
                 "include the missing field{} in the pattern{}",
@@ -2672,7 +2690,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             ),
             Applicability::MachineApplicable,
         );
-        err.span_suggestion(
+        err.span_suggestion_verbose(
             sp,
             format!(
                 "if you don't care about {these} missing field{s}, you can explicitly ignore {them}",
@@ -2696,7 +2714,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             ),
             Applicability::MachineApplicable,
         );
-        err.span_suggestion(
+        err.span_suggestion_verbose(
             sp,
             "or always ignore missing fields here",
             format!("{prefix}..{postfix}"),
@@ -2997,7 +3015,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         } else {
             self.dcx().struct_span_err(pat.span, err_msg)
         };
-        err.emit()
+        err.emit_err()
     }
 
     fn try_resolve_slice_ty_to_array_ty(
@@ -3194,7 +3212,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             size,
         )
         .with_span_label(span, format!("expected {} element{}", size, pluralize!(size)))
-        .emit()
+        .emit_err()
     }
 
     fn error_scrutinee_with_rest_inconsistent_length(
@@ -3216,7 +3234,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             span,
             format!("pattern cannot match array of {} element{}", size, pluralize!(size),),
         )
-        .emit()
+        .emit_err()
     }
 
     fn error_scrutinee_unfixed_length(&self, span: Span) -> ErrorGuaranteed {
@@ -3226,7 +3244,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             E0730,
             "cannot pattern-match on an array without a fixed length",
         )
-        .emit()
+        .emit_err()
     }
 
     fn error_expected_array_or_slice(
