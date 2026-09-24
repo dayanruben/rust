@@ -368,6 +368,7 @@
 #![feature(maybe_dangling)]
 #![feature(maybe_uninit_array_assume_init)]
 #![feature(maybe_uninit_fill)]
+#![feature(once_lazy_lock_get_unchecked)]
 #![feature(panic_can_unwind)]
 #![feature(panic_internals)]
 #![feature(pin_coerce_unsized_trait)]
@@ -399,7 +400,7 @@
 // Library features (alloc):
 // tidy-alphabetical-start
 #![feature(alloc_io)]
-#![feature(allocator_api)]
+#![feature(allocator_ext)]
 #![feature(buf_read_has_data_left)]
 #![feature(clone_from_ref)]
 #![feature(get_mut_unchecked)]
@@ -758,6 +759,8 @@ pub use core::concat_bytes;
 )]
 #[unstable(feature = "derive_macro_global_path", issue = "154645")]
 pub use core::derive;
+#[unstable(feature = "min_generic_const_args", issue = "132980")]
+pub use core::gca;
 #[stable(feature = "matches_macro", since = "1.42.0")]
 pub use core::matches;
 #[stable(feature = "core_primitive", since = "1.43.0")]
