@@ -243,17 +243,18 @@ impl<'a> Parser<'a> {
             None
         };
 
-        let suggest_remove_comma =
-            if self.token == token::Comma && self.look_ahead(1, |t| t.is_ident()) {
-                if recover {
-                    self.bump();
-                    recovered_ident = self.ident_or_err(false).ok();
-                };
-
-                Some(SuggRemoveComma { span: bad_token.span })
-            } else {
-                None
+        let suggest_remove_comma = if self.token == token::Comma
+            && let Some(ident) = self.look_ahead(1, Token::ident)
+        {
+            if recover {
+                self.bump();
+                recovered_ident = Some(ident);
             };
+
+            Some(SuggRemoveComma { span: bad_token.span })
+        } else {
+            None
+        };
 
         let help_cannot_start_number = self.is_lit_bad_ident().map(|(len, valid_portion)| {
             let (invalid, valid) = self.token.span.split_at(len as u32);
@@ -1561,8 +1562,8 @@ impl<'a> Parser<'a> {
         self.bump(); // `+`
         let _bounds = self.parse_generic_bounds()?;
         let sub = match &ty.kind {
-            TyKind::Ref(_lifetime, mut_ty) => {
-                let lo = mut_ty.ty.span.shrink_to_lo();
+            TyKind::Ref(_lifetime, inner_ty, _) => {
+                let lo = inner_ty.span.shrink_to_lo();
                 let hi = self.prev_token.span.shrink_to_hi();
                 BadTypePlusSub::AddParen { suggestion: AddParen { lo, hi } }
             }
