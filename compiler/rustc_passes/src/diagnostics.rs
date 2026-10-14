@@ -146,10 +146,6 @@ pub(crate) struct RustcForceInlineCoro {
 
 #[derive(Subdiagnostic)]
 pub(crate) enum UnusedNote {
-    #[note("attribute `{$name}` with an empty list has no effect")]
-    EmptyList { name: Symbol },
-    #[note("attribute `{$name}` without any lints has no effect")]
-    NoLints { name: Symbol },
     #[note(
         "the `linker_messages` and `linker_info` lints can only be controlled at the root of a crate that needs to be linked"
     )]
@@ -1030,7 +1026,7 @@ pub(crate) struct GlobOrListDelegationUnusedTargetExpr {
 
 #[derive(Diagnostic)]
 #[diag("unknown parameter `{$name}`")]
-#[help(r#"expect either a generic argument name, {"`{This}`"}, {"`{Expected}`"} or {"`{Found}`"} as format argument"#)]
+#[help(r#"expect either a generic argument name, {"`{this}`"}, {"`{expected}`"} or {"`{found}`"} as format argument"#)]
 pub(crate) struct OnTypeErrorMalformedFormatLiterals {
     pub name: Symbol,
 }
