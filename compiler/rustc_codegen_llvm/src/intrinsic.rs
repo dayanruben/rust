@@ -22,7 +22,7 @@ use rustc_middle::mir::interpret::{AllocId, Allocation, ErrorHandled, GlobalAllo
 use rustc_middle::mir::{self, BinOp};
 use rustc_middle::ty::layout::{FnAbiOf, HasTyCtxt, HasTypingEnv, LayoutOf};
 use rustc_middle::ty::offload_meta::OffloadMetadata;
-use rustc_middle::ty::{self, GenericArgsRef, Instance, SimdAlign, Ty, TyCtxt};
+use rustc_middle::ty::{self, GenericArgs, Instance, SimdAlign, Ty, TyCtxt};
 use rustc_session::diagnostics::feature_err;
 use rustc_span::{ErrorGuaranteed, Span, Symbol, bug, span_bug, sym};
 use rustc_structures::CrateType;
@@ -398,7 +398,7 @@ impl<'ll, 'tcx> IntrinsicCallBuilderMethods<'tcx> for Builder<'_, 'll, 'tcx> {
                 // FIXME: could be `trunc nuw`, even for signed.
                 let high = self.trunc(high, narrow_llty);
 
-                let pair_llty = self.type_struct(&[narrow_llty, narrow_llty], false);
+                let pair_llty = self.type_struct(&[narrow_llty, narrow_llty]);
                 let pair = self.const_poison(pair_llty);
                 let pair = self.insert_value(pair, low, 0);
                 let pair = self.insert_value(pair, high, 1);
@@ -1669,7 +1669,7 @@ fn codegen_gnu_try<'ll, 'tcx>(
         // the landing pad clauses the exception's type had been matched to.
         // rust_try ignores the selector.
         bx.switch_to_block(catch);
-        let lpad_ty = bx.type_struct(&[bx.type_ptr(), bx.type_i32()], false);
+        let lpad_ty = bx.type_struct(&[bx.type_ptr(), bx.type_i32()]);
         let vals = bx.landing_pad(lpad_ty, bx.eh_personality(), 1);
         let tydesc = bx.const_null(bx.type_ptr());
         bx.add_clause(vals, tydesc);
@@ -2005,7 +2005,7 @@ fn get_args_from_tuple<'ll, 'tcx>(
 fn generic_simd_intrinsic<'ll, 'tcx>(
     bx: &mut Builder<'_, 'll, 'tcx>,
     name: Symbol,
-    fn_args: GenericArgsRef<'tcx>,
+    fn_args: GenericArgs<'tcx>,
     args: &[OperandRef<'tcx, &'ll Value>],
     ret_ty: Ty<'tcx>,
     llret_ty: &'ll Type,
@@ -3398,7 +3398,7 @@ fn generic_simd_intrinsic<'ll, 'tcx>(
         }
         let offsets = args[1].immediate();
 
-        return Ok(bx.gep(bx.backend_type(layout), ptrs, &[offsets]));
+        return Ok(bx.gep(layout.size, ptrs, offsets));
     }
 
     if name == sym::simd_saturating_add || name == sym::simd_saturating_sub {
