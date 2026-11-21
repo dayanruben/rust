@@ -7,7 +7,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use semver::Version;
 use tracing::*;
 
-use crate::common::{Config, Debugger, PassFailMode, TestMode};
+use crate::common::{CodegenBackend, Config, Debugger, PassFailMode, TestMode};
 use crate::debuggers::{LldbVersion, extract_cdb_version, extract_gdb_version};
 use crate::directives::auxiliary::parse_and_update_aux;
 pub(crate) use crate::directives::auxiliary::{AuxCrate, AuxProps};
@@ -240,6 +240,7 @@ mod directives {
     pub(crate) const AUX_BIN: &str = "aux-bin";
     pub(crate) const AUX_BUILD: &str = "aux-build";
     pub(crate) const AUX_CRATE: &str = "aux-crate";
+    pub(crate) const AUX_LINT: &str = "aux-lint";
     pub(crate) const PROC_MACRO: &str = "proc-macro";
     pub(crate) const AUX_CODEGEN_BACKEND: &str = "aux-codegen-backend";
     pub(crate) const EXEC_ENV: &str = "exec-env";
@@ -1218,7 +1219,7 @@ fn needs_backends(config: &Config, line: &DirectiveLine<'_>) -> IgnoreDecision {
 
 /// When using the GCC backend, ignore tests for which we did not find a libgccjit.so.
 fn ignore_unsupported_backend_target(config: &Config, line: &DirectiveLine<'_>) -> IgnoreDecision {
-    if config.default_codegen_backend != crate::CodegenBackend::Gcc {
+    if config.default_codegen_backend != CodegenBackend::Gcc {
         return IgnoreDecision::Continue;
     }
 
